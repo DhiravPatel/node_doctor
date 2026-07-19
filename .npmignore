@@ -1,0 +1,16 @@
+# Publish the compiled dist + bin shim + skill only. Everything below is dev-only.
+src/
+tests/
+bench/
+scripts/
+fixtures/
+.github/
+node_modules/
+coverage/
+tsconfig.json
+tsconfig.build.json
+*.tsbuildinfo
+BUILD_SPEC.md
+PROJECT.md
+.node-doctor-cache/
+.gitignore

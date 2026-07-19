@@ -1,0 +1,960 @@
+{
+  "generatedFrom": "node.doctor registry",
+  "total": 62,
+  "defaultOn": 50,
+  "optIn": 12,
+  "byCategory": {
+    "Security": 24,
+    "Reliability": 17,
+    "Bugs": 7,
+    "Performance": 9,
+    "Maintainability": 5
+  },
+  "categoryWeights": {
+    "Security": 2,
+    "Reliability": 1.5,
+    "Bugs": 1.5,
+    "Performance": 1,
+    "Maintainability": 0.5
+  },
+  "diagnostics": [
+    {
+      "id": "cors-credentials-reflect",
+      "title": "CORS reflects any origin with credentials enabled",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "auth",
+        "cors"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Do not combine `credentials: true` with a reflected origin. Use an explicit allowlist (`origin: ['https://app.example.com']`) or a validating function that only calls back `true` for known origins."
+    },
+    {
+      "id": "express-async-handler-unprotected",
+      "title": "Async route handler with no error path",
+      "category": "Reliability",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "async",
+        "express",
+        "lifecycle"
+      ],
+      "requires": [
+        "express"
+      ],
+      "disabledWhen": [
+        "express:5"
+      ],
+      "optIn": false,
+      "recommendation": "Wrap the handler (`asyncHandler(fn)` / express-async-errors), or add a `try/catch` that calls `next(error)`, or upgrade to Express 5. A rejection after the first `await` otherwise escapes Express 4 error handling and the request hangs."
+    },
+    {
+      "id": "express-missing-return-after-response",
+      "title": "Response sent in a guard without a return",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "express"
+      ],
+      "requires": [
+        "express"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Prefix the guard's response with `return` (`return res.status(400).json(...)`). A response call does not stop the handler — without `return`, the 'rejected' request runs the protected logic and responds twice."
+    },
+    {
+      "id": "fastify-missing-schema",
+      "title": "Fastify route without a validation schema",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "fastify"
+      ],
+      "requires": [
+        "fastify"
+      ],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Attach a JSON `schema` to the route (`{ schema: { body, querystring, params } }`). Fastify validates and serializes against it before the handler runs; without one the route accepts arbitrary input."
+    },
+    {
+      "id": "nest-missing-validation-pipe",
+      "title": "Nest body param without validation",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "nest"
+      ],
+      "requires": [
+        "nest"
+      ],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Apply a global `ValidationPipe` (`app.useGlobalPipes(new ValidationPipe())`) and type the parameter with a DTO class (`@Body() dto: CreateUserDto`) so class-validator diagnostics run before the handler."
+    },
+    {
+      "id": "no-async-array-callback",
+      "title": "Async callback passed to a synchronous array method",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "async",
+        "concurrency"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use `for...of` with `await` for sequential work, or `await Promise.all(collection.map(fn))` for parallel work. For an async predicate, resolve first (`const flags = await Promise.all(items.map(pred))`) then filter synchronously."
+    },
+    {
+      "id": "no-async-executor",
+      "title": "Async function passed as a Promise executor",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "async"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Keep the executor synchronous and do the async work inside with explicit `resolve`/`reject` (`new Promise((resolve, reject) => { work().then(resolve, reject); })`), or drop the constructor and use an async IIFE wrapped in try/catch."
+    },
+    {
+      "id": "no-await-in-loop-over-independent-work",
+      "title": "Sequential await over independent work in a loop",
+      "category": "Performance",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "async",
+        "performance"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Collect the promises and `await Promise.all(items.map((x) => work(x)))` instead of awaiting inside the loop. If the collection is caller-sized, bound the fan-out with `p-limit`."
+    },
+    {
+      "id": "no-console-log-in-committed-code",
+      "title": "console.log left in committed code",
+      "category": "Maintainability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "hygiene"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Remove the stray `console.log`/`console.debug`, or route it through a structured logger (`logger.info(...)`). Keep `console.error`/`console.warn` for real findings."
+    },
+    {
+      "id": "no-db-connection-per-request",
+      "title": "Database client/pool constructed inside a handler",
+      "category": "Performance",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "db",
+        "performance"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Construct the client/pool once at module scope and reuse the singleton across requests (e.g. `const prisma = new PrismaClient();`). A per-request client opens a new connection every time and exhausts the pool."
+    },
+    {
+      "id": "no-dead-async",
+      "title": "async function with no await",
+      "category": "Maintainability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "async",
+        "hygiene"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Drop the `async` keyword if the function never awaits. Keep it only when the body uses `await`/`for await` or genuinely returns a promise."
+    },
+    {
+      "id": "no-disabled-tls-verification",
+      "title": "TLS certificate verification disabled",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "crypto",
+        "network"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Keep verification on. If the peer uses a private CA, provide it via the `ca` option (`{ ca: fs.readFileSync('ca.pem') }`) instead of disabling verification. `rejectUnauthorized: false` accepts any certificate and enables man-in-the-middle."
+    },
+    {
+      "id": "no-duplicate-route-definition",
+      "title": "Duplicate route definition",
+      "category": "Maintainability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "express",
+        "hygiene"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Remove or merge the duplicate route — the later registration shadows the earlier one. Keep one handler per (method, path)."
+    },
+    {
+      "id": "no-eval-with-input",
+      "title": "eval() of caller-controlled input",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "injection"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Never eval() dynamic input. Parse structured data with JSON.parse, and replace dynamic dispatch with an explicit lookup table keyed on a validated string."
+    },
+    {
+      "id": "no-exec-with-interpolation",
+      "title": "Shell command built by string interpolation",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "injection"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use `execFile`/`spawn` with an argument array: `execFile('git', ['clone', url])`. There is no shell to re-parse the arguments, so an interpolated value cannot become a second command."
+    },
+    {
+      "id": "no-external-call-inside-open-transaction",
+      "title": "Network call inside an open transaction",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "db",
+        "reliability"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Do the external I/O before the transaction (pass the result in) or after it commits — keep the `$transaction` callback pure DB work. A network round trip inside it pins the connection and holds row locks for the upstream's full latency."
+    },
+    {
+      "id": "no-findmany-then-filter-in-js",
+      "title": "Fetch-all then filter in JavaScript",
+      "category": "Performance",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "db",
+        "performance"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Move the predicate into the query's `where` (e.g. `db.user.findMany({ where: { active: true } })`) so the database returns only the rows you keep instead of streaming the whole table into JS."
+    },
+    {
+      "id": "no-function-constructor-with-input",
+      "title": "Function constructor built from input",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "injection"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Avoid the Function constructor for dynamic input — it compiles its arguments as source. Use a fixed dispatch table or a purpose-built safe expression interpreter instead."
+    },
+    {
+      "id": "no-hardcoded-secret-literal",
+      "title": "Hardcoded credential literal",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "secrets"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Load secrets from the environment (`process.env.X`) or a secret manager (AWS Secrets Manager, Vault). Never commit a credential — it lives forever in git history and cannot be rotated without a code change."
+    },
+    {
+      "id": "no-infinite-retry-without-backoff",
+      "title": "Retry loop without backoff",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "reliability"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Add exponential backoff between attempts (`await sleep(base * 2 ** attempt)`) and a maximum-attempt cap so a downed dependency does not trigger a tight retry storm."
+    },
+    {
+      "id": "no-jwt-decode-as-verify",
+      "title": "jwt.decode() result used for authorization",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "auth",
+        "secrets"
+      ],
+      "requires": [
+        "jsonwebtoken"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use `jwt.verify(token, key, { algorithms: [...] })` for any decision that trusts the claims. `jwt.decode` skips the signature check, so its claims are attacker-controlled."
+    },
+    {
+      "id": "no-jwt-none-algorithm",
+      "title": "JWT verified with the 'none' algorithm",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "auth",
+        "crypto"
+      ],
+      "requires": [
+        "jsonwebtoken"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Never allow the `none` algorithm. Pin a specific allowlist, e.g. `jwt.verify(token, key, { algorithms: ['RS256'] })`, and sign with a real algorithm. `none` disables signature verification, so any token is accepted."
+    },
+    {
+      "id": "no-large-json-parse-in-request-path",
+      "title": "JSON.parse of caller input on a request path",
+      "category": "Performance",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "event-loop"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Enforce a body size limit (e.g. `express.json({ limit: '100kb' })`) before parsing, and move parsing of large payloads off the hot path (a worker thread or a streaming parser). Synchronous `JSON.parse` blocks the single event-loop thread for the whole parse."
+    },
+    {
+      "id": "no-listener-added-per-request",
+      "title": "Event listener added on every request",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "lifecycle",
+        "memory"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Register listeners once at startup, or use `emitter.once(...)` inside the handler and remove it with `removeListener` when the request completes."
+    },
+    {
+      "id": "no-math-random-for-token",
+      "title": "Math.random() used for a security token",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "crypto",
+        "secrets"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use a CSPRNG: `crypto.randomBytes(n)` / `crypto.randomUUID()` / `crypto.randomInt()`. `Math.random()` is predictable, so any token, OTP, or session id derived from it can be guessed."
+    },
+    {
+      "id": "no-missing-await-on-query",
+      "title": "Floating database query (missing await)",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "async",
+        "db"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "`await` the query (or `return` its promise, or chain `.then`/`.catch`). A bare query statement floats its promise: the write may not finish before you respond and a rejection becomes an unhandledRejection."
+    },
+    {
+      "id": "no-missing-body-size-limit",
+      "title": "Body parser without a size limit",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "express",
+        "lifecycle"
+      ],
+      "requires": [
+        "express"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Pass an explicit cap: `express.json({ limit: '1mb' })` (or the size your API actually needs). An unbounded body parser buffers the whole request in memory and is a denial-of-service / OOM vector."
+    },
+    {
+      "id": "no-missing-catch-on-async-iife",
+      "title": "Async IIFE with no error handling",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "async",
+        "lifecycle"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Attach a `.catch(err => ...)` to the invocation, or wrap the whole body in a `try/catch`. A floating async IIFE turns any rejection into an unhandledRejection, which crashes the process by default."
+    },
+    {
+      "id": "no-missing-stream-error-handler",
+      "title": "Stream pipe without an error handler",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "lifecycle"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use `stream.pipeline(src, dest, cb)` (it forwards errors and cleans up), or attach `.on('error', handler)` to both the source and destination stream."
+    },
+    {
+      "id": "no-nosql-object-injection",
+      "title": "NoSQL operator/object injection",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "db",
+        "injection"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Never pass a raw request object as a filter. Whitelist expected fields and cast each to a scalar (e.g. `String(req.body.email)`), and never build a `$where` clause from input."
+    },
+    {
+      "id": "no-open-redirect",
+      "title": "Redirect to a caller-controlled URL",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "injection"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Redirect only to a fixed allowlist of paths or origins: compare the target against a known-good set, or resolve it and assert `new URL(target).origin` is one you trust before calling redirect."
+    },
+    {
+      "id": "no-path-traversal",
+      "title": "Filesystem path built from caller input without containment",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "fs",
+        "injection"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Resolve against a root and enforce containment: `const full = path.resolve(root, name); if (!full.startsWith(root + path.sep)) reject;` — or strip traversal with `path.basename(name)`. `join`/`resolve` normalize but do not confine."
+    },
+    {
+      "id": "no-process-exit-in-request-path",
+      "title": "process.exit() on a request path",
+      "category": "Reliability",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "event-loop",
+        "lifecycle"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Never call `process.exit`/`process.abort` from a handler. Respond, then drain and shut down outside the request (`scheduleGracefulShutdown()` → `server.close()` on SIGTERM). Reserve `process.exit` for top-level fatal handlers."
+    },
+    {
+      "id": "no-query-in-loop",
+      "title": "Database query inside a loop (N+1)",
+      "category": "Performance",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "db",
+        "n+1",
+        "performance"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Fetch the set in one round trip: a JOIN, a `WHERE id IN (...)`, or the ORM's eager-load (`include` / `with` / `populate`). A query per iteration is N round trips for one request."
+    },
+    {
+      "id": "no-race-without-timeout",
+      "title": "Promise.race with no timeout branch",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "async"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Add an explicit timeout branch to the race — a `setTimeout`/`AbortSignal.timeout(ms)` promise or a `timeout(ms)` helper — so a stuck upstream call cannot hang the race forever."
+    },
+    {
+      "id": "no-redos-prone-regex",
+      "title": "Regex with catastrophic-backtracking shape",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "event-loop",
+        "security"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Rewrite to remove the nested quantifier (`(\\w+)*` → `\\w*`), anchor the pattern, or bound the tested input length. For untrusted input use a linear-time matcher (RE2) instead of the backtracking engine."
+    },
+    {
+      "id": "no-redundant-try-catch-rethrow",
+      "title": "try/catch that only rethrows",
+      "category": "Maintainability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "error-handling"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Remove the redundant try/catch and let the error propagate, or add real handling (log, wrap with `{ cause }`, or recover)."
+    },
+    {
+      "id": "no-send-after-next",
+      "title": "Response sent after calling next()",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "express"
+      ],
+      "requires": [
+        "express"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Return when you delegate: `return next(err)` (or return after responding). A bare `next()` does not stop the handler, so the later `res.*` writes to an already-finished response and throws ERR_HTTP_HEADERS_SENT."
+    },
+    {
+      "id": "no-sql-template-interpolation",
+      "title": "SQL built by string interpolation",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "db",
+        "injection"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use parameter binding: `db.query('SELECT ... WHERE id = $1', [id])`, Prisma's tagged `$queryRaw` template, or the query builder. Interpolation loses the data/grammar boundary before the driver sees it."
+    },
+    {
+      "id": "no-ssrf-unvalidated-url",
+      "title": "Outbound request to a caller-controlled URL (SSRF)",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "injection",
+        "network"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Validate the destination before the request: parse it with `new URL(target)` and assert its host is in an explicit allowlist, rejecting internal/link-local ranges and non-http(s) schemes."
+    },
+    {
+      "id": "no-swallowed-error-empty-catch",
+      "title": "Empty catch swallows the error",
+      "category": "Bugs",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "error-handling"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Do something with the error: log it (`log.error(err)`), rethrow it (`throw err`), forward it (`next(err)`), or return a meaningful fallback. An empty catch hides the failure entirely."
+    },
+    {
+      "id": "no-sync-bcrypt-in-request-path",
+      "title": "Synchronous bcrypt on a request path",
+      "category": "Performance",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "crypto",
+        "event-loop"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use the async KDF (`await bcrypt.hash(...)` / `await bcrypt.compare(...)`), which offloads the CPU-bound work to the libuv thread pool. The `*Sync` form runs the whole cost factor inline and blocks every concurrent request."
+    },
+    {
+      "id": "no-sync-io-in-request-path",
+      "title": "Blocking synchronous I/O on a request path",
+      "category": "Performance",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "event-loop",
+        "fs",
+        "performance"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use the async form (`await fs.promises.readFile(...)`, `await execFile(...)`). The synchronous call blocks the single event-loop thread, freezing every concurrent request, the timers, and the liveness probe."
+    },
+    {
+      "id": "no-sync-io-reachable-from-handler",
+      "title": "Blocking synchronous I/O reachable from a request handler",
+      "category": "Performance",
+      "severity": "error",
+      "scope": "project",
+      "tags": [
+        "event-loop",
+        "fs",
+        "performance"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Make the helper async and have the handler await it (`await fs.promises.readFile(...)`, `await execFile(...)`). A synchronous call in a helper on the request path blocks the event loop exactly as one written inline does."
+    },
+    {
+      "id": "no-throw-in-finally",
+      "title": "throw or return inside a finally block",
+      "category": "Bugs",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "error-handling"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Do not `throw` or `return` from `finally`; let the original completion of the try/catch propagate. Do side-effect cleanup (e.g. `await cleanup()`) there instead."
+    },
+    {
+      "id": "no-timing-unsafe-secret-compare",
+      "title": "Secret compared with a non-constant-time operator",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "auth",
+        "crypto",
+        "secrets"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Compare secrets in constant time: `crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b))` after a length check. `===` leaks a prefix oracle through its early exit."
+    },
+    {
+      "id": "no-trust-proxy-true",
+      "title": "Express trust proxy set to unconditional true",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "auth",
+        "express"
+      ],
+      "requires": [
+        "express"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Set `trust proxy` to the exact number of proxies in front of the app (e.g. `1`), a trusted subnet string, or a predicate function — not `true`. Trusting every hop lets any client spoof `X-Forwarded-For` and thus `req.ip`."
+    },
+    {
+      "id": "no-unbounded-module-cache",
+      "title": "Module-scope cache with no eviction",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "lifecycle",
+        "memory"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Give the cache an eviction story: a TTL sweep (`setInterval(() => cache.clear(), ...)`), a bounded `LRUCache({ max })`, or a `WeakMap` that self-evicts. A write-only module-scope Map/Set grows without bound."
+    },
+    {
+      "id": "no-unbounded-promise-all",
+      "title": "Unbounded Promise.all over a mapped collection",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "async",
+        "concurrency",
+        "network"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Bound the fan-out instead of removing the parallelism: wrap each task with a concurrency limiter (`p-limit`), e.g. `collection.map((x) => limit(() => work(x)))`, so at most N run at once."
+    },
+    {
+      "id": "no-uncleared-module-interval",
+      "title": "Module-scope setInterval never cleared",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "lifecycle",
+        "memory"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Store the handle and `clearInterval(handle)` on shutdown, or call `handle.unref()` so the interval does not by itself keep the process alive."
+    },
+    {
+      "id": "no-unsafe-regexp-from-input",
+      "title": "RegExp constructed from caller input",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "event-loop",
+        "injection"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Never build a RegExp from raw input. Escape the value with an escape-regexp helper before interpolating it, or match against a fixed pattern and treat input as data."
+    },
+    {
+      "id": "no-vm-run-untrusted",
+      "title": "vm runs untrusted code without isolation",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "injection"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Do not treat `vm` as a sandbox. Run untrusted code in a real isolate (isolated-vm) or a separate OS process with a memory/CPU/time budget and no ambient credentials."
+    },
+    {
+      "id": "no-weak-cipher",
+      "title": "Weak or insecure cipher",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "crypto"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use an authenticated cipher with a random IV: `crypto.createCipheriv('aes-256-gcm', key, iv)`. DES/3DES and RC4 are broken, ECB leaks structure, and `createCipher` derives keys insecurely."
+    },
+    {
+      "id": "no-weak-hash-for-password",
+      "title": "Weak hash (MD5/SHA-1) for password storage",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "crypto",
+        "secrets"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use a slow, salted, memory-hard KDF for passwords: `argon2.hash(pw)`, `scrypt`, or `bcrypt`. MD5/SHA-1 are GPU-crackable at billions of guesses per second."
+    },
+    {
+      "id": "prefer-node-protocol-imports",
+      "title": "Core module imported without the node: protocol",
+      "category": "Maintainability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "hygiene"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Prefix the specifier with `node:` (e.g. `import fs from 'node:fs'`). The protocol form is unambiguous with npm packages and resolves faster."
+    },
+    {
+      "id": "require-error-handling-middleware",
+      "title": "Express app with no error-handling middleware",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "express"
+      ],
+      "requires": [
+        "express"
+      ],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Register a terminal error handler: `app.use((err, req, res, next) => { ... })`. Its 4-argument signature is how Express routes thrown errors and `next(err)` to your logging and shaped 500 response."
+    },
+    {
+      "id": "require-fetch-timeout",
+      "title": "Outbound fetch without a timeout or abort signal",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "async",
+        "network"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Pass an abort signal: `fetch(url, { signal: AbortSignal.timeout(5_000) })` (Node 18+). Without it a stalled upstream pins a request slot, then a connection, then the whole pool."
+    },
+    {
+      "id": "require-jwt-algorithms-allowlist",
+      "title": "jwt.verify without an algorithms allowlist",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "auth",
+        "crypto"
+      ],
+      "requires": [
+        "jsonwebtoken"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Always pass an explicit allowlist, e.g. `jwt.verify(token, key, { algorithms: ['RS256'] })`. Without it, an RS256 verifier can be confused into accepting an HS256 token signed with the public key."
+    },
+    {
+      "id": "require-pagination-limit",
+      "title": "Unbounded findMany without a take/limit",
+      "category": "Performance",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "db",
+        "performance"
+      ],
+      "requires": [
+        "prisma"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Always pass a `take` (or SQL `LIMIT`) and paginate with a cursor/offset. An unbounded `findMany` grows with the table and eventually drains the pool, the heap, and the event loop."
+    },
+    {
+      "id": "require-secure-cookie-flags",
+      "title": "Cookie set without secure/httpOnly flags",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "auth"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Set `{ httpOnly: true, secure: true, sameSite: 'lax' }` on auth cookies. `httpOnly` blocks JavaScript from reading the session (XSS theft) and `secure` keeps it off plaintext HTTP."
+    },
+    {
+      "id": "require-sigterm-handler",
+      "title": "Server started without a SIGTERM handler",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "lifecycle"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "On `process.on('SIGTERM', ...)`, stop accepting connections and call `server.close(() => process.exit(0))` so in-flight requests drain before the process exits."
+    },
+    {
+      "id": "secret-in-env-fallback",
+      "title": "Secret env var with a hardcoded fallback",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "auth",
+        "secrets"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Fail fast at boot instead of degrading silently: `if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is required')`. A `|| \"fallback\"` ships a working key that anyone can read from source."
+    }
+  ]
+}

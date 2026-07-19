@@ -1,0 +1,81 @@
+/**
+ * A small intra-file taint pass.
+ *
+ * It propagates "this value came from the caller" from request-shaped roots
+ * (`req`, `request`, `ctx`, `context`, `event`) through a few assignment hops to
+ * a fixpoint. `const { name } = req.query` marks `name` tainted; `const id =
+ * lookup(req.params.id)` marks `id` tainted.
+ *
+ * The result **sharpens messages** (an injection sink built from a tainted value
+ * says "caller-controlled — this is injection"). It must never *gate* a finding:
+ * an unsound analysis silencing a real sink would ship a false negative people
+ * trust. See §3.4 / guardrail 3.
+ */
+
+import type { AstNode } from "./types.ts";
+import { walk, findDescendant } from "./walk.ts";
+import { REQUEST_ROOTS, isFunctionLike } from "./ast.ts";
+
+const MAX_ROUNDS = 6;
+
+const patternNames = (pattern: AstNode | null | undefined, out: string[]): void => {
+  if (!pattern) return;
+  switch (pattern.type) {
+    case "Identifier":
+      out.push(pattern.name);
+      break;
+    case "AssignmentPattern":
+      patternNames(pattern.left, out);
+      break;
+    case "RestElement":
+      patternNames(pattern.argument, out);
+      break;
+    case "ArrayPattern":
+      for (const el of (pattern.elements as (AstNode | null)[]) ?? []) patternNames(el, out);
+      break;
+    case "ObjectPattern":
+      for (const prop of (pattern.properties as AstNode[]) ?? []) {
+        if (prop.type === "RestElement") patternNames(prop.argument, out);
+        else patternNames(prop.value, out);
+      }
+      break;
+    default:
+      break;
+  }
+};
+
+/** Compute the set of caller-controlled binding names in a file. */
+export const computeTaint = (program: AstNode): Set<string> => {
+  const tainted = new Set<string>();
+
+  const referencesCaller = (expr: AstNode | null | undefined): boolean => {
+    if (!expr) return false;
+    const isTaintedIdent = (n: AstNode): boolean =>
+      n.type === "Identifier" && (REQUEST_ROOTS.has(n.name) || tainted.has(n.name));
+    if (isTaintedIdent(expr)) return true;
+    return findDescendant(expr, isTaintedIdent, isFunctionLike) !== null;
+  };
+
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const before = tainted.size;
+    walk(program, {
+      enter: (node) => {
+        if (node.type === "VariableDeclarator" && node.init && referencesCaller(node.init)) {
+          const names: string[] = [];
+          patternNames(node.id, names);
+          for (const name of names) tainted.add(name);
+        } else if (
+          node.type === "AssignmentExpression" &&
+          node.operator === "=" &&
+          node.left?.type === "Identifier" &&
+          referencesCaller(node.right)
+        ) {
+          tainted.add(node.left.name);
+        }
+      },
+    });
+    if (tainted.size === before) break;
+  }
+
+  return tainted;
+};

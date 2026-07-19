@@ -1,0 +1,77 @@
+{
+  "name": "node-doctor",
+  "version": "0.1.0",
+  "description": "Deterministic, offline-first static analysis for Node.js backends — catches the defects that compile, pass tests, and fail under concurrency.",
+  "keywords": [
+    "node",
+    "static-analysis",
+    "linter",
+    "security",
+    "express",
+    "fastify",
+    "prisma",
+    "async",
+    "sast",
+    "code-review",
+    "ai",
+    "agent"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "bin": {
+    "node-doctor": "bin/node-doctor.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./eslint": {
+      "types": "./dist/adapters/eslint.d.ts",
+      "import": "./dist/adapters/eslint.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "skill",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage",
+    "gen:registry": "node scripts/gen-registry.ts",
+    "check:registry": "node scripts/gen-registry.ts --check",
+    "scan": "node src/cli/run.ts",
+    "bench": "node bench/corpus.ts",
+    "prepack": "npm run build",
+    "fuzz": "node bench/fuzz.ts"
+  },
+  "dependencies": {
+    "fast-glob": "^3.3.2",
+    "oxc-parser": "^0.140.0",
+    "picocolors": "^1.1.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-org/node-doctor.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2"
+  }
+}

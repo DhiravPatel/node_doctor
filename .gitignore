@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+.node-doctor-cache/
+*.tsbuildinfo
+/tmp/

@@ -1,0 +1,43 @@
+# Example workflow — copy this into your own repository at
+# .github/workflows/node-doctor.yml
+#
+# It scans the base branch and the head branch, then reports ONLY the findings
+# the pull request introduced. The two baseline scans use `--blocking none`
+# (informational — they must never fail the job); only the final `delta` step
+# enforces policy, on the introduced set alone.
+name: node-doctor
+
+on:
+  pull_request:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Scan base branch (baseline)
+        run: |
+          git checkout --detach origin/${{ github.base_ref }}
+          npx node-doctor@latest . --json-out /tmp/baseline.json --blocking none
+
+      - name: Scan head
+        run: |
+          git checkout --detach ${{ github.sha }}
+          npx node-doctor@latest . --json-out /tmp/current.json --blocking none
+
+      - name: Report introduced findings only
+        run: |
+          npx node-doctor@latest delta \
+            --baseline /tmp/baseline.json \
+            --current /tmp/current.json \
+            --blocking error

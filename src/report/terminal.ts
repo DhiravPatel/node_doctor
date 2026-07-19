@@ -1,0 +1,189 @@
+/**
+ * The terminal reporter. Reads top-to-bottom: score → counts → findings grouped
+ * by category (largest first), then diagnostic (most sites first). Colors via
+ * picocolors; degrades gracefully when not a TTY or when `color: false`.
+ */
+
+import pc from "picocolors";
+import type { Category, Finding } from "../core/types.ts";
+import { CATEGORIES } from "../core/types.ts";
+import type { ScanReport } from "../core/scan.ts";
+
+export interface RenderOptions {
+  verbose?: boolean;
+  color?: boolean;
+  version?: string;
+}
+
+type Colorize = (s: string) => string;
+
+interface Palette {
+  bold: Colorize;
+  dim: Colorize;
+  red: Colorize;
+  green: Colorize;
+  yellow: Colorize;
+  cyan: Colorize;
+}
+
+const identity: Colorize = (s) => s;
+
+const makePalette = (color: boolean): Palette =>
+  color
+    ? { bold: pc.bold, dim: pc.dim, red: pc.red, green: pc.green, yellow: pc.yellow, cyan: pc.cyan }
+    : { bold: identity, dim: identity, red: identity, green: identity, yellow: identity, cyan: identity };
+
+const BAR_WIDTH = 30;
+const DEFAULT_SITE_CAP = 3;
+
+const scoreColor = (label: string, p: Palette): Colorize =>
+  label === "healthy" ? p.green : label === "needs work" ? p.yellow : p.red;
+
+const bar = (score: number, p: Palette): string => {
+  const filled = Math.max(0, Math.min(BAR_WIDTH, Math.round((score / 100) * BAR_WIDTH)));
+  const color = scoreColor(score >= 75 ? "healthy" : score >= 50 ? "needs work" : "critical", p);
+  return color("█".repeat(filled)) + p.dim("░".repeat(BAR_WIDTH - filled));
+};
+
+const glyph = (severity: string, p: Palette): string =>
+  severity === "error" ? p.red("✖") : p.yellow("⚠");
+
+const groupBy = <T, K>(items: T[], key: (item: T) => K): Map<K, T[]> => {
+  const map = new Map<K, T[]>();
+  for (const item of items) {
+    const k = key(item);
+    const list = map.get(k) ?? [];
+    list.push(item);
+    map.set(k, list);
+  }
+  return map;
+};
+
+/** Produce the terminal-formatted string for a report. */
+export const renderReport = (report: ScanReport, options: RenderOptions = {}): string => {
+  const verbose = options.verbose ?? false;
+  const p = makePalette(options.color ?? true);
+  const version = options.version ? `v${options.version}` : "";
+  const lines: string[] = [];
+  const { project, findings, score } = report;
+
+  const errors = findings.filter((d) => d.severity === "error").length;
+  const warnings = findings.length - errors;
+
+  lines.push("");
+  lines.push(`  ${p.bold("node.doctor")} ${p.dim(version)}  ${p.bold(project.name)}`);
+  lines.push(
+    p.dim(
+      `  ${project.analyzedFileCount} files · ${project.totalLines.toLocaleString("en-US")} lines · ${report.diagnosticsRun}/${report.diagnosticsAvailable} diagnostics active`,
+    ),
+  );
+  const caps = project.capabilities.filter((c) => c !== "node");
+  if (caps.length > 0) lines.push(p.dim(`  detected: ${caps.join(" ")}`));
+  lines.push("");
+
+  const scoreLine = `  ${bar(score.score, p)}  ${p.bold(`${score.score}/100`)}  ${scoreColor(score.label, p)(score.label)}`;
+  lines.push(scoreLine);
+  lines.push("");
+  lines.push(
+    `  ${p.red(`${errors} errors`)}  ·  ${p.yellow(`${warnings} warnings`)}  ·  ${p.dim(`${score.perThousandLines} weighted/kLOC`)}`,
+  );
+
+  if (!project.complete) {
+    lines.push("");
+    lines.push(
+      p.yellow(
+        `  ⚠ ${project.parseFailures.length} file(s) could not be parsed — results are incomplete, not "clean".`,
+      ),
+    );
+    for (const f of project.parseFailures.slice(0, verbose ? Infinity : 3)) {
+      lines.push(p.dim(`     ${f.normalizedFilePath}: ${f.message}`));
+    }
+  }
+
+  if (findings.length === 0) {
+    lines.push("");
+    lines.push(project.complete ? p.green("  ✓ No findings.") : p.dim("  No findings in the files that parsed."));
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  // Group by category, largest first (tie-break by canonical order).
+  const byCategory = groupBy(findings, (d) => d.category);
+  const orderedCategories = [...byCategory.keys()].sort((a, b) => {
+    const diff = byCategory.get(b)!.length - byCategory.get(a)!.length;
+    if (diff !== 0) return diff;
+    return CATEGORIES.indexOf(a) - CATEGORIES.indexOf(b);
+  });
+
+  for (const category of orderedCategories) {
+    const catDiags = byCategory.get(category)!;
+    lines.push("");
+    lines.push(`  ${p.bold(category as Category)} ${p.dim(`(${catDiags.length})`)}`);
+
+    // Group by diagnostic, most sites first.
+    const byRule = groupBy(catDiags, (d) => d.diagnostic);
+    const orderedRules = [...byRule.keys()].sort((a, b) => {
+      const diff = byRule.get(b)!.length - byRule.get(a)!.length;
+      if (diff !== 0) return diff;
+      return a < b ? -1 : 1;
+    });
+
+    for (const diagnostic of orderedRules) {
+      const ruleDiags = byRule.get(diagnostic)!;
+      const first = ruleDiags[0]!;
+      const siteWord = ruleDiags.length === 1 ? "site" : "sites";
+      lines.push("");
+      lines.push(
+        `  ${glyph(first.severity, p)} ${p.bold(first.title)} ${p.dim(`· ${ruleDiags.length} ${siteWord}`)}`,
+      );
+      lines.push(`     ${first.message}`);
+
+      const cap = verbose ? Infinity : DEFAULT_SITE_CAP;
+      const shown = ruleDiags.slice(0, cap);
+      for (const d of shown) {
+        lines.push(p.cyan(`     ${d.normalizedFilePath}:${d.line}:${d.column}`));
+      }
+      const remaining = ruleDiags.length - shown.length;
+      if (remaining > 0) lines.push(p.dim(`     … ${remaining} more`));
+
+      lines.push(p.dim(`     → ${first.recommendation}`));
+      lines.push(p.dim(`     node-doctor/${diagnostic}`));
+    }
+  }
+
+  lines.push("");
+  return lines.join("\n");
+};
+
+/** Render just the delta view (introduced/resolved). */
+export const renderDelta = (
+  introduced: Finding[],
+  resolved: Finding[],
+  options: RenderOptions = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  if (resolved.length > 0) {
+    lines.push(p.green(`  ✓ ${resolved.length} finding(s) resolved by this change`));
+    lines.push("");
+  }
+
+  if (introduced.length === 0) {
+    lines.push(p.green("  ✓ No new findings introduced by this change."));
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  lines.push(p.bold(`  ${introduced.length} new finding(s) introduced by this change:`));
+  for (const d of introduced) {
+    lines.push("");
+    lines.push(`  ${glyph(d.severity, p)} ${p.cyan(`${d.normalizedFilePath}:${d.line}:${d.column}`)}`);
+    lines.push(`    ${p.bold(d.title)}`);
+    lines.push(`    ${d.message}`);
+    lines.push(p.dim(`    → ${d.recommendation}`));
+    lines.push(p.dim(`    node-doctor/${d.diagnostic}`));
+  }
+  lines.push("");
+  return lines.join("\n");
+};

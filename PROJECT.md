@@ -33,7 +33,7 @@ npx node-doctor@latest .
 - [Command-line reference](#command-line-reference)
 - [Output](#output)
 - [The scoring model](#the-scoring-model)
-- [The diagnostic set](#the-diagnostic set)
+- [The ruleset](#the-ruleset)
 - [Capability detection and gating](#capability-detection-and-gating)
 - [Configuration](#configuration)
 - [Suppressing findings](#suppressing-findings)
@@ -43,7 +43,7 @@ npx node-doctor@latest .
 - [Framework support](#framework-support)
 - [Comparison with other tools](#comparison-with-other-tools)
 - [Architecture](#architecture)
-- [Writing a diagnostic](#writing-a-diagnostic)
+- [Writing a rule](#writing-a-rule)
 - [Performance and scaling](#performance-and-scaling)
 - [Roadmap](#roadmap)
 - [FAQ](#faq)
@@ -83,7 +83,7 @@ is written correctly the first time instead of caught afterward.
 2. **Version-aware analysis.** `express-async-handler-unprotected` is a genuine,
    client-hanging bug on Express 4 and a complete non-issue on Express 5, which
    awaits handler return values. node.doctor reads your manifest and retires the
-   diagnostic automatically when it no longer applies.
+   rule automatically when it no longer applies.
 
 3. **A transparent, local score.** Every scan produces a 0–100 health number
    computed entirely on your machine from a published formula. No network call,
@@ -104,7 +104,7 @@ Typical output on a codebase that needs help:
 
 ```
   node.doctor v0.1.0  checkout-service
-  148 files · 21,904 lines · 50/61 diagnostics active
+  148 files · 21,904 lines · 17/17 rules active
   detected: typescript esm express prisma jsonwebtoken
 
   ██████░░░░░░░░░░░░░░░░░░░░░░░░░░  21/100  critical
@@ -127,10 +127,10 @@ Typical output on a codebase that needs help:
   … more findings …
 ```
 
-See the whole diagnostic set and when each diagnostic applies:
+See the whole ruleset and when each rule applies:
 
 ```bash
-npx node-doctor@latest diagnostics
+npx node-doctor@latest rules
 ```
 
 Machine-readable report for scripting or CI:
@@ -144,7 +144,7 @@ npx node-doctor@latest . --json
 ## The problem it solves
 
 Agent-written backend code fails in four recurring ways. Each is a whole family
-of diagnostics in node.doctor.
+of rules in node.doctor.
 
 ### 1. Broken asynchrony
 
@@ -238,17 +238,17 @@ of ESLint plugins does not:
 | --- | --- | --- |
 | Context gating (module vs request path) | ✗ Fires everywhere | ✓ Position-aware |
 | Version gating (Express 4 vs 5) | ✗ Manual per-project config | ✓ Reads your manifest |
-| Curated, opinionated diagnostic set | ✗ You assemble and maintain it | ✓ Ships as one thing |
+| Curated, opinionated ruleset | ✗ You assemble and maintain it | ✓ Ships as one thing |
 | Health score | ✗ | ✓ Local, transparent |
 | CI baseline delta (legacy-friendly) | ✗ | ✓ Built in |
 | Agent skill (upstream prevention) | ✗ | ✓ One install command |
 | Zero-config first run | Partial | ✓ |
 
 node.doctor is **not** a replacement for a well-configured ESLint. Keep ESLint
-for style, formatting, and the hundreds of general-purpose correctness diagnostics it
+for style, formatting, and the hundreds of general-purpose correctness rules it
 does brilliantly. node.doctor is a complement focused on the specific,
 high-severity, load-dependent defects that are hard to express as a generic lint
-diagnostic and easy to ship to production.
+rule and easy to ship to production.
 
 ---
 
@@ -299,8 +299,8 @@ node-doctor ~/code/some-service
   configure.
 - Works on JavaScript and TypeScript source: `.js`, `.mjs`, `.cjs`, `.ts`,
   `.mts`, `.cts`. TypeScript is parsed structurally — no `tsconfig` resolution or
-  type checking is required for the current diagnostic set (see
-  [Roadmap](#roadmap) for type-aware diagnostics).
+  type checking is required for the current ruleset (see
+  [Roadmap](#roadmap) for type-aware rules).
 
 ---
 
@@ -312,49 +312,33 @@ this before you depend on it.
 **What ships today and works:**
 
 - A sound analysis engine: parser, AST walker with parent links, shared AST
-  helpers, a scope/binding resolver, request-path detection, intra-file taint,
-  and capability detection. Two-phase (per-file + project pass) from day one.
-- A precision-first diagnostic set across Security, Bugs, Performance, Reliability, and
-  Maintainability — every diagnostic with a valid/invalid test pair, FP-prone diagnostics
-  shipped opt-in (`defaultEnabled: false`).
-- A full test suite (native `node:test`), including regression tests for real
-  false positives found during development, plus a `good-app` canary enforced in
-  CI at zero findings.
+  helpers, request-path detection, intra-file taint, capability detection.
+- **17 rules** across Security, Bugs, Performance, and Reliability, each with a
+  valid/invalid test pair.
+- **56 passing tests**, including regression tests for real false positives found
+  during development.
 - Local, transparent scoring.
-- A complete CLI: full scan, `diagnostics` catalog, `delta` for CI baselines, `deslop`
-  dead-code scan, `explain`, `init`, `install`, and `mcp`; JSON / SARIF 2.1.0 /
-  GitHub-annotation / **self-contained HTML** output; tag filtering, per-diagnostic
-  config, inline suppression, `--fix`, `--cache`, `--watch`, and
-  `--only`/`--diff`/`--staged` subsetting.
-- A **cross-file call graph**: reachability from every handler, with the first
-  cross-file diagnostic (`no-sync-io-reachable-from-handler`) flagging a blocking sink
-  in a helper reached *through other files*.
-- A **content-hash cache** (`--cache`) so unchanged files are not re-analyzed.
-- An **MCP server** (`node-doctor mcp`) exposing the scanner as a native tool for
-  agents, plus an installable, locally-bundled agent skill and a thin ESLint
-  adapter.
-- A **config file** (`node-doctor.config.js` or a `nodeDoctor` key in
-  `package.json`) and **inline suppression comments** with mandatory reasons.
-- CI baseline-delta workflow and a GitHub composite Action.
-- A stable, documented programmatic API, and a fuzz + corpus harness.
-
-The tool is authored in TypeScript and ships compiled ESM in `dist/` (Node ≥
-20.19), with a strict-typed public API surface.
+- A complete CLI: full scan, `rules` catalog, `delta` for CI baselines, JSON
+  output, tag filtering, configurable blocking level.
+- CI baseline-delta workflow.
+- An installable agent skill.
+- A stable, documented programmatic API.
 
 **What is deliberately not here yet** (and is on the [roadmap](#roadmap) with
 honest estimates):
 
-- **More cross-file diagnostics.** The call graph and the first request-path effect
-  diagnostic ship today; promoting the remaining effect diagnostics (process.exit,
-  unbounded fan-out) to follow calls through helpers is ongoing.
-- **Type-aware diagnostics** (e.g. floating-promise detection that relies on
-  `Promise<T>` types rather than the `async` keyword), behind a `--typed` flag.
-- A **worker pool** for parsing very large monorepos in parallel (the
-  content-hash cache already lands the warm-scan win).
+- A whole-program **call graph**. Every rule today is intra-file. A blocking call
+  in a helper three modules away from the handler that calls it is not yet
+  detected. This is the single biggest gap between v0 and a production-grade tool.
+- **Type-aware rules** (e.g. floating-promise detection that relies on
+  `Promise<T>` types rather than the `async` keyword).
+- A **config file** and **inline suppression comments** (tag-level filtering via
+  `--ignore-tag` works today; finer-grained control lands in 0.2).
+- A **worker pool** and **content-hash cache** for large monorepos.
 
-The diagnostic set is curated for precision, not maximized for count. A mature
-comparable tool ships several hundred diagnostics; node.doctor wins on trust, and the
-engine below makes each new diagnostic cheap to add.
+Seventeen rules is a proof that the engine works, not full coverage. For scale,
+a mature comparable tool ships several hundred. The engine below is the reusable
+asset; the ruleset grows from here.
 
 ---
 
@@ -364,11 +348,11 @@ A scan is a pipeline. Understanding it explains both what node.doctor catches an
 what it cannot.
 
 ```
-  discover project ─▶ detect capabilities ─▶ select diagnostics
+  discover project ─▶ detect capabilities ─▶ select rules
         │
         ▼
   for each source file:
-     parse (oxc) ─▶ attach parents ─▶ run taint pass ─▶ run enabled diagnostics ─▶ collect findings
+     parse (oxc) ─▶ attach parents ─▶ run taint pass ─▶ run enabled rules ─▶ collect diagnostics
         │
         ▼
   sort deterministically ─▶ compute score ─▶ render (terminal | JSON)
@@ -379,17 +363,17 @@ what it cannot.
 node.doctor reads `package.json` and derives a set of **capability tokens** —
 `express`, `prisma`, `typescript`, `esm`, and so on. Crucially, it inspects
 version ranges: an Express `^5.0.0` dependency adds the `express:5` token, which
-switches off diagnostics that only apply to Express 4.
+switches off rules that only apply to Express 4.
 
 This is cheap by design — one manifest read, no lockfile parse, no install-tree
-walk — and it is the difference between "a Fastify diagnostic fires on an Express app"
+walk — and it is the difference between "a Fastify rule fires on an Express app"
 and a tool people keep installed.
 
-### 2. Diagnostic selection
+### 2. Rule selection
 
-A diagnostic runs only when the project satisfies its gate:
+A rule runs only when the project satisfies its gate:
 
-- Every token in the diagnostic's `requires` list must be present.
+- Every token in the rule's `requires` list must be present.
 - No token in its `disabledWhen` list may be present.
 - Its tags must not be excluded via `--ignore-tag`.
 
@@ -418,7 +402,7 @@ request handlers by detecting:
   `(req, res)` / `(req, res, next)` signature, so a `controllers/` file whose
   handlers are mounted elsewhere is still covered.
 
-A diagnostic can then ask "is this node inside a request handler?" and give opposite
+A rule can then ask "is this node inside a request handler?" and give opposite
 verdicts for the same syntax depending on the answer.
 
 **The honest limitation:** this is *direct-lexical* detection. It sees code
@@ -433,25 +417,25 @@ A small, local taint pass propagates "this value came from the caller" from
 request-shaped roots (`req`, `request`, `ctx`, `event`) through a couple of
 assignment hops. `const { name } = req.query` marks `name` as tainted.
 
-This is used to **sharpen messages**, not to gate findings. An injection diagnostic
+This is used to **sharpen messages**, not to gate findings. An injection rule
 still fires on interpolated SQL regardless of taint; taint only decides whether
 the message says "built by interpolation" or the stronger "built from
 caller-controlled input — this is SQL injection." Gating on an intentionally
 unsound analysis would ship false negatives that people trust, so we don't.
 
-### 6. Diagnostic execution and isolation
+### 6. Rule execution and isolation
 
 Rules are registered as visitors keyed by AST node type (with an optional
-`:exit` pass). The walker traverses once and dispatches to every interested diagnostic.
-Each diagnostic — and each individual visitor invocation — is wrapped so that a crash
-in one diagnostic cannot take down the scan. A misbehaving diagnostic is skipped; your report
+`:exit` pass). The walker traverses once and dispatches to every interested rule.
+Each rule — and each individual visitor invocation — is wrapped so that a crash
+in one rule cannot take down the scan. A misbehaving rule is skipped; your report
 still comes back.
 
 ### 7. Deterministic output and scoring
 
-Diagnostics are sorted by severity, then file, then line, then column, then diagnostic
-id, so output is byte-stable across runs. Each finding carries a deterministic
-`id` (a hash of its location, diagnostic, and message) — the primitive that makes CI
+Diagnostics are sorted by severity, then file, then line, then column, then rule
+id, so output is byte-stable across runs. Each diagnostic carries a deterministic
+`id` (a hash of its location, rule, and message) — the primitive that makes CI
 baseline deltas possible. Finally the score is computed locally (see
 [The scoring model](#the-scoring-model)).
 
@@ -461,7 +445,7 @@ baseline deltas possible. Finally the score is computed locally (see
 
 ```
 node-doctor [directory] [options]
-node-doctor diagnostics
+node-doctor rules
 node-doctor delta --baseline <file> --current <file> [options]
 ```
 
@@ -477,18 +461,18 @@ node-doctor delta --baseline <file> --current <file> [options]
 | --- | --- | --- |
 | `--json` | Emit the full JSON report to stdout instead of the terminal view | off |
 | `--json-out <path>` | Write the JSON report to a file (in addition to normal output) | — |
-| `--verbose`, `-v` | Show every diagnostic and every site, not just the top few per category | off |
+| `--verbose`, `-v` | Show every rule and every site, not just the top few per category | off |
 | `--blocking <level>` | Process exit policy: `error`, `warning`, or `none` | `error` |
-| `--ignore-tag <tag>` | Disable an entire diagnostic family; repeatable | — |
+| `--ignore-tag <tag>` | Disable an entire rule family; repeatable | — |
 | `--help`, `-h` | Show usage | — |
 
-### The `diagnostics` subcommand
+### The `rules` subcommand
 
-Lists every diagnostic, its severity, its category, and its gating, so you can see what
-node.doctor checks and when each diagnostic applies:
+Lists every rule, its severity, its category, and its gating, so you can see what
+node.doctor checks and when each rule applies:
 
 ```bash
-node-doctor diagnostics
+node-doctor rules
 ```
 
 ```
@@ -563,16 +547,16 @@ node-doctor . --json | jq '.score'
 
 The default view is designed to be read top to bottom and to fit real terminals.
 It leads with the score and the headline counts, then groups findings by category
-(largest first), and within each category by diagnostic (most sites first). For each
-diagnostic it shows the message, the first few file locations, the recommended fix, and
-the diagnostic id. By default it caps the number of diagnostics and sites shown per category;
+(largest first), and within each category by rule (most sites first). For each
+rule it shows the message, the first few file locations, the recommended fix, and
+the rule id. By default it caps the number of rules and sites shown per category;
 `--verbose` removes the caps.
 
 Anatomy:
 
 ```
   node.doctor v0.1.0  checkout-service            ← tool version + project name
-  148 files · 21,904 lines · 50/61 diagnostics active   ← scan scope + active diagnostics
+  148 files · 21,904 lines · 17/17 rules active   ← scan scope + active rules
   detected: typescript esm express prisma         ← capability tokens
 
   ██████░░░░░░░░░░░░░░░░░░░░░░░░░░  21/100  critical   ← score bar + label
@@ -581,12 +565,12 @@ Anatomy:
 
   Security (19)                                   ← category header + total
 
-  ✖ SQL built by string interpolation · 6 sites   ← diagnostic + site count
+  ✖ SQL built by string interpolation · 6 sites   ← rule + site count
      SQL is built from caller-controlled input…    ← message
      src/orders/repository.ts:88:24                ← locations
      …
      → Use parameter binding: …                    ← recommendation
-     node-doctor/no-sql-template-interpolation     ← diagnostic id
+     node-doctor/no-sql-template-interpolation     ← rule id
 ```
 
 ### JSON report
@@ -596,7 +580,7 @@ is the contract other tools should build on.
 
 ```json
 {
-  "schemaVersion 2,
+  "schemaVersion": 1,
   "project": {
     "name": "checkout-service",
     "rootDirectory": "/abs/path/checkout-service",
@@ -606,9 +590,9 @@ is the contract other tools should build on.
     "complete": true,
     "parseFailures": []
   },
-  "diagnosticsRun": 17,
-  "diagnosticsAvailable": 17,
-  "findings": [
+  "rulesRun": 17,
+  "rulesAvailable": 17,
+  "diagnostics": [
     {
       "id": "src/orders/repository.ts::88:24::node-doctor/no-sql-template-interpolation::7c8ec1e7",
       "filePath": "/abs/path/checkout-service/src/orders/repository.ts",
@@ -616,7 +600,7 @@ is the contract other tools should build on.
       "line": 88,
       "column": 24,
       "plugin": "node-doctor",
-      "diagnostic": "no-sql-template-interpolation",
+      "rule": "no-sql-template-interpolation",
       "title": "SQL built by string interpolation",
       "category": "Security",
       "severity": "error",
@@ -647,11 +631,11 @@ is the contract other tools should build on.
   integration to a major.
 - `normalizedFilePath` is repo-relative with forward slashes on every OS; use it
   for display and grouping. `filePath` is absolute; use it to open the file.
-- `findings[].id` is deterministic and stable for an unchanged finding. It
+- `diagnostics[].id` is deterministic and stable for an unchanged finding. It
   changes when the finding's location or user-visible message changes. This is
   what `delta` keys on.
 - `project.complete` is `false` when any file failed to parse. **Never infer
-  "clean" from an empty `findings` array without checking this flag** — an
+  "clean" from an empty `diagnostics` array without checking this flag** — an
   empty array plus `complete: false` means "we couldn't read part of your code,"
   not "your code is fine."
 - `tags` are sorted for stability.
@@ -735,32 +719,25 @@ want.
 
 ---
 
-## The diagnostic set
+## The ruleset
 
-node.doctor ships **61 diagnostics** — 49 on by default and 12 opt-in
-(`defaultEnabled: false`, for the inherently FP-prone families). Rules are grouped
-into **categories** (which drive scoring weight) and tagged with **families**
-(which drive `--ignore-tag`). Every diagnostic has one of two **severities**: `error`
-(fix before shipping) or `warn` (should fix).
-
-Run `node-doctor diagnostics` for the full catalog with gating, or browse it on the
-[landing site](./web). The 17 highest-value **core** diagnostics are documented in depth
-below (why it matters · flagged · not-flagged · conditions); the full 61 are
-listed by the `diagnostics` command.
+Rules are grouped into **categories** (which drive scoring weight) and tagged
+with **families** (which drive `--ignore-tag`). Every rule has one of two
+**severities**: `error` (fix before shipping) or `warn` (should fix).
 
 ### Categories
 
-| Category | What it means | Weight | Rules |
-| --- | --- | --- | --- |
-| **Security** | Injection, secret handling, auth bypass | 2.0 | 24 |
-| **Reliability** | Crashes, hangs, resource exhaustion, lifecycle | 1.5 | 17 |
-| **Bugs** | Logic errors that produce wrong results | 1.5 | 7 |
-| **Performance** | Event-loop stalls, N+1, avoidable slow paths | 1.0 | 8 |
-| **Maintainability** | Structure, hygiene, dead code (mostly opt-in) | 0.5 | 5 |
+| Category | What it means | Weight |
+| --- | --- | --- |
+| **Security** | Injection, secret handling, auth bypass | 2.0 |
+| **Reliability** | Crashes, hangs, resource exhaustion, lifecycle | 1.5 |
+| **Bugs** | Logic errors that produce wrong results | 1.5 |
+| **Performance** | Event-loop stalls, N+1, avoidable slow paths | 1.0 |
+| **Maintainability** | Structure and clarity (reserved; no rules in v0) | 0.5 |
 
-### The 17 core diagnostics at a glance
+### The 17 rules at a glance
 
-| Diagnostic | Category | Severity | Gating |
+| Rule | Category | Severity | Gating |
 | --- | --- | --- | --- |
 | [`express-async-handler-unprotected`](#express-async-handler-unprotected) | Reliability | error | requires `express`, off on `express:5` |
 | [`express-missing-return-after-response`](#express-missing-return-after-response) | Bugs | error | requires `express` |
@@ -797,7 +774,7 @@ process kill. This is the Express footgun agents reproduce most reliably, and it
 is exactly the kind of bug that never appears in a test that only exercises the
 success path.
 
-The diagnostic gates itself off when `express:5` is detected, because Express 5 awaits
+The rule gates itself off when `express:5` is detected, because Express 5 awaits
 handler return values and propagates the rejection correctly.
 
 ❌ **Flagged:**
@@ -943,7 +920,7 @@ path.
 synchronous read inside a handler does not block "this request" — it blocks
 **every** concurrent request, the timers, and the health check the orchestrator
 uses to decide whether to kill the pod. The same call at module scope is a
-correct one-time boot cost. This diagnostic is the reason request-path detection
+correct one-time boot cost. This rule is the reason request-path detection
 exists: identical node, opposite verdict based on position.
 
 ❌ **Flagged:**
@@ -1187,7 +1164,7 @@ SQL built by string interpolation instead of parameter binding.
 
 **Why it matters.** Parameter binding is not a convenience — it is the only thing
 that keeps data from being re-parsed as SQL grammar. An interpolated query has
-already lost that boundary before the driver ever sees it. This diagnostic correctly
+already lost that boundary before the driver ever sees it. This rule correctly
 *allows* Prisma's tagged `$queryRaw` template, which parameterizes every `${}`,
 and flags only the unsafe call forms.
 
@@ -1306,7 +1283,7 @@ compare), or neither side is secret-shaped.
 **Why it matters.** `jwt.decode()` parses the payload *without checking the
 signature*. Anyone can mint `{"role":"admin"}`, base64-encode it, and send it. If
 the decoded claims then drive an authorization decision, the token is not
-authentication — it is a request parameter the caller fully controls. The diagnostic is
+authentication — it is a request parameter the caller fully controls. The rule is
 deliberately narrow: decoding a token to read `exp` for a refresh heuristic is
 legitimate and not flagged.
 
@@ -1347,7 +1324,7 @@ MD5/SHA-1 used in a password-storage context.
 wrong for passwords: a commodity GPU does billions of guesses a second. Password
 hashing wants a deliberately slow, salted, memory-hard KDF. This is not a "weak
 algorithm" style nit — it is the difference between a leaked table being useless
-and being cracked overnight. The diagnostic is context-gated: a fast hash for an ETag or
+and being cracked overnight. The rule is context-gated: a fast hash for an ETag or
 a cache key is fine and not flagged.
 
 ❌ **Flagged:**
@@ -1435,7 +1412,7 @@ round trips inside a single request, each holding a pool connection. This is the
 most common cause of "it was fast on my machine" in Node services, and agents
 write it constantly because the loop form reads more naturally than the join.
 
-This diagnostic uses *segment-aware* receiver matching to avoid a specific false
+This rule uses *segment-aware* receiver matching to avoid a specific false
 positive class: an earlier version flagged `items.find()` because the token
 `em` (TypeORM's EntityManager) appears inside "it-**em**-s". Short, ambiguous
 receiver names must now match a whole path segment.
@@ -1525,7 +1502,7 @@ or it is scoped inside a function.
 
 ## Capability detection and gating
 
-Capabilities are the vocabulary that decides which diagnostics run. They are derived
+Capabilities are the vocabulary that decides which rules run. They are derived
 from `package.json` and the presence of certain files.
 
 ### Detected tokens
@@ -1549,26 +1526,28 @@ from `package.json` and the presence of certain files.
 
 ### How gating works
 
-Each diagnostic may declare:
+Each rule may declare:
 
-- **`requires`** — every listed token must be present, or the diagnostic does not run.
-- **`disabledWhen`** — if any listed token is present, the diagnostic does not run.
+- **`requires`** — every listed token must be present, or the rule does not run.
+- **`disabledWhen`** — if any listed token is present, the rule does not run.
 
 For example, `express-async-handler-unprotected` is
 `requires: ["express"], disabledWhen: ["express:5"]`: it runs on an Express 4
 project and is silent on both non-Express projects and Express 5 projects. The
-scan header reports the active count (`50/61 diagnostics active`), and the `diagnostics`
-subcommand shows each diagnostic's gating so nothing is a surprise.
+scan header reports the active count (`17/17 rules active`), and the `rules`
+subcommand shows each rule's gating so nothing is a surprise.
 
 ---
 
 ## Configuration
 
-Tag filtering, the config file, and inline suppression are all live.
+> **Status:** tag-level filtering via `--ignore-tag` is live today. The config
+> file and inline suppression comments described below land in **v0.2**; they are
+> documented here so the intended surface is clear.
 
-### Tag filtering
+### Tag filtering (available now)
 
-Every diagnostic carries one or more family tags. Disable an entire family for a run:
+Every rule carries one or more family tags. Disable an entire family for a run:
 
 ```bash
 node-doctor . --ignore-tag async --ignore-tag db
@@ -1578,21 +1557,21 @@ Available tags include: `async`, `concurrency`, `network`, `event-loop`,
 `lifecycle`, `injection`, `db`, `n+1`, `crypto`, `secrets`, `auth`, `cors`,
 `fs`, `memory`, `express`.
 
-### Config file
+### Config file (planned, v0.2)
 
-A `node-doctor.config.js` (or a `nodeDoctor` key in `package.json`) lets you set
-defaults so they do not have to be passed on every invocation:
+A `node-doctor.config.js` (or a `nodeDoctor` key in `package.json`) will let you
+set defaults so they do not have to be passed on every invocation:
 
 ```js
 // node-doctor.config.js
 export default {
-  // Override severity or disable individual diagnostics
-  diagnostics: {
+  // Override severity or disable individual rules
+  rules: {
     "no-query-in-loop": "off",
     "require-fetch-timeout": "error", // upgrade a warning to an error
   },
 
-  // Disable diagnostic families
+  // Disable rule families
   ignoreTags: ["async"],
 
   // Skip paths entirely (in addition to the built-in ignores)
@@ -1610,8 +1589,10 @@ Built-in ignores (always applied): `node_modules`, `dist`, `build`, `.next`,
 
 ## Suppressing findings
 
+> **Status:** planned for v0.2. Documented here for completeness.
+
 When a finding is a genuine false positive, or an accepted risk with a documented
-reason, you can suppress it inline:
+reason, you will be able to suppress it inline:
 
 ```js
 // node-doctor-disable-next-line no-sync-io-in-request-path -- one-time warmup, gated behind a flag
@@ -1620,14 +1601,14 @@ const seed = fs.readFileSync("./seed.json", "utf8");
 
 ```js
 /* node-doctor-disable no-exec-with-interpolation */
-// … block where the diagnostic is intentionally off …
+// … block where the rule is intentionally off …
 /* node-doctor-enable no-exec-with-interpolation */
 ```
 
 **Suppression requires a reason** (the text after `--`). A suppression with no
 justification is itself reported, so the escape hatch cannot be used to silently
 hide problems. This mirrors the project's stance in the agent skill: a false
-positive is a bug in the diagnostic and should be reported, not quietly silenced.
+positive is a bug in the rule and should be reported, not quietly silenced.
 
 ---
 
@@ -1734,7 +1715,7 @@ node-doctor:
     - git checkout $CI_COMMIT_SHA
     - npx node-doctor@latest . --json-out current.json --blocking none
     - npx node-doctor@latest delta --baseline baseline.json --current current.json --blocking error
-  diagnostics:
+  rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 ```
 
@@ -1770,15 +1751,15 @@ the code**, so the code is correct the first time.
 npx node-doctor@latest install
 ```
 
-This writes a skill/diagnostics file into your agent's config — Claude Code, Cursor,
-Windsurf, Codex, and other clients that support skills or project diagnostics. From
+This writes a skill/rules file into your agent's config — Claude Code, Cursor,
+Windsurf, Codex, and other clients that support skills or project rules. From
 then on, the agent treats node.doctor's checks as part of how it writes Node
 code, and it runs the scanner before declaring backend work complete.
 
 ### The skill's philosophy
 
 The skill (`skill/SKILL.md`) is deliberately thin. It does not try to encode all
-seventeen diagnostics as prose — that would drift out of date the moment a diagnostic
+seventeen rules as prose — that would drift out of date the moment a rule
 changed. Instead it tells the agent to **run the scanner and trust its output**,
 and it teaches the reasoning the scanner cannot yet automate:
 
@@ -1797,91 +1778,9 @@ network and where they land.
 
 And it sets a firm stance on the escape hatch:
 
-> Do not suppress a diagnostic to make a scan pass. If a finding is wrong, say so
-> explicitly and explain why; a false positive is a bug in the diagnostic and should
+> Do not suppress a rule to make a scan pass. If a finding is wrong, say so
+> explicitly and explain why; a false positive is a bug in the rule and should
 > be reported, not silenced.
-
----
-
-## Beyond the scan
-
-node.doctor is more than a linter loop. These ship today.
-
-### Cross-file analysis (the call graph)
-
-The engine builds a module import graph and resolves reachability from every
-request handler. The first cross-file diagnostic,
-`no-sync-io-reachable-from-handler`, flags a blocking `*Sync` call in a helper
-that a handler reaches *through other files* — the class of bug the intra-file
-diagnostics can't see — while staying silent on a helper only reached from module scope
-(a boot loader). More effect diagnostics move onto the graph over time.
-
-### `deslop` — dead-code scan
-
-```bash
-node-doctor deslop .        # unused files, exports, and dependencies
-node-doctor deslop . --json
-```
-
-Uses the same import graph to find code and dependencies nothing references,
-tuned to not cry wolf: entry points (package `main`/`bin`, index files, shebang
-scripts), re-exports, and namespace imports are all respected. Treat results as
-candidates to review, not automatic deletions.
-
-### MCP server — node.doctor as an agent tool
-
-```bash
-node-doctor mcp             # stdio JSON-RPC MCP server
-```
-
-This is the thesis made literal: register node.doctor as an MCP server and any
-MCP client can call it as a native tool.
-
-```json
-{ "mcpServers": { "node-doctor": { "command": "npx", "args": ["node-doctor", "mcp"] } } }
-```
-
-Tools exposed: `node_doctor_scan`, `node_doctor_diagnostics`, `node_doctor_explain`,
-`node_doctor_deslop`.
-
-### Safe autofix
-
-```bash
-node-doctor . --fix
-```
-
-`--fix` applies only **mechanically safe** codemods — today, adding the `node:`
-protocol prefix to core-module imports. Security and concurrency findings are
-never auto-fixed: an auto-fixer for those would need to be far more certain than
-a heuristic can be.
-
-### Shareable HTML report
-
-```bash
-node-doctor . --html-out report.html
-```
-
-A self-contained HTML report — inline CSS, no external requests — you can open
-anywhere or attach to a PR.
-
-### Content-hash cache
-
-```bash
-node-doctor . --cache      # unchanged files are not re-analyzed between runs
-node-doctor . --watch      # re-scan on change (implies --cache)
-```
-
-The cache key includes the enabled diagnostics, their severities, and the project's
-capabilities, so it never returns stale results after a config change. Cached
-output is byte-identical to a cold scan.
-
-### `explain` and `init`
-
-```bash
-node-doctor explain no-sql-template-interpolation   # what a diagnostic catches + the fix
-node-doctor explain src/routes.ts:94                # why a diagnostic fired at a location
-node-doctor init                                    # scaffold node-doctor.config.js
-```
 
 ---
 
@@ -1897,10 +1796,10 @@ import {
   computeDelta,
   calculateScore,
   renderReport,
-  DIAGNOSTICS,
-  DIAGNOSTICS_BY_ID,
+  RULES,
+  RULES_BY_ID,
   discoverProject,
-  shouldEnableDiagnostic,
+  shouldEnableRule,
 } from "node-doctor";
 ```
 
@@ -1916,8 +1815,8 @@ const report = await scanProject({
 });
 
 console.log(report.score.score, report.score.label);
-for (const d of report.findings) {
-  console.log(`${d.normalizedFilePath}:${d.line} ${d.diagnostic} — ${d.message}`);
+for (const d of report.diagnostics) {
+  console.log(`${d.normalizedFilePath}:${d.line} ${d.rule} — ${d.message}`);
 }
 ```
 
@@ -1927,51 +1826,51 @@ Lint a single source string with no filesystem access — ideal for editor
 integrations and unit tests.
 
 ```js
-const { findings, parseFailed } = lintSource({
+const { diagnostics, parseFailed } = lintSource({
   filePath: "app.js",
   sourceText: `app.get("/u", async (req, res) => { const u = await db.find(1); res.json(u); });`,
-  diagnostics: DIAGNOSTICS.filter((r) => shouldEnableDiagnostic(r, new Set(["node", "express"]))),
+  rules: RULES.filter((r) => shouldEnableRule(r, new Set(["node", "express"]))),
   capabilities: new Set(["node", "express"]),
 });
 ```
 
 ### `computeDelta(baseline, current)`
 
-Diff two reports; returns `{ introduced, resolved }` arrays of findings.
+Diff two reports; returns `{ introduced, resolved }` arrays of diagnostics.
 
 ```js
 const { introduced, resolved } = computeDelta(baselineReport, currentReport);
 if (introduced.some((d) => d.severity === "error")) process.exit(1);
 ```
 
-### `calculateScore(findings, { totalLines })`
+### `calculateScore(diagnostics, { totalLines })`
 
-Run the scoring model on an arbitrary finding set.
+Run the scoring model on an arbitrary diagnostic set.
 
 ### `renderReport(report, { verbose })`
 
 Produce the terminal-formatted string for a report.
 
-### `DIAGNOSTICS` / `DIAGNOSTICS_BY_ID`
+### `RULES` / `RULES_BY_ID`
 
-The full diagnostic array and a `Map` keyed by diagnostic id, for building your own
+The full rule array and a `Map` keyed by rule id, for building your own
 catalogs, docs, or config UIs.
 
 ### Editor integration sketch
 
 ```js
-// On document change, lint just the buffer and surface findings.
-import { lintSource, DIAGNOSTICS, shouldEnableDiagnostic } from "node-doctor";
+// On document change, lint just the buffer and surface diagnostics.
+import { lintSource, RULES, shouldEnableRule } from "node-doctor";
 
 function lintBuffer(filePath, text, capabilities) {
   const caps = new Set(capabilities);
-  const diagnostics = DIAGNOSTICS.filter((r) => shouldEnableDiagnostic(r, caps));
-  const { findings } = lintSource({ filePath, sourceText: text, diagnostics, capabilities: caps });
-  return findings.map((d) => ({
+  const rules = RULES.filter((r) => shouldEnableRule(r, caps));
+  const { diagnostics } = lintSource({ filePath, sourceText: text, rules, capabilities: caps });
+  return diagnostics.map((d) => ({
     range: { line: d.line - 1, column: d.column - 1 },
     severity: d.severity,
     message: `${d.message}\n${d.recommendation}`,
-    source: `node-doctor/${d.diagnostic}`,
+    source: `node-doctor/${d.rule}`,
   }));
 }
 ```
@@ -1980,20 +1879,20 @@ function lintBuffer(filePath, text, capabilities) {
 
 ## Framework support
 
-| Framework / library | Request-path detection | Dedicated diagnostics | Notes |
+| Framework / library | Request-path detection | Dedicated rules | Notes |
 | --- | --- | --- | --- |
 | **Express** 4 | ✓ | ✓ (async handler, missing return, CORS) | Full support |
-| **Express** 5 | ✓ | ✓ (async-handler diagnostic auto-retires) | Full support |
-| **Fastify** | ✓ (method + object route forms) | Partial (shared diagnostics apply) | Dedicated diagnostics on roadmap |
-| **Hono** | ✓ | Partial | Dedicated diagnostics on roadmap |
-| **Koa** | ✓ (middleware form) | Partial | Dedicated diagnostics on roadmap |
-| **Nest** | ✓ (decorator handlers) | Partial | Dedicated diagnostics on roadmap |
-| **Adonis** | ✓ (decorator handlers) | Partial | Dedicated diagnostics on roadmap |
+| **Express** 5 | ✓ | ✓ (async-handler rule auto-retires) | Full support |
+| **Fastify** | ✓ (method + object route forms) | Partial (shared rules apply) | Dedicated rules on roadmap |
+| **Hono** | ✓ | Partial | Dedicated rules on roadmap |
+| **Koa** | ✓ (middleware form) | Partial | Dedicated rules on roadmap |
+| **Nest** | ✓ (decorator handlers) | Partial | Dedicated rules on roadmap |
+| **Adonis** | ✓ (decorator handlers) | Partial | Dedicated rules on roadmap |
 | **Prisma** | — | ✓ (raw query, N+1 eager-load hints) | Full support |
-| **Drizzle / Knex / Mongoose / TypeORM** | — | Partial (N+1 receiver-aware) | Dedicated diagnostics on roadmap |
+| **Drizzle / Knex / Mongoose / TypeORM** | — | Partial (N+1 receiver-aware) | Dedicated rules on roadmap |
 
-"Shared diagnostics apply" means the framework-agnostic diagnostics (async, event-loop,
-injection, secrets, memory) work everywhere; only the framework-*specific* diagnostics
+"Shared rules apply" means the framework-agnostic rules (async, event-loop,
+injection, secrets, memory) work everywhere; only the framework-*specific* rules
 are Express-first in v0. Broadening framework-specific coverage is a primary
 roadmap item.
 
@@ -2008,7 +1907,7 @@ node.doctor is not trying to replace the ecosystem. Here is where it fits.
 | **node.doctor** | Node runtime defects | ✓ | ✓ | ✓ | ✓ | Zero-config |
 | **ESLint** + plugins | General correctness + style | ✗ | ✗ | ✗ | ✗ | You assemble it |
 | **Biome** | Fast lint + format | ✗ | ✗ | ✗ | ✗ | Config file |
-| **Semgrep** | Pattern-based security | Partial | ✗ | ✓ (paid) | ✗ | Write/import diagnostics |
+| **Semgrep** | Pattern-based security | Partial | ✗ | ✓ (paid) | ✗ | Write/import rules |
 | **Snyk Code** | Security (SAST) | ✓ | ✗ | ✓ | ✗ | Account + CLI |
 | **SonarQube** | Quality gate + coverage | Partial | ✓ (quality gate) | ✓ | ✗ | Server + scanner |
 | **CodeQL** | Deep dataflow security | ✓ (dataflow) | ✗ | ✓ | ✗ | Heavy setup |
@@ -2042,16 +1941,16 @@ node-doctor/
 ├── src/
 │   ├── index.js                Public API surface
 │   ├── core/
-│   │   ├── types.js            The Diagnostic contract, categories, defineDiagnostic
+│   │   ├── types.js            The Rule contract, categories, defineRule
 │   │   ├── walk.js             ESTree walker: parent links, enter/exit, findDescendant
 │   │   ├── ast.js              Shared helpers: callee resolution, enclosing fn, taint helpers
 │   │   ├── request-path.js     Request-handler detection (the load-bearing primitive)
 │   │   ├── taint.js            Intra-file taint from request-shaped roots
-│   │   ├── project.js          package.json → capability tokens; diagnostic gating
-│   │   ├── scan.js             Orchestrator: parse, run diagnostics, finding identity, delta
+│   │   ├── project.js          package.json → capability tokens; rule gating
+│   │   ├── scan.js             Orchestrator: parse, run rules, diagnostic identity, delta
 │   │   ├── score.js            Local transparent scoring
-│   │   └── registry.js         The diagnostic list (hand-written; codegen-shaped)
-│   ├── diagnostics/
+│   │   └── registry.js         The rule list (hand-written; codegen-shaped)
+│   ├── rules/
 │   │   ├── async/              forEach-async, unbounded Promise.all, fetch timeout
 │   │   ├── express/            async handler, missing return, CORS credentials
 │   │   ├── event-loop/         sync IO, process.exit on request path
@@ -2065,7 +1964,7 @@ node-doctor/
 ├── .github/workflows/
 │   └── node-doctor.yml         CI with baseline delta
 ├── tests/
-│   └── diagnostics.test.js           56 tests; valid/invalid pairs + regressions
+│   └── rules.test.js           56 tests; valid/invalid pairs + regressions
 └── fixtures/
     ├── agent-app/              Deliberately bad Express + Prisma app
     └── good-app/               Correct equivalent (false-positive canary)
@@ -2074,43 +1973,43 @@ node-doctor/
 ### Data flow
 
 1. **`bin/node-doctor.js`** parses arguments and dispatches to `scanProject`,
-   the `diagnostics` catalog, or `delta`.
+   the `rules` catalog, or `delta`.
 2. **`scanProject`** (`core/scan.js`) discovers the project (`core/project.js`),
-   selects diagnostics by capability, globs source files, and lints each one.
+   selects rules by capability, globs source files, and lints each one.
 3. **`lintSource`** parses with oxc, runs the taint pass (`core/taint.js`),
-   builds a per-diagnostic context, and walks the AST once (`core/walk.js`) dispatching
-   to every interested diagnostic visitor.
+   builds a per-rule context, and walks the AST once (`core/walk.js`) dispatching
+   to every interested rule visitor.
 4. Diagnostics are collected with deterministic ids, sorted stably, and scored
    (`core/score.js`).
 5. **`report/terminal.js`** renders, or the JSON is emitted directly.
 
 ### Design principles
 
-- **Rules are pure and host-agnostic.** A diagnostic never touches the filesystem and
+- **Rules are pure and host-agnostic.** A rule never touches the filesystem and
   never knows which host runs it. This is what keeps an ESLint adapter or an
   oxlint-plugin host cheap to add.
 - **Precision over recall, everywhere.** Every heuristic resolves toward silence.
   A false negative costs one missed bug; a false positive costs the whole tool,
   because people uninstall linters that cry wolf.
-- **Isolation.** A diagnostic that throws is skipped; it cannot take down the scan.
+- **Isolation.** A rule that throws is skipped; it cannot take down the scan.
 - **Determinism.** Output is byte-stable across runs — a prerequisite for the CI
   delta and for snapshot tests.
 
 ---
 
-## Writing a diagnostic
+## Writing a rule
 
-Adding a diagnostic is a single-file operation. Here is the whole process.
+Adding a rule is a single-file operation. Here is the whole process.
 
 ### 1. The contract
 
-Every diagnostic is an object created with `defineDiagnostic`:
+Every rule is an object created with `defineRule`:
 
 ```js
-import { defineDiagnostic } from "../../core/types.ts";
+import { defineRule } from "../../core/types.js";
 
-export const myRule = defineDiagnostic({
-  id: "my-diagnostic-id",                    // becomes node-doctor/my-diagnostic-id
+export const myRule = defineRule({
+  id: "my-rule-id",                    // becomes node-doctor/my-rule-id
   title: "Short headline, no period",
   severity: "error",                    // "error" | "warn"
   category: "Security",                 // drives scoring weight
@@ -2130,7 +2029,7 @@ export const myRule = defineDiagnostic({
 
 ### 2. The context
 
-The object passed to `create` gives a diagnostic everything it needs:
+The object passed to `create` gives a rule everything it needs:
 
 | Field | Description |
 | --- | --- |
@@ -2160,14 +2059,14 @@ reach for constantly:
 
 ### 4. A complete worked example
 
-A diagnostic that flags `res.send()` called with a raw request value (a naive
+A rule that flags `res.send()` called with a raw request value (a naive
 reflected-XSS smell):
 
 ```js
-import { defineDiagnostic } from "../../core/types.ts";
-import { getMethodName, looksCallerControlled } from "../../core/ast.ts";
+import { defineRule } from "../../core/types.js";
+import { getMethodName, looksCallerControlled } from "../../core/ast.js";
 
-export const noRawEcho = defineDiagnostic({
+export const noRawEcho = defineRule({
   id: "no-raw-request-echo",
   title: "Response body echoes raw request input",
   severity: "warn",
@@ -2192,9 +2091,8 @@ export const noRawEcho = defineDiagnostic({
 
 ### 5. Register and test
 
-Run `npm run gen:registry` (the registry is codegen'd — it discovers your new
-diagnostic file automatically), then add a valid/invalid pair to the bucket's test file
-under `tests/diagnostics/`:
+Add it to `src/core/registry.js` (import + push into `RULES`), then add a
+valid/invalid pair to `tests/rules.test.js`:
 
 ```js
 describe("no-raw-request-echo", () => {
@@ -2209,11 +2107,11 @@ describe("no-raw-request-echo", () => {
 });
 ```
 
-### The golden principle of writing diagnostics
+### The one hard rule of rule-writing
 
-**Write the `valid` test first and make sure the diagnostic stays silent on correct
-code.** A diagnostic that fires on good code gets the entire tool uninstalled. Every
-diagnostic in node.doctor ships with a passing "does not fire" case for exactly this
+**Write the `valid` test first and make sure the rule stays silent on correct
+code.** A rule that fires on good code gets the entire tool uninstalled. Every
+rule in node.doctor ships with a passing "does not fire" case for exactly this
 reason, and the `fixtures/good-app` canary exists to catch the false positives no
 unit test anticipated.
 
@@ -2228,7 +2126,7 @@ on very large monorepos.
 
 **Planned:**
 
-- A **worker pool** sized to `min(cores, memory / 1GiB)` so parsing and diagnostic
+- A **worker pool** sized to `min(cores, memory / 1GiB)` so parsing and rule
   execution parallelize across files.
 - A **content-hash cache**, so an unchanged file is never re-analyzed between
   runs — the biggest win for local iterative use and for CI with a warm cache.
@@ -2243,20 +2141,22 @@ These are engineering, not research, and are scoped in the [Roadmap](#roadmap).
 
 Ordered by leverage. This is the honest plan, with honest estimates.
 
-### 1. A whole-program call graph — mostly shipped
+### 1. A whole-program call graph — the big one
 
-The call graph is **built and working**: module resolution, an import graph, and
-reachability from every route handler, plus a content-hash cache. The first
-cross-file diagnostic, `no-sync-io-reachable-from-handler`, follows handler →
-`userService.load()` → `cache.warm()` → `readFileSync` across files and flags it.
+Everything interesting is cross-file, and v0 is intra-file. Today
+`no-sync-io-in-request-path` only sees a blocking call written *directly inside* a
+handler. Real code goes handler → `userService.load()` → `cache.warm()` →
+`readFileSync`, and node.doctor currently sees none of it.
 
-**What remains:** promoting the other request-path effect diagnostics (`process.exit`,
-unbounded fan-out, N+1) onto the graph so they too see through helpers, and a
-richer hop-trail in the message.
+This is *the* gap between a demo and a production tool. It needs module
+resolution, an import graph, and reachability analysis from every route handler —
+plus a cache, because recomputing reachability per file is quadratic.
 
-### 2. Type-aware diagnostics
+**Estimate: 3–4 weeks. It is the whole ballgame.**
 
-The most valuable Node diagnostic — "this promise is floating" — needs the return type.
+### 2. Type-aware rules
+
+The most valuable Node rule — "this promise is floating" — needs the return type.
 Without types, node.doctor catches `async function` and misses everything typed
 as `Promise<T>`. The same limitation makes "is this a DB client?" a
 receiver-name heuristic rather than a fact (the heuristic already cost one false
@@ -2266,9 +2166,9 @@ positive; see `no-query-in-loop`). This needs a TypeScript type source
 
 **Estimate: 2–3 weeks.**
 
-### 3. Diagnostic set depth
+### 3. Ruleset depth
 
-17 → ~120 diagnostics for credible coverage, roughly a day per diagnostic with tests. The
+17 → ~120 rules for credible coverage, roughly a day per rule with tests. The
 buckets that need it most: Fastify/Nest/Hono/Koa framework-specific parity,
 Drizzle/TypeORM/Mongoose, streams and backpressure, graceful shutdown and
 lifecycle (SIGTERM handling, `setInterval` never cleared, per-request listeners),
@@ -2276,22 +2176,23 @@ and observability gaps.
 
 **Estimate: ~6 weeks full-time, or several months of evenings.**
 
-### 4. Config and suppression — ✅ shipped in 0.1
+### 4. Config and suppression (v0.2)
 
-The config file, inline suppression (with mandatory reasons), and `node-doctor
-init` to scaffold a config are all live.
+The config file and inline suppression comments documented above, with mandatory
+suppression reasons.
 
-### 5. Performance — content-hash cache shipped
+**Estimate: 1 week.**
 
-The **content-hash cache** (`--cache`) is live: unchanged files are not
-re-analyzed between runs, warm re-scans are fast, and cached output is
-byte-identical to a cold scan. **What remains:** a worker pool to parse very
-large monorepos across cores.
+### 5. Performance
 
-### 6. Correctness infrastructure — shipped
+The worker pool and content-hash cache described in
+[Performance and scaling](#performance-and-scaling).
 
-A fuzz harness (`npm run fuzz`) with crash/slow/invariant oracles and a corpus
-benchmark (`npm run bench`) are live. The remaining work is a broad corpus run against the
+**Estimate: 1–2 weeks.**
+
+### 6. Correctness infrastructure
+
+A fuzz harness with crash and invariant oracles, plus a corpus run against the
 top ~200 real Node repositories to measure the *actual* false-positive rate.
 "Zero false positives" currently means "zero on the fixtures we wrote," which is
 weak evidence. This should probably come earlier than its position here suggests.
@@ -2301,19 +2202,19 @@ weak evidence. This should probably come earlier than its position here suggests
 ---
 
 **Total to a credible v1: roughly 3–4 months full-time, or 8–10 months of
-evenings.** The engine is the easy part and it is already done. The diagnostic set and
+evenings.** The engine is the easy part and it is already done. The ruleset and
 the call graph are the work.
 
 ### A strategic note on scope
 
 If node.doctor is to be a public tool, going *broad* against an established,
-well-resourced competitor is a losing race — diagnostic count is not where a new
+well-resourced competitor is a losing race — rule count is not where a new
 entrant wins. The stronger plays are **narrow and deep**: pick one framework or
 one domain and be the best tool for it (`adonis-doctor`, `prisma-doctor`), or
 target the genuinely under-served lane of **MCP server and agent-tool security**,
 where the whole ecosystem is Node/TS, the code is overwhelmingly agent-written,
 and no incumbent has meaningful coverage. The other high-value direction is
-*internal*: encode a specific team's conventions as ~25 diagnostics — nobody else can
+*internal*: encode a specific team's conventions as ~25 rules — nobody else can
 build that, and the baseline delta makes it adoptable on legacy code immediately.
 
 ---
@@ -2323,7 +2224,7 @@ build that, and the baseline delta makes it adoptable on legacy code immediately
 **Is this a replacement for ESLint?**
 No. Keep ESLint for style and general correctness. node.doctor is a focused
 complement for Node runtime defects that are hard to express as generic lint
-diagnostics.
+rules.
 
 **Does it modify my code?**
 No. node.doctor is a detector, not a fixer. It reports findings and recommends
@@ -2338,12 +2239,12 @@ network call in a scan.
 **Why did it flag correct code / miss a real bug?**
 node.doctor tunes for precision, so it prefers to stay silent when unsure — that
 means some real bugs are missed (especially cross-file ones; see the roadmap). If
-it flagged something correct, that is a bug in the diagnostic; please report it with a
+it flagged something correct, that is a bug in the rule; please report it with a
 minimal reproduction. If it missed something, that is expected coverage growth.
 
 **Does it work with TypeScript?**
-Yes, structurally — it parses `.ts`/`.mts`/`.cts`. The current diagnostic set does not
-require type information. Type-*aware* diagnostics are on the roadmap.
+Yes, structurally — it parses `.ts`/`.mts`/`.cts`. The current ruleset does not
+require type information. Type-*aware* rules are on the roadmap.
 
 **Why a custom score instead of just a pass/fail?**
 The score gives a single, trackable health number and a fair way to compare a
@@ -2354,18 +2255,14 @@ that is what `--blocking` and exit codes are for.
 Yes, via the API's `only` option, and in CI via the `delta` subcommand, which
 reports only PR-introduced findings.
 
-**How do I turn off a diagnostic I disagree with?**
-Set it to `"off"` in `node-doctor.config.js`, disable its whole family with
-`--ignore-tag`, or suppress a specific site inline with a
-`// node-doctor-disable-next-line <diagnostic> -- <reason>` comment (the reason is
-mandatory).
+**How do I turn off a rule I disagree with?**
+Today, disable its whole family with `--ignore-tag`. Per-rule config and inline
+suppression land in v0.2.
 
-**How many diagnostics are there, and are they enough?**
-61 today (49 default-on, 12 opt-in), across Security, Reliability, Bugs,
-Performance, and Maintainability — each with a valid + invalid test, and none of
-them firing on the `good-app` canary. That is enough to catch a real class of
-high-severity defects on a real Express + Prisma codebase (the fixtures
-demonstrate it). Coverage grows; the engine makes each new diagnostic cheap to add.
+**Is 17 rules enough to be useful?**
+It is enough to catch a real class of high-severity bugs on a real Express +
+Prisma codebase (the fixtures demonstrate this), and it is honest about being
+early. Coverage grows; the engine that makes each new rule cheap is already built.
 
 ---
 

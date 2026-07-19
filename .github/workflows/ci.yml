@@ -1,0 +1,52 @@
+# CI for node.doctor itself.
+#
+# Development runs the TypeScript sources directly via Node's type-stripping,
+# which needs Node >= 22.6. The *published* package ships compiled ESM in dist/
+# and supports Node >= 20.19 — so we test on 22 and separately prove the built
+# artifact runs on 20.19.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Registry is up to date
+        run: npm run check:registry
+      - name: Tests
+        run: npm test
+      - name: good-app canary stays clean
+        run: node bin/node-doctor.js tests/fixtures/good-app --blocking warning
+
+  build-and-run:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: ["20.19", "22"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # build with 22 (tsc runs anywhere; keep it consistent)
+      - run: npm ci
+      - name: Build dist
+        run: npm run build
+      - name: Run the built CLI on the target Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Scan fixtures with the compiled dist
+        run: |
+          node bin/node-doctor.js tests/fixtures/good-app --blocking warning
+          node --version

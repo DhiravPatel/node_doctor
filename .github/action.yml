@@ -1,0 +1,59 @@
+name: "node.doctor"
+description: "Deterministic static analysis for Node.js backends, with PR baseline-delta (report only what the change introduced)."
+author: "node.doctor"
+branding:
+  icon: "activity"
+  color: "green"
+
+inputs:
+  directory:
+    description: "Directory to scan."
+    required: false
+    default: "."
+  blocking:
+    description: "Exit policy applied to INTRODUCED findings only: error | warning | none."
+    required: false
+    default: "error"
+  version:
+    description: "node-doctor version to run (npm dist-tag or exact version)."
+    required: false
+    default: "latest"
+  sarif-out:
+    description: "Optional path to write a SARIF 2.1.0 report for code scanning upload."
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Scan base branch (baseline, informational)
+      shell: bash
+      run: |
+        set -e
+        if [ -n "${{ github.base_ref }}" ]; then
+          git fetch origin "${{ github.base_ref }}" --depth=1 || true
+          git checkout --detach "origin/${{ github.base_ref }}" 2>/dev/null \
+            || git checkout --detach "${{ github.base_ref }}" || true
+          npx --yes node-doctor@${{ inputs.version }} "${{ inputs.directory }}" \
+            --json-out "$RUNNER_TEMP/baseline.json" --blocking none || true
+          git checkout --detach "${{ github.sha }}" || true
+        else
+          echo '{"schemaVersion":1,"diagnostics":[]}' > "$RUNNER_TEMP/baseline.json"
+        fi
+
+    - name: Scan head
+      shell: bash
+      run: |
+        set -e
+        ARGS=""
+        if [ -n "${{ inputs.sarif-out }}" ]; then ARGS="--sarif-out ${{ inputs.sarif-out }}"; fi
+        npx --yes node-doctor@${{ inputs.version }} "${{ inputs.directory }}" \
+          --json-out "$RUNNER_TEMP/current.json" --blocking none $ARGS
+
+    - name: Report introduced findings only
+      shell: bash
+      run: |
+        npx --yes node-doctor@${{ inputs.version }} delta \
+          --baseline "$RUNNER_TEMP/baseline.json" \
+          --current "$RUNNER_TEMP/current.json" \
+          --blocking "${{ inputs.blocking }}"
