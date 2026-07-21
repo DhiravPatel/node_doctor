@@ -27,12 +27,13 @@ describe("agent-fix prompt builder", () => {
   test("excludes the suppression-without-reason meta finding", () => {
     const report = {
       schemaVersion: 2,
+      provenance: { toolVersion: "0.0.0", rulesetHash: "t", configHash: "t", capabilities: [] },
       project: { name: "x", rootDirectory: "/x", capabilities: ["node"], analyzedFileCount: 1, totalLines: 10, complete: true, parseFailures: [] },
       diagnosticsRun: 1,
       diagnosticsAvailable: 1,
       findings: [
-        { id: "1", filePath: "/x/a.js", normalizedFilePath: "a.js", line: 1, column: 1, plugin: "node-doctor", diagnostic: "suppression-without-reason", title: "Suppression without a reason", category: "Maintainability" as const, severity: "warn" as const, message: "m", recommendation: "r", tags: [] },
-        { id: "2", filePath: "/x/a.js", normalizedFilePath: "a.js", line: 2, column: 1, plugin: "node-doctor", diagnostic: "no-sql-template-interpolation", title: "SQL built by string interpolation", category: "Security" as const, severity: "error" as const, message: "SQL injection", recommendation: "Use bound params", tags: [] },
+        { id: "1", filePath: "/x/a.js", normalizedFilePath: "a.js", line: 1, column: 1, plugin: "node-doctor", diagnostic: "suppression-without-reason", title: "Suppression without a reason", category: "Maintainability" as const, severity: "warn" as const, message: "m", recommendation: "r", tags: [], confidence: "high" as const },
+        { id: "2", filePath: "/x/a.js", normalizedFilePath: "a.js", line: 2, column: 1, plugin: "node-doctor", diagnostic: "no-sql-template-interpolation", title: "SQL built by string interpolation", category: "Security" as const, severity: "error" as const, message: "SQL injection", recommendation: "Use bound params", tags: [], confidence: "high" as const },
       ],
       score: { score: 40, label: "critical" as const, weighted: 6, perThousandLines: 600, byCategory: { Security: 1, Reliability: 0, Bugs: 0, Performance: 0, Maintainability: 1 } },
     };

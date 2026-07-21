@@ -11,6 +11,7 @@
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import { CATEGORY_WEIGHTS } from "../core/score.ts";
+import { computeDelta } from "../core/delta.ts";
 import type { ScanReport } from "../core/scan.ts";
 import type { Category, Finding } from "../core/types.ts";
 
@@ -46,6 +47,7 @@ const glyph = (sev: string): string => (sev === "error" ? "✖" : "⚠");
 
 interface Group {
   diagnostic: string;
+  confidence: Finding["confidence"];
   category: Category;
   severity: "error" | "warn";
   title: string;
@@ -62,6 +64,7 @@ const groupFindings = (findings: Finding[]): Group[] => {
     if (!g) {
       g = {
         diagnostic: f.diagnostic,
+        confidence: f.confidence,
         category: f.category,
         severity: f.severity,
         title: f.title,
@@ -106,7 +109,7 @@ export const buildAgentPrompt = (report: ScanReport, opts: { reportPath?: string
         .join("\n");
       const more = g.sites.length > MAX_SITES ? `\n   - +${g.sites.length - MAX_SITES} more sites` : "";
       return (
-        `${i + 1}. ${g.severity === "error" ? "ERROR" : "WARN"} ${g.category}: ${g.title} (${badge})  [node-doctor/${g.diagnostic}]\n` +
+        `${i + 1}. ${g.severity === "error" ? "ERROR" : "WARN"} ${g.category}: ${g.title} (${badge}, ${g.confidence} confidence)  [node-doctor/${g.diagnostic}]\n` +
         `   ${g.message}\n` +
         `   Fix: ${g.recommendation}\n${sites}${more}`
       );
@@ -131,6 +134,7 @@ ${list}${remainder}${reportLine}
 - Read each file and fix the **root cause** with the named mechanism in each "Fix:" line. Do **not** suppress or silence a diagnostic to make the scan pass — a false positive is a bug in node.doctor; tell me so I can report it, rather than silencing it.
 - For every request handler you touch, check the four questions: (1) where a post-\`await\` rejection goes, (2) whether anything blocks the event loop, (3) whether it fans out proportionally to caller input, (4) where caller-controlled data lands — shell → \`execFile\`, SQL → bound params, filesystem → a containment check, and no \`eval\`-family calls on input.
 - Findings that share a diagnostic and message are usually one root cause — fix it once.
+- **Confidence** tells you how to act: \`high\` is an unambiguous shape or a proven taint path — fix it. \`medium\` is a strong heuristic — read the code and confirm before changing it. \`low\` is a threshold/style judgement — only act if it genuinely improves the code.
 
 ## Verify — don't assume
 
@@ -155,6 +159,64 @@ export const copyToClipboard = (text: string): boolean => {
   } catch {
     return false;
   }
+};
+
+/** The machine-checked outcome of an agent's fix pass (§51). */
+export interface VerifyResult {
+  /** Findings present before the agent ran (excluding the suppression meta-finding). */
+  originalCount: number;
+  /** Pre-existing findings the agent actually cleared. */
+  resolvedCount: number;
+  /** Pre-existing findings still present. */
+  remaining: Finding[];
+  /** NEW findings the agent's own edits introduced — regressions. */
+  introduced: Finding[];
+  scoreBefore: number;
+  scoreAfter: number;
+  /** True only when everything was fixed and nothing was broken. */
+  passed: boolean;
+}
+
+const realFindings = (report: ScanReport): Finding[] =>
+  report.findings.filter((f) => f.diagnostic !== "suppression-without-reason");
+
+/**
+ * Compare a pre-fix report with a post-fix re-scan. Pure and deterministic, so
+ * the verdict is testable without launching an agent. Matching is evidence-based
+ * (via `computeDelta`), so code the agent *moved* is not miscounted as new.
+ */
+export const verifyFixes = (before: ScanReport, after: ScanReport): VerifyResult => {
+  const { introduced, resolved } = computeDelta(before, after);
+  const introducedKeys = new Set(introduced.map((f) => f.id));
+  const remaining = realFindings(after).filter((f) => !introducedKeys.has(f.id));
+  const realIntroduced = introduced.filter((f) => f.diagnostic !== "suppression-without-reason");
+  const realResolved = resolved.filter((f) => f.diagnostic !== "suppression-without-reason");
+  return {
+    originalCount: realFindings(before).length,
+    resolvedCount: realResolved.length,
+    remaining,
+    introduced: realIntroduced,
+    scoreBefore: before.score.score,
+    scoreAfter: after.score.score,
+    passed: realIntroduced.length === 0 && remaining.length === 0,
+  };
+};
+
+/** Human-readable verdict for the terminal. */
+export const renderVerifyResult = (v: VerifyResult): string => {
+  const lines = ["", "  Verification (re-scanned after the agent ran)"];
+  lines.push(`    ✓ ${v.resolvedCount} of ${v.originalCount} finding(s) resolved`);
+  if (v.remaining.length > 0) lines.push(`    ⚠ ${v.remaining.length} still present`);
+  if (v.introduced.length > 0) {
+    lines.push(`    ✖ ${v.introduced.length} NEW finding(s) introduced by the fix:`);
+    for (const f of v.introduced.slice(0, 5)) {
+      lines.push(`        ${f.normalizedFilePath}:${f.line} node-doctor/${f.diagnostic}`);
+    }
+  }
+  lines.push(`    score ${v.scoreBefore} → ${v.scoreAfter}`);
+  lines.push(v.passed ? "  → PASS" : "  → FAIL");
+  lines.push("");
+  return lines.join("\n");
 };
 
 export type FixAction =
@@ -203,6 +265,13 @@ export interface RunAgentFixOptions {
   chooseAction?: (agents: AgentDef[]) => Promise<FixAction>;
   /** Injected spawn (for tests) — returns the child exit code. */
   spawnAgent?: (bin: string, args: string[], cwd: string) => Promise<number>;
+  /**
+   * Re-scan after the agent finishes and machine-verify the fix (§51). Requires
+   * `rescan`. The exit code then reflects the verdict, not the agent's own code.
+   */
+  verify?: boolean;
+  /** Produce a fresh report for verification (injected so this stays testable). */
+  rescan?: () => Promise<ScanReport>;
   out?: (s: string) => void;
   err?: (s: string) => void;
 }
@@ -267,13 +336,28 @@ export const runAgentFix = async (report: ScanReport, opts: RunAgentFixOptions =
         `\n  → Handing ${findings.length} finding(s) to ${a.label}. ` +
           (opts.review ? "It will ask before each edit.\n\n" : "It runs in auto-accept mode and will fix them end-to-end, then re-scan to confirm.\n\n"),
       );
+      let agentExit: number;
       try {
-        return await (opts.spawnAgent ?? realSpawn)(a.bin, args, opts.cwd ?? process.cwd());
+        agentExit = await (opts.spawnAgent ?? realSpawn)(a.bin, args, opts.cwd ?? process.cwd());
       } catch {
         err(`\n  Couldn't launch ${a.bin}. Here's the prompt instead:\n\n`);
         out(prompt + "\n");
         return 0;
       }
+
+      // §51 — don't take the agent's word for it: re-scan and check.
+      if (opts.verify && opts.rescan) {
+        try {
+          const after = await opts.rescan();
+          const verdict = verifyFixes(report, after);
+          err(renderVerifyResult(verdict));
+          return verdict.passed ? 0 : 1;
+        } catch (e) {
+          err(`\n  Verification re-scan failed: ${e instanceof Error ? e.message : String(e)}\n`);
+          return agentExit;
+        }
+      }
+      return agentExit;
     }
   }
 };

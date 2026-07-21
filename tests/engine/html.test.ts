@@ -21,6 +21,7 @@ describe("HTML report", () => {
   test("escapes HTML in messages", () => {
     const report = {
       schemaVersion: 2,
+      provenance: { toolVersion: "0.0.0", rulesetHash: "t", configHash: "t", capabilities: [] },
       project: { name: "x", rootDirectory: "/x", capabilities: ["node"], analyzedFileCount: 1, totalLines: 10, complete: true, parseFailures: [] },
       diagnosticsRun: 1,
       diagnosticsAvailable: 1,
@@ -28,7 +29,7 @@ describe("HTML report", () => {
         {
           id: "1", filePath: "/x/a.js", normalizedFilePath: "a.js", line: 1, column: 1,
           plugin: "node-doctor", diagnostic: "r", title: "<script>", category: "Bugs" as const, severity: "error" as const,
-          message: "<img onerror=1>", recommendation: "fix & <it>", tags: [],
+          message: "<img onerror=1>", recommendation: "fix & <it>", tags: [], confidence: "high" as const,
         },
       ],
       score: { score: 0, label: "critical" as const, weighted: 0, perThousandLines: 0, byCategory: { Security: 0, Reliability: 0, Bugs: 1, Performance: 0, Maintainability: 0 } },

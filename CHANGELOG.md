@@ -71,6 +71,41 @@ Verified at zero false positives across 213 files of real TypeScript; the
 - **`rootDir`** config redirect, resolved against the config file's own location.
 - **Generated JSON Schema** (`npm run gen:schema`) for editor autocomplete/validation.
 
+### Agent loop: conventions, verification, patches & the ratchet
+
+- **`node-doctor conventions`** (§50) — writes AGENTS.md / CLAUDE.md / .cursorrules
+  derived from the project's **own** detected stack, so the agent writes correct code
+  the first time instead of being corrected afterward. Rule citations are
+  capability-gated: a Drizzle project is never told a Prisma-only diagnostic has its
+  back. Non-destructive; `--overwrite` to replace.
+- **`node-doctor fix --verify`** (§51) — re-scans after the agent finishes and gates on
+  the result instead of trusting its exit code. An agent that exits 0 having fixed
+  nothing now yields exit 1. Matching is evidence-based, so code the agent merely
+  moved is not counted as a regression.
+- **`--fix-diff`** (§54) — emits the safe autofixes as a unified diff instead of writing
+  them, so an agent can apply a patch rather than re-derive the edit. Verified against
+  `git apply`; paths are repo-relative so two checkouts produce identical patches.
+- **`node-doctor ratchet init|check`** (§87) — locks today's debt as an accepted
+  baseline and fails only on newly introduced findings. The accepted set may only
+  shrink and the score floor may only rise, so debt cannot grow back. Tightens
+  automatically when a scan is strictly better.
+
+### Agent loop: confidence, provenance & pre-write linting
+
+- **Per-finding confidence** (§54/§101) — every finding now carries `high` | `medium` | `low`,
+  derived on a principled rule (threshold/opt-in → low, warn → medium, error → high) and
+  overridable per diagnostic. An agent can auto-fix high-confidence findings and escalate the
+  rest; the agent hand-off prompt states the policy explicitly. Confidence is a property of the
+  **analysis**, not the config — downgrading a severity does not change it.
+- **Provenance record** (§104) — every report carries `toolVersion`, `rulesetHash`,
+  `configHash`, and the gating `capabilities`, so "why did this pass yesterday and fail today"
+  is answerable from the artifact alone. Identical inputs produce an identical record.
+- **`node_doctor_check_snippet`** MCP tool (§49) — lint a fragment **before** writing it to
+  disk. The cheapest feedback loop there is: the agent corrects the code instead of writing it
+  and re-scanning. Reports syntax errors honestly rather than claiming a broken snippet is clean.
+- **`node_doctor_scan_diff`** MCP tool (§49) — baseline delta as a tool call, using the
+  evidence-based matching so moved code is not reported as new.
+
 ### Programmatic API, plugins & install
 
 - **`diagnose()`** — the formal programmatic entry point. `diagnose(dir, opts)`

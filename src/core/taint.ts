@@ -48,10 +48,30 @@ const patternNames = (pattern: AstNode | null | undefined, out: string[]): void 
 export const computeTaint = (program: AstNode): Set<string> => {
   const tainted = new Set<string>();
 
+  /**
+   * A request-root *name* that the file declares as its own variable is not the
+   * request object — `const context = 3` in a diff utility means "lines of
+   * context". Seeding taint from it floods the whole function and produces
+   * false positives, so such names are never treated as a source. If the local
+   * really is caller-derived (`const ctx = req.context`), the propagation rule
+   * below still taints it, so nothing is lost.
+   */
+  const locallyDeclared = new Set<string>();
+  walk(program, {
+    enter: (node) => {
+      if (node.type !== "VariableDeclarator") return;
+      const names: string[] = [];
+      patternNames(node.id, names);
+      for (const name of names) if (REQUEST_ROOTS.has(name)) locallyDeclared.add(name);
+    },
+  });
+
+  const isCallerRoot = (name: string): boolean => REQUEST_ROOTS.has(name) && !locallyDeclared.has(name);
+
   const referencesCaller = (expr: AstNode | null | undefined): boolean => {
     if (!expr) return false;
     const isTaintedIdent = (n: AstNode): boolean =>
-      n.type === "Identifier" && (REQUEST_ROOTS.has(n.name) || tainted.has(n.name));
+      n.type === "Identifier" && (isCallerRoot(n.name) || tainted.has(n.name));
     if (isTaintedIdent(expr)) return true;
     return findDescendant(expr, isTaintedIdent, isFunctionLike) !== null;
   };

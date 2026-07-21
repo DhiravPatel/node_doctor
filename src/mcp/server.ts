@@ -17,10 +17,12 @@
 import { createInterface } from "node:readline";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { scanProject } from "../core/scan.ts";
+import { scanProject, lintSource } from "../core/scan.ts";
 import { toJson } from "../report/json.ts";
 import { DIAGNOSTICS, DIAGNOSTICS_BY_ID } from "../core/registry.ts";
 import { runDeslop } from "../deslop/index.ts";
+import { discoverProject, shouldEnableDiagnostic } from "../core/project.ts";
+import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
 
 const PROTOCOL_VERSION = "2024-11-05";
 
@@ -81,6 +83,40 @@ const TOOLS = [
       properties: { directory: { type: "string", description: "Directory to scan (default: cwd)." } },
     },
   },
+  {
+    name: "node_doctor_check_snippet",
+    description:
+      "Lint a code fragment BEFORE writing it to disk. Pass the code you are about to write and the path you intend to write it to; returns any node.doctor findings so you can correct the code first. Cheapest possible feedback loop — prefer this over writing then scanning.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        code: { type: "string", description: "The source text you are about to write." },
+        filePath: {
+          type: "string",
+          description: "Intended path (drives extension/context detection), e.g. src/routes/users.ts.",
+        },
+        directory: {
+          type: "string",
+          description: "Project directory used to detect frameworks/capabilities (default: cwd).",
+        },
+      },
+      required: ["code"],
+    },
+  },
+  {
+    name: "node_doctor_scan_diff",
+    description:
+      "Baseline delta: report only the findings introduced between a baseline report and the current state. Matching is evidence-based, so moving code or shifting lines does not count as new.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        directory: { type: "string", description: "Directory to scan as 'current' (default: cwd)." },
+        baselinePath: { type: "string", description: "Path to a previously written --json-out baseline report." },
+        blocking: { type: "string", enum: ["error", "warning", "none"], description: "Blocking policy for the delta." },
+      },
+      required: ["baselinePath"],
+    },
+  },
 ];
 
 interface ToolResult {
@@ -130,6 +166,72 @@ const callTool = async (name: string, args: Record<string, unknown>): Promise<To
         `# node-doctor/${diagnostic.id}\n${diagnostic.title}\n` +
           `Category: ${diagnostic.category} · Severity: ${diagnostic.severity}${gating ? ` · ${gating}` : ""}\n\n` +
           `Fix: ${diagnostic.recommendation}`,
+      );
+    }
+    case "node_doctor_check_snippet": {
+      const code = String(args.code ?? "");
+      if (code.trim().length === 0) return text("check_snippet: `code` is required.", true);
+      const filePath = String(args.filePath ?? "snippet.ts");
+      const dir = resolve(String(args.directory ?? "."));
+      // Detect the project's real capabilities so framework-gated diagnostics apply.
+      let capabilities: Set<string>;
+      try {
+        capabilities = (await discoverProject(dir)).capabilities;
+      } catch {
+        capabilities = new Set(["node"]);
+      }
+      const active = DIAGNOSTICS.filter(
+        (d) => (d.scope ?? "file") === "file" && shouldEnableDiagnostic(d, capabilities),
+      );
+      const { findings, parseFailed, errors } = lintSource({
+        filePath,
+        sourceText: code,
+        diagnostics: active,
+        capabilities,
+      });
+      if (parseFailed) {
+        return text(`check_snippet: the snippet did not parse — ${errors[0] ?? "syntax error"}. Fix the syntax first.`, true);
+      }
+      if (findings.length === 0) {
+        return text(`✓ No node.doctor findings in this snippet (${active.length} file-scope diagnostics active). Safe to write.`);
+      }
+      const body = findings
+        .map(
+          (f) =>
+            `${f.severity === "error" ? "✖" : "⚠"} [${f.confidence} confidence] node-doctor/${f.diagnostic} at line ${f.line}:${f.column}\n` +
+            `   ${f.message}\n   Fix: ${f.recommendation}`,
+        )
+        .join("\n\n");
+      return text(
+        `${findings.length} finding(s) in the snippet — correct these BEFORE writing the file:\n\n${body}`,
+        true,
+      );
+    }
+    case "node_doctor_scan_diff": {
+      const dir = resolve(String(args.directory ?? "."));
+      const baselinePath = resolve(String(args.baselinePath ?? ""));
+      let baseline: Parameters<typeof computeDelta>[0];
+      try {
+        baseline = JSON.parse(readFileSync(baselinePath, "utf8")) as Parameters<typeof computeDelta>[0];
+      } catch (err) {
+        return text(`scan_diff: cannot read baseline ${baselinePath} — ${err instanceof Error ? err.message : String(err)}`, true);
+      }
+      const current = await scanProject({ rootDirectory: dir });
+      const { introduced, resolved } = computeDelta(baseline, current);
+      const blocking = (args.blocking as string) ?? "error";
+      const isBlocking = deltaHasBlocking(introduced, blocking as "error" | "warning" | "none");
+      if (introduced.length === 0) {
+        return text(`✓ No findings introduced. ${resolved.length} resolved. Score ${current.score.score}/100.`);
+      }
+      const body = introduced
+        .map(
+          (f) =>
+            `${f.severity === "error" ? "✖" : "⚠"} [${f.confidence}] node-doctor/${f.diagnostic} ${f.normalizedFilePath}:${f.line}:${f.column}\n   ${f.message}\n   Fix: ${f.recommendation}`,
+        )
+        .join("\n\n");
+      return text(
+        `${introduced.length} finding(s) introduced (${resolved.length} resolved) · blocking=${isBlocking}\n\n${body}`,
+        isBlocking,
       );
     }
     case "node_doctor_deslop": {

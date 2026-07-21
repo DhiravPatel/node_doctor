@@ -4,6 +4,10 @@ The complete capability catalog for **node.doctor**: a deterministic static-anal
 
 This document is the **north-star feature catalog**. It describes the product in full. Because the scope is large, every domain carries a **maturity tier** so it is clear what exists today versus what is committed roadmap versus long-term platform ambition.
 
+The catalog spans **104 domains** across two halves: **Parts I–XV** (§1–§48) are the analysis and platform base; **Parts XVI–XXV** (§49–§104) extend it into agent-native workflow, deep semantic analysis, runtime correlation, compliance, API lifecycle, and governance.
+
+> **The moat vs. the breadth.** The genuine, defensible differentiator is **[Part XVI — Agent-Native & AI Coding Workflow](#part-xvi--agent-native--ai-coding-workflow)** sitting on top of a precision-first core — that is the thesis, and the thing competitors do not have. Most other domains are either table-stakes or things existing tools (SonarQube, Snyk, Clinic.js, Dependency-Cruiser) already do. The highest-leverage items are tagged **★ Differentiator**: build those first and treat the rest as a menu, not a mandate. A tool that does 104 things adequately loses to one that does 20 exceptionally.
+
 ---
 
 ## Maturity legend
@@ -13,6 +17,7 @@ This document is the **north-star feature catalog**. It describes the product in
 | **Core** | Implemented in the current engine. Where a domain is only partly built, the specific implemented checks are called out. |
 | **Planned** | Committed roadmap. Deterministic static analysis that fits the existing engine and the build plan; realistic to ship incrementally. |
 | **Vision** | Longer-term platform scope. Requires additional infrastructure (runtime instrumentation, hosted services, an AI layer, or enterprise back-end) beyond the static-analysis core. |
+| **★ Differentiator** | Not a tier — a marker on the domains where node.doctor is *unlike* the incumbents, rather than merely at parity. |
 
 **Design invariants that never change across tiers:** the analysis core is deterministic and offline (no code leaves the machine during a scan), the health score is computed locally from a published formula, precision is prioritized over recall (a false positive is a release blocker), and any AI layer is strictly optional and separated from the deterministic core so reproducibility is never compromised.
 
@@ -52,6 +57,19 @@ This document is the **north-star feature catalog**. It describes the product in
   - [45. Rule Engine](#45-rule-engine)
 - [Part XV — Teams, Enterprise & DX](#part-xv--teams-enterprise--dx)
   - [43. Team Features](#43-team-features) · [44. Enterprise Features](#44-enterprise-features) · [48. Developer Experience](#48-advanced-developer-experience)
+
+**Extended catalog (§49–§104)**
+
+- [Part XVI — Agent-Native & AI Coding Workflow](#part-xvi--agent-native--ai-coding-workflow) — §49–§55 ★
+- [Part XVII — Deep Semantic Analysis](#part-xvii--deep-semantic-analysis) — §56–§61
+- [Part XVIII — Runtime & Dynamic Analysis](#part-xviii--runtime--dynamic-analysis) — §62–§66
+- [Part XIX — Security & Compliance Depth](#part-xix--security--compliance-depth) — §67–§72
+- [Part XX — Data & Privacy](#part-xx--data--privacy) — §73–§76
+- [Part XXI — API Lifecycle](#part-xxi--api-lifecycle) — §77–§81
+- [Part XXII — Migration & Modernization](#part-xxii--migration--modernization) — §82–§86
+- [Part XXIII — Workflow, Governance & Collaboration](#part-xxiii--workflow-governance--collaboration) — §87–§93
+- [Part XXIV — Ecosystem & Runtime Breadth](#part-xxiv--ecosystem--runtime-breadth) — §94–§98
+- [Part XXV — Novel & Differentiating](#part-xxv--novel--differentiating) — §99–§104
 - [Scope philosophy](#scope-philosophy)
 
 ---
@@ -642,6 +660,384 @@ Multi-repository scanning, organization dashboard, policy enforcement, custom ru
 
 ---
 
+# Part XVI — Agent-Native & AI Coding Workflow
+
+*The core reason node.doctor exists is that agents write the code. These features make it the analyzer agents actually run and obey. This is the moat.*
+
+## 49. MCP Server ★ Differentiator
+**Status: Core** — the stdio MCP server ships (`node-doctor mcp`) exposing `node_doctor_scan`, `node_doctor_diagnostics`, `node_doctor_explain`, and `node_doctor_deslop`. `scan_diff` and `check_snippet` are **Planned**.
+
+node.doctor runs as a **Model Context Protocol server**, so any MCP-capable agent (Claude, Cursor, Windsurf, Cline, custom) can call it as a first-class tool mid-task.
+
+- Returns structured, token-efficient findings the model can act on directly.
+- Lets the agent *self-correct in the loop* rather than being told after the fact.
+- Read-only and capability-scoped; no shell/exec exposure.
+- **`check_snippet`** *(Planned)* — lint a code fragment **before** the agent writes it to disk (the highest-leverage remaining piece).
+- **`scan_diff`** *(Planned)* — baseline-delta as a tool call.
+
+## 50. Agent Skill & Rules Distribution ★ Differentiator
+**Status: Core** for client install + native hooks; **Planned** for the conventions generator.
+
+- **One-command install** of the skill into Claude Code, Cursor, Windsurf, Codex, Cline, and GitHub Copilot (extensible client→path map), defaulting to the clients actually detected on the machine. *(Core)*
+- **Two bundled skills** — the main `node-doctor` skill, and `improve-node`, a read-only audit-then-plan advisor. *(Core)*
+- **Native post-edit hooks** for Claude Code and Cursor, so a scan runs automatically as the agent edits. *(Core)*
+- Thin, locally-bundled skill — no runtime remote fetch (offline-first). *(Core)*
+- **Conventions generator** *(Planned)* — emit a `CLAUDE.md` / `.cursorrules` / `AGENTS.md` from the project's *own* patterns (detected frameworks, ORM, auth model, naming) so the agent writes correct code the first time, not corrected code afterward.
+- Aider and other clients *(Planned)*.
+
+## 51. Agent Fix Loop & Handoff ★ Differentiator
+**Status: Core** for prompt generation, session review, and batching; **Planned** for the enforced verification loop.
+
+Turns a scan into an executable remediation plan for an agent.
+
+- **Handoff prompt generation** (`node-doctor fix`) — one structured prompt with every finding, its exact location, and its concrete fix, ranked by severity and category weight and sized to a context window. *(Core)*
+- **Fix batching** — findings grouped by diagnostic and root cause so the agent edits efficiently rather than per-site. *(Core)*
+- **Session review** — `--diff` / `--staged` / `--scope lines` scan only what changed and hand back just the regressions introduced. *(Core)*
+- **Agent auto-launch** — detects installed agent CLIs and hands off directly. *(Core)*
+- **Verification loop** *(Planned)* — today the prompt *instructs* the agent to re-scan and confirm; making it an enforced, machine-checked pass/fail gate is the remaining work.
+
+## 52. Node Bench ★ Differentiator
+**Status: Vision**
+
+The Node equivalent of React Bench: a public benchmark measuring **which models write the best Node.js backend code**, scored by node.doctor on a fixed suite of realistic tasks (build an API, add auth, write a queue consumer). Drives adoption, gives the project a data moat, and creates a feedback loop that improves the ruleset.
+
+## 53. Real-Time In-Editor Guardrails
+**Status: Planned** (rides on the LSP — see §41)
+
+- As the agent (or human) writes, surface findings inline with zero config.
+- "Would-block-CI" indicator on the exact line before commit.
+- Debounced incremental analysis of the open buffer only.
+
+## 54. Machine-Optimized Output & Confidence ★ Differentiator
+**Status: Core** for token-efficient output; **Planned** for confidence and fix-as-diff.
+
+- **Token-efficient JSON** (`--json-compact`) with deterministic key order, tuned for LLM consumption. *(Core)*
+- **Per-finding confidence score** *(Planned)* — how certain the analyzer is, so an agent can auto-fix high-confidence findings and escalate low-confidence ones to a human.
+- **Fix-as-diff** *(Planned)* — emit the recommended change as a unified diff the agent can apply directly, where the fix is mechanical and safe.
+
+## 55. Learning & Feedback Loop
+**Status: Vision**
+
+- Track which findings get accepted vs. dismissed (with reasons) and feed that into rule tuning.
+- Per-repo suppression memory so the same false positive isn't re-surfaced.
+- Aggregate (opt-in, anonymized) signal to improve rule precision across the ecosystem.
+
+---
+
+# Part XVII — Deep Semantic Analysis
+
+*The real version of what the current heuristic engine gestures at — the analysis depth that separates a linter from a program analyzer.*
+
+## 56. Interprocedural Taint & Dataflow ★ Differentiator
+**Status: Planned** — the foundation (cross-file call graph + reachability from request handlers) is **Core**; sound source→sink taint across that graph is the remaining work.
+
+Full source→sink tracking **across files and function boundaries**: request input flowing through helpers, services, and utilities into an injection sink, a log, a response, or a client bundle. This is the sound version of today's intra-file taint, and it is what makes the security and privacy rules trustworthy rather than heuristic.
+
+## 57. Type-Aware Analysis
+**Status: Planned** (opt-in `--typed`, via a TypeScript type source)
+
+- **Floating-promise detection via types** (`Promise<T>` return, not just the `async` keyword).
+- Nullability / undefined-access analysis.
+- Exhaustiveness checks on unions and switch statements.
+- Type-driven DB-client and framework identification (removes receiver-name heuristics).
+
+## 58. Control-Flow & Reachability
+**Status: Planned**
+
+- Unreachable code and dead branches.
+- Always-true / always-false conditions.
+- Missing returns on some paths.
+- Guaranteed-throw paths and error propagation gaps.
+
+## 59. Cross-Request State Analysis ★ Differentiator
+**Status: Planned** — module-scope unbounded state detection is **Core**; the concurrency/race dimension is the remaining work.
+
+A signature Node footgun: module-scope mutable state (`let`/`var`, shared objects) that leaks or races **across concurrent requests**. Detects shared mutable state written on the request path — the cause of subtle data-bleed-between-users bugs that no per-file linter catches.
+
+## 60. CVE Reachability Analysis ★ Differentiator
+**Status: Planned**
+
+When a dependency has a known CVE, determine whether the **vulnerable function is actually called** from your code (directly or transitively). Collapses the "1,400 advisories, 3 that matter" noise problem that makes `npm audit` unusable, and prioritizes the reachable ones.
+
+## 61. Invariant & Contract Checking
+**Status: Vision**
+
+- User-declared pre/post-conditions on functions and route handlers.
+- Assertion-density and defensive-check analysis.
+- Idempotency-contract verification for handlers that must be idempotent.
+
+---
+
+# Part XVIII — Runtime & Dynamic Analysis
+
+*Bridging static findings with runtime truth — the Clinic.js layer that confirms and prioritizes what static analysis suspects. Every domain here needs instrumentation beyond the offline core, so all are Vision.*
+
+## 62. Runtime Profiling Correlation
+**Status: Vision**
+
+Optional integration that runs the app/tests under a profiler and **confirms static findings with real numbers**: prove the N+1 actually fires, measure event-loop lag from a suspected blocking call, quantify a hotspot. Static flags the suspects; runtime confirms the guilty.
+
+## 63. Production Telemetry Correlation ★ Differentiator
+**Status: Vision**
+
+Ingest OpenTelemetry traces / APM data and **map slow or error-prone spans back to the exact code**, then attach the relevant static finding and fix. Turns "this endpoint is slow in prod" into "this line is the N+1, here's the fix."
+
+## 64. Load-Test-Informed Prioritization
+**Status: Vision**
+
+Feed k6 / Artillery / autocannon results back in to rank findings by the endpoints that actually break under load, so remediation effort goes where traffic hurts.
+
+## 65. Memory-Snapshot Leak Confirmation
+**Status: Vision**
+
+Diff heap snapshots across a workload to confirm suspected leaks (the timer/listener/cache-growth findings) with evidence rather than heuristics.
+
+## 66. Traffic-Weighted Reachability
+**Status: Vision**
+
+Use production route-hit data to weight findings: a critical issue on a hot path outranks the same issue on a never-called admin route.
+
+---
+
+# Part XIX — Security & Compliance Depth
+
+## 67. SBOM Generation
+**Status: Planned**
+
+Emit a Software Bill of Materials in **CycloneDX** and **SPDX** formats for the full dependency tree — increasingly a procurement and compliance requirement.
+
+## 68. Advanced Secret Scanning
+**Status: Core** for provider-signature matching and committed-secret scanning; **Planned** for git-history scanning and pre-commit blocking.
+
+- **Known-provider signature matching** (Stripe, AWS, GitHub, Google, Slack, GitLab) plus entropy/shape heuristics with placeholder and env-reference guards. *(Core)*
+- **Whole-tree scan** of non-source files — `.env*`, `*.pem`/`*.key`, YAML/CI configs, Dockerfiles, `*.tfvars`, JSON — with per-bucket size caps. *(Core)*
+- **Committed-files-only gate** — leaked key material is only flagged in git-tracked files, so a gitignored local `.env` is never a false positive. *(Core)*
+- **Git-history scanning** *(Planned)* — secrets committed and later "removed" are still in history and must be rotated.
+- **Pre-commit secret blocking** *(Planned)* — the pre-commit hook ships and is advisory today; making secrets a hard block is the remaining step.
+
+## 69. Malicious & Risky Dependency Detection
+**Status: Planned → Vision**
+
+- Typosquatting / dependency-confusion detection.
+- Install-script and lifecycle-hook risk analysis.
+- Obfuscation / suspicious-behavior heuristics.
+- Newly-published / low-maturity package flags (release-age policy).
+
+## 70. Attack-Surface & Authorization Mapping ★ Differentiator
+**Status: Planned**
+
+- **Attack-surface map** — enumerate every externally reachable entry point (routes, webhooks, queue consumers, GraphQL fields) with its auth posture.
+- **Authorization matrix** — auto-generate a route → required-permission table and flag inconsistencies and gaps. Enormously useful for security review and impossible to maintain by hand.
+
+## 71. Compliance Packs
+**Status: Vision**
+
+Curated rule bundles mapped to **SOC 2, PCI-DSS, HIPAA, GDPR, ISO 27001** controls, with per-control pass/fail and evidence export for auditors.
+
+## 72. IaC & Cloud-Config Security
+**Status: Planned** (static config analysis)
+
+Extend infra analysis (Docker/K8s already cataloged in Part IX) with Terraform/Pulumi/CloudFormation static checks: public buckets, over-broad IAM, unencrypted resources, open security groups.
+
+---
+
+# Part XX — Data & Privacy
+
+## 73. PII / PHI Flow Tracking ★ Differentiator
+**Status: Vision** (built on interprocedural dataflow, §56)
+
+Track where personal/health data **enters** the system and where it **goes** — flag it reaching logs, third parties, client bundles, or unencrypted storage. A genuine gap in the market and a compliance goldmine.
+
+## 74. Data-Residency & Retention Checks
+**Status: Vision**
+
+- Cross-region data-movement flags.
+- Retention-policy presence on stored personal data.
+- Right-to-erasure implementation checks.
+
+## 75. Encryption Posture
+**Status: Core** for weak-cipher, weak password hashing, and disabled TLS verification; **Planned** for at-rest and key management.
+
+- **Encryption-in-transit** — disabled TLS verification (`rejectUnauthorized: false`) detection. *(Core)*
+- **Weak-cipher / weak-hash detection** — deprecated ciphers and MD5/SHA-1 for password storage. *(Core)*
+- **Encryption at rest** *(Planned)*.
+- **Key-management anti-patterns** *(Planned)*.
+
+## 76. Consent & Tracking Hygiene
+**Status: Vision**
+
+Flag analytics/tracking calls that fire before consent, and PII sent to analytics.
+
+---
+
+# Part XXI — API Lifecycle
+
+## 77. OpenAPI Generation From Code ★ Differentiator
+**Status: Planned**
+
+Generate an OpenAPI/Swagger spec **from the actual routes, DTOs, and validators** — the inverse of the "missing spec" detection in §22. Keeps docs honest because they're derived, not hand-written.
+
+## 78. API Breaking-Change Detection ★ Differentiator
+**Status: Planned**
+
+Diff the API surface between two revisions and flag **breaking changes** (removed endpoints, changed shapes, tightened validation) — semver for your API, enforceable in CI. High value, low competition, and it reuses the baseline-delta machinery that already ships.
+
+## 79. Contract Testing & Drift
+**Status: Vision**
+
+Detect drift between a declared spec and the implementation; optionally verify against consumer contracts (Pact-style).
+
+## 80. Client SDK Generation
+**Status: Vision**
+
+Emit typed client SDKs from the derived spec.
+
+## 81. GraphQL & RPC Lifecycle
+**Status: Planned**
+
+Schema linting, persisted-query enforcement, deprecation tracking, and resolver-cost limits for GraphQL; proto-compatibility checks for gRPC.
+
+---
+
+# Part XXII — Migration & Modernization
+
+## 82. Framework & Runtime Migration Assistants
+**Status: Vision** (deterministic codemods + agent-assisted)
+
+Guided, codemod-backed migrations: Express→Fastify, callback→async, CJS→ESM, JS→TS, legacy→modern ORM. Especially valuable for teams modernizing legacy backends.
+
+## 83. Node Version Upgrade Checker
+**Status: Planned**
+
+Flag APIs deprecated or removed across Node major versions, and surface new-version opportunities (native `fetch`, `AbortSignal.timeout`, the built-in test runner). The version-gating machinery this needs is already **Core** (§1).
+
+## 84. Dependency Major-Upgrade Codemods
+**Status: Vision**
+
+Apply known migration codemods for major-version bumps of common libraries.
+
+## 85. Modernization Score
+**Status: Planned**
+
+A dedicated score for "how far from current best practices" (deprecated APIs, legacy patterns, outdated deps), tracked over time to show modernization progress.
+
+## 86. Golden-Path Scaffolding
+**Status: Vision**
+
+Generate new routes/services/consumers from templates that are **pre-verified clean** by node.doctor's own diagnostics — correct-by-construction scaffolding.
+
+---
+
+# Part XXIII — Workflow, Governance & Collaboration
+
+## 87. Baseline / Ratchet & Quality Gates
+**Status: Core** for baseline delta and CI gating; **Planned** for the ratchet.
+
+- **Baseline delta** — scan base and head, report only what the change *introduced*. *(Core)*
+- **Evidence-based identity** — findings are matched on the diagnostic + message + the code that triggered them, so moving a function or shifting lines does **not** resurface it as "new". *(Core)*
+- **Blocking levels** — `error` / `warning` / `none` exit policy for CI. *(Core)*
+- **Ratchet** *(Planned)* — lock current debt as a committed baseline and let the threshold only improve, preventing backsliding without demanding a big-bang cleanup.
+
+## 88. Triage Workflow
+**Status: Vision** (persisted state)
+
+Accept / dismiss / snooze findings with a required reason, persisted across scans, with an audit trail — so the same debate isn't re-litigated every run.
+
+## 89. Ownership-Aware Routing
+**Status: Planned**
+
+Use CODEOWNERS / directory ownership to route each finding to the responsible team and scope PR comments accordingly.
+
+## 90. PR Risk Scoring & Effort Estimates
+**Status: Planned** — PR summary comments and inline review comments already ship (§42); the scoring layer is the remaining work.
+
+- A **risk score** per pull request (how dangerous is this change), from touched surface + finding severity.
+- Time-to-fix estimates per finding to help planning.
+
+## 91. Notifications & Ticketing
+**Status: Vision**
+
+Slack / Teams / Discord notifications; one-click issue creation in Jira / Linear / GitHub Issues from a finding.
+
+## 92. Rule-Effectiveness Analytics & Auto-Tuning
+**Status: Vision**
+
+Dashboards on which diagnostics fire, which get dismissed, and false-positive rates — feeding automatic severity/enablement tuning per team.
+
+## 93. Policy-as-Code Governance
+**Status: Vision** (enterprise)
+
+Org-level policies (required diagnostics, minimum score, blocked licenses) enforced across all repos, versioned and reviewable.
+
+---
+
+# Part XXIV — Ecosystem & Runtime Breadth
+
+## 94. Bun & Deno First-Class Support
+**Status: Planned** — package-manager detection (including Bun) is **Core**; runtime-specific diagnostics are not.
+
+Runtime-specific detection and rules for Bun (`Bun.serve`, `bun:sqlite`) and Deno (permissions, `Deno.serve`, std imports), not just Node.
+
+## 95. Edge Runtime Analysis
+**Status: Planned**
+
+Cloudflare Workers / Vercel Edge / Deno Deploy constraints: no Node built-ins, size limits, no long-lived state, streaming requirements.
+
+## 96. Cross-Package Monorepo Analysis ★ Differentiator
+**Status: Core** for workspace discovery and per-project scoring; **Planned** for analysis *across* package boundaries.
+
+- **Workspace discovery** (npm/yarn/bun `workspaces`, `pnpm-workspace.yaml`), per-project scoring, worst-of aggregation, `--project` selection, and additive root→member config merge. *(Core)*
+- **Cross-package graph** *(Planned)* — the import graph is per-project today; extending it across packages unlocks: a handler in `apps/api` calling a helper in `packages/db` that blocks the event loop, internal-package boundary and layering violations, and unused internal exports across packages.
+
+## 97. WASM & Native Boundary Checks
+**Status: Vision**
+
+Flag risky patterns at WASM/native-addon boundaries (blocking calls, memory handling).
+
+## 98. Air-Gapped & Self-Hosted Deployment
+**Status: Core** for offline operation; **Vision** for the self-hosted mirror.
+
+- **Fully offline** — the analysis core makes **no network calls** and sends no telemetry; it already runs air-gapped today. *(Core)*
+- **Self-hosted advisory/SBOM mirror** *(Vision)* — required once the optional advisory/supply-chain integrations (§19, §67, §69) exist, for regulated environments.
+
+---
+
+# Part XXV — Novel & Differentiating
+
+## 99. Codebase Q&A Over the Analysis Graph ★ Differentiator
+**Status: Vision**
+
+Natural-language questions answered from the built graph + findings: "which endpoints touch the payments table without auth?", "where does user email flow?", "what's our slowest handler and why?". The analysis graph becomes a queryable knowledge base — a capability no linter has.
+
+## 100. Auto-Generated Regression Tests
+**Status: Vision**
+
+For each fixed finding, generate a test that fails on the anti-pattern and passes on the fix, so the class of bug can't silently return.
+
+## 101. Confidence & Explainability Everywhere
+**Status: Core** for explainability; **Planned** for confidence.
+
+- **Plain-language explanation** — every finding ships a concrete message, a named-mechanism fix, and `node-doctor explain <id> | <file>:<line>` for the "why here". Source code frames and a prefilled false-positive issue URL are included. *(Core)*
+- **Confidence level per finding** *(Planned)* — powering agent auto-fix decisions (see §54) and human trust.
+
+## 102. Ecosystem Percentile Benchmarking
+**Status: Vision**
+
+Show how a codebase's health score ranks against anonymized ecosystem percentiles ("healthier than 78% of scanned Node services"), and track the trend.
+
+## 103. Fix Impact Simulation
+**Status: Vision**
+
+Estimate the payoff of fixing a finding (latency saved, attack surface closed, memory reclaimed) so teams fix what matters most first.
+
+## 104. Deterministic Replay & Provenance
+**Status: Core** for determinism; **Planned** for the provenance record.
+
+- **Byte-identical, reproducible scans** — stable finding ids, deterministic sort order, and a content-hash cache probe keyed on the diagnostic set + config + capabilities. *(Core)*
+- **Provenance record** *(Planned)* — stamp each report with tool version + rule-set hash + config hash so "why did this pass yesterday and fail today" is answerable from the artifact alone. Critical for CI trust and audits.
+
+---
+
 ## Scope philosophy
 
 Built to its fullest, node.doctor would combine, in one Node-focused platform: a curated linter (ESLint), a code-quality gate (SonarQube), dependency and supply-chain security (Snyk / npm audit), dead-code and dependency-graph analysis (Dependency Cruiser / Madge), runtime performance insight (Clinic.js), API-contract validation (OpenAPI validators), an architecture linter, and an AI-assisted reviewer — spanning not just code quality, but backend architecture, APIs, security, performance, infrastructure, and operations.
@@ -650,7 +1046,13 @@ That is the destination. The path there is deliberately staged:
 
 1. **Win the core first.** A fast, deterministic, offline analyzer with a curated, precision-first ruleset, a local health score, an agent skill, and CI baseline-delta. This is where the product earns trust — and where a false positive, not a missing feature, is the real risk.
 2. **Deepen with the import graph.** Cross-file reachability unlocks the architecture, dead-code, dependency, and request-path-through-helpers analyses that a per-file linter cannot do.
-3. **Extend into infrastructure and operations** via static config analysis (Docker, K8s, CI, serverless configs).
-4. **Layer intelligence and platform** last — the AI assist, dashboards, trends, and team/enterprise surfaces — on top of a core that is already reliable, reproducible, and offline.
+3. **Own the agent loop** ([Part XVI](#part-xvi--agent-native--ai-coding-workflow)). The MCP server, skill distribution, and fix handoff are what make node.doctor the analyzer agents *run and obey* — the one thing the incumbents don't have.
+4. **Earn the depth the agent loop depends on** ([Part XVII](#part-xvii--deep-semantic-analysis)) — especially §56 interprocedural taint and §59 cross-request state. An agent acting on a heuristic finding is worse than no finding; trust is the prerequisite for automation.
+5. **Extend into infrastructure and operations** via static config analysis (Docker, K8s, CI, serverless, IaC).
+6. **Layer intelligence and platform** last — runtime correlation, AI assist, dashboards, trends, and team/enterprise surfaces — on top of a core that is already reliable, reproducible, and offline.
+
+**The trap to avoid.** Every domain here is real and valuable, but a tool that does 104 things adequately loses to one that does 20 exceptionally. Precision and the agent loop are the product; the **★ Differentiator** items are where node.doctor is *unlike* everything else, and the rest is where it merely *matches* the incumbents. Treat this as a roadmap you pull from, not a checklist you must clear.
+
+**Consistency across the catalog.** Nothing in the extended domains weakens the invariants — the deterministic offline core, the locally computed score, precision-first, and AI-as-optional-layer hold across all 104.
 
 Everything in this catalog is real intent. The maturity tiers keep it honest about sequence, so the product is credible at every step rather than impressive only on paper.

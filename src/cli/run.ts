@@ -41,6 +41,9 @@ import { rememberClients } from "../install/prefs.ts";
 import { runDeslop } from "../deslop/index.ts";
 import { renderDeslop } from "../report/deslop.ts";
 import { fixSource, FIXABLE_DIAGNOSTICS } from "../fix/index.ts";
+import { fixDiffForFile } from "../fix/diff.ts";
+import { writeConventions, CONVENTION_TARGETS } from "../core/conventions.ts";
+import { RATCHET_FILENAME, buildRatchet, compareToRatchet, readRatchet, writeRatchet } from "../core/ratchet.ts";
 import { runAgentFix } from "../agent/fix.ts";
 import { lintSource } from "../core/scan.ts";
 import { shouldEnableDiagnostic, discoverProject } from "../core/project.ts";
@@ -266,6 +269,8 @@ Usage:
   node-doctor install --agent-hooks      Install post-edit hooks (Claude Code / Cursor)
   node-doctor install --package-script   Add a "doctor" script to package.json
   node-doctor ci                         Scaffold a GitHub Actions workflow
+  node-doctor conventions [dir]          Write CLAUDE.md/AGENTS.md from the detected stack
+  node-doctor ratchet init|check         Lock current debt; fail only on new findings
   node-doctor deslop [directory]         Dead-code scan (unused files/exports/deps)
   node-doctor explain <diagnostic-id>          Explain a diagnostic and its fix
   node-doctor explain <file>:<line>      Why a diagnostic fired at a location
@@ -283,6 +288,7 @@ Options:
   --annotations          Emit GitHub Actions annotation lines
   --score                Print only the health score (quiet, for badges/CI)
   --fix                  Apply safe autofixes (e.g. node: protocol imports)
+  --fix-diff             Print those autofixes as a unified diff instead of writing
   --dead-code            Also run the dead-code scan and fold it into the report
   --cache                Reuse unchanged files between runs (content-hash cache)
   --watch                Re-scan on file changes (implies --cache)
@@ -296,6 +302,7 @@ Options:
   --agent <name>         (fix) claude · codex · cursor
   --print                (fix) print the agent prompt instead of launching
   --review               (fix) agent asks before each edit (no bypass-approvals)
+  --verify               (fix) re-scan after the agent and gate on the result
   --verbose, -v          Show every diagnostic and every site
   --blocking <level>     Exit policy: error (default), warning, none
   --category <name>      Show only a category (repeatable; display-only)
@@ -412,18 +419,38 @@ const runDiagnostics = async (args: ParsedArgs): Promise<number> => {
 const SOURCE_GLOB = "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}";
 
 /** Apply safe autofixes to the source tree; returns files changed + edits made. */
-const applyFixes = async (dir: string, only?: string[]): Promise<{ files: number; edits: number }> => {
+/**
+ * Apply the safe autofixes. In `diff` mode nothing is written — the change is
+ * emitted as a unified diff instead (§54), so an agent can apply a patch rather
+ * than re-derive the edit from prose, and a human can review before committing.
+ */
+const applyFixes = async (
+  dir: string,
+  only?: string[],
+  mode: "write" | "diff" = "write",
+): Promise<{ files: number; edits: number; diff: string }> => {
   const fg = (await import("fast-glob")).default;
   const targets =
     only ?? (await fg([SOURCE_GLOB], { cwd: dir, ignore: [...BUILTIN_IGNORES], absolute: true, suppressErrors: true }));
   let files = 0;
   let edits = 0;
-  for (const f of targets) {
+  const patches: string[] = [];
+  // Sorted so the emitted patch is deterministic across runs and machines.
+  for (const f of targets.slice().sort()) {
     if (!SOURCE_EXT.test(f)) continue;
     let src: string;
     try {
       src = await readFile(f, "utf8");
     } catch {
+      continue;
+    }
+    if (mode === "diff") {
+      const { diff, applied } = fixDiffForFile(f, src, new Set(FIXABLE_DIAGNOSTICS), { rootDirectory: dir });
+      if (applied > 0 && diff) {
+        patches.push(diff);
+        files += 1;
+        edits += applied;
+      }
       continue;
     }
     const { fixed, applied } = fixSource(f, src, new Set(FIXABLE_DIAGNOSTICS));
@@ -433,7 +460,7 @@ const applyFixes = async (dir: string, only?: string[]): Promise<{ files: number
       edits += applied;
     }
   }
-  return { files, edits };
+  return { files, edits, diff: patches.join("") };
 };
 
 const runWorkspaceScan = async (
@@ -499,6 +526,17 @@ const runScan = async (args: ParsedArgs, version: string): Promise<number> => {
     return await runWorkspaceScan(args, version, dir, config);
   }
 
+  if (args.fixDiff) {
+    // Patch mode: emit the diff on stdout and stop — never write, never scan.
+    const { files, edits, diff } = await applyFixes(dir, only, "diff");
+    if (diff) process.stdout.write(diff);
+    process.stderr.write(
+      edits > 0
+        ? `node-doctor --fix-diff: ${edits} safe edit(s) across ${files} file(s) — apply with \`git apply\`.\n`
+        : "node-doctor --fix-diff: nothing mechanically fixable.\n",
+    );
+    return 0;
+  }
   if (args.fix) {
     const { files, edits } = await applyFixes(dir, only);
     process.stderr.write(`node-doctor --fix: applied ${edits} safe edit(s) across ${files} file(s).\n`);
@@ -873,18 +911,108 @@ const runInit = async (args: ParsedArgs): Promise<number> => {
   return 0;
 };
 
-const runFix = async (args: ParsedArgs, version: string): Promise<number> => {
+/** §50 — write a conventions file derived from the project's own detected stack. */
+const runConventions = async (args: ParsedArgs): Promise<number> => {
   const dir = resolve(args.positionals[0] ?? ".");
-  const only = await resolveOnly(args, dir);
+  const targets = args.projectFilter.length > 0 ? args.projectFilter : undefined;
+  const { written, skipped } = await writeConventions({
+    rootDirectory: dir,
+    targets,
+    overwrite: args.overwrite,
+  });
+  for (const w of written) process.stdout.write(`  ✓ wrote ${w}\n`);
+  for (const s of skipped) process.stdout.write(`  · exists, left alone: ${s}  (--overwrite to replace)\n`);
+  if (written.length === 0 && skipped.length === 0) {
+    process.stderr.write(
+      `node-doctor conventions: no target matched. Known: ${CONVENTION_TARGETS.map((t) => t.id).join(", ")}\n`,
+    );
+    return 2;
+  }
+  return 0;
+};
+
+/** §87 — baseline ratchet: lock today's debt, fail only on new, tighten on improvement. */
+const runRatchet = async (args: ParsedArgs, version: string): Promise<number> => {
+  const sub = args.positionals[0] ?? "check";
+  if (sub !== "init" && sub !== "check") {
+    process.stderr.write(`node-doctor ratchet: unknown subcommand "${sub}". Use: init | check\n`);
+    return 2;
+  }
+  const { dir, config } = await resolveScanTarget({ ...args, positionals: args.positionals.slice(1) });
+  const ratchetPath = join(dir, RATCHET_FILENAME);
   const report = await scanProject({
     rootDirectory: dir,
+    config,
     ignoredTags: new Set(args.ignoreTags),
-    only,
     cache: args.cache,
     parallel: args.parallel,
     secrets: args.secrets,
-    configPath: args.config ? resolve(args.config) : undefined,
   });
+
+  if (sub === "init") {
+    const ratchet = buildRatchet(report);
+    await writeRatchet(ratchetPath, ratchet);
+    process.stdout.write(
+      `  ✓ ratchet set at ${report.score.score}/100 with ${ratchet.accepted.length} accepted finding(s)\n` +
+        `    ${ratchetPath}\n` +
+        `    New findings will now fail; the accepted set can only shrink.\n`,
+    );
+    return 0;
+  }
+
+  const ratchet = await readRatchet(ratchetPath);
+  if (!ratchet) {
+    process.stderr.write(
+      `node-doctor ratchet: no ratchet at ${ratchetPath}. Run \`node-doctor ratchet init\` first.\n`,
+    );
+    return 2;
+  }
+  const cmp = compareToRatchet(report, ratchet);
+
+  if (args.json) {
+    process.stdout.write(
+      (args.jsonCompact ? JSON.stringify(cmp) : JSON.stringify(cmp, null, 2)) + "\n",
+    );
+  } else {
+    const p = useColor(args);
+    process.stdout.write(
+      `\n  Ratchet: ${cmp.passed ? "PASS" : "FAIL"}  ·  score ${ratchet.score} → ${report.score.score} (${cmp.scoreDelta >= 0 ? "+" : ""}${cmp.scoreDelta})\n`,
+    );
+    if (cmp.resolved > 0) process.stdout.write(`  ✓ ${cmp.resolved} accepted finding(s) resolved\n`);
+    if (cmp.introduced.length > 0) {
+      process.stdout.write(`  ✖ ${cmp.introduced.length} NEW finding(s) beyond the accepted baseline:\n`);
+      process.stdout.write(
+        renderReport({ ...report, findings: cmp.introduced }, { verbose: args.verbose, color: p, version }) + "\n",
+      );
+    } else if (!cmp.passed) {
+      // The score-only regression case — say so, or the FAIL looks unexplained.
+      process.stdout.write(
+        `  ✖ No new findings, but the score fell below the ratchet floor (${ratchet.score}).\n`,
+      );
+    }
+    process.stdout.write("\n");
+  }
+
+  if (cmp.tightened) {
+    await writeRatchet(ratchetPath, cmp.tightened);
+    process.stderr.write(`  ↓ ratchet tightened to ${cmp.tightened.score}/100 (${cmp.tightened.accepted.length} accepted)\n`);
+  }
+  return cmp.passed ? 0 : 1;
+};
+
+const runFix = async (args: ParsedArgs, version: string): Promise<number> => {
+  const dir = resolve(args.positionals[0] ?? ".");
+  const only = await resolveOnly(args, dir);
+  // The exact scan the verification pass must repeat, so before/after are comparable.
+  const scanOptions = {
+    rootDirectory: dir,
+    ignoredTags: new Set(args.ignoreTags),
+    only,
+    parallel: args.parallel,
+    secrets: args.secrets,
+    configPath: args.config ? resolve(args.config) : undefined,
+  };
+  const report = await scanProject({ ...scanOptions, cache: args.cache });
 
   // Show the findings first (unless we're only emitting the prompt for piping).
   if (!args.print) {
@@ -907,6 +1035,9 @@ const runFix = async (args: ParsedArgs, version: string): Promise<number> => {
     review: args.review,
     cwd: dir,
     reportPath,
+    verify: args.verify,
+    // Re-scan with the cache OFF so the verification sees the agent's edits.
+    rescan: () => scanProject({ ...scanOptions, cache: false }),
   });
 };
 
@@ -953,6 +1084,10 @@ export const main = async (argv: string[]): Promise<number> => {
       case "mcp":
         await startMcpServer();
         return 0;
+      case "conventions":
+        return await runConventions(args);
+      case "ratchet":
+        return await runRatchet(args, version);
       case "ci":
         return await runCi(args);
       case "fix":

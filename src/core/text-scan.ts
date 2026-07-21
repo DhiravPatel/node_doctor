@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fg from "fast-glob";
-import { PLUGIN, type Category, type Severity, type Finding } from "./types.ts";
+import { PLUGIN, confidenceOf, type Category, type Severity, type Finding, type Confidence } from "./types.ts";
 import { BUILTIN_IGNORES, effectiveSetting, settingsForFile, globToRegExp, type NodeDoctorConfig } from "./config.ts";
 
 const execFileAsync = promisify(execFile);
@@ -40,6 +40,8 @@ export interface TextDiagnostic {
   disabledWhen?: string[];
   /** false → opt-in only. Default true. */
   defaultEnabled?: boolean;
+  /** How certain this diagnostic is (see `confidenceOf` for the default). */
+  confidence?: Confidence;
   recommendation: string;
   /** Glob patterns (relative to root) selecting candidate files. */
   files: string[];
@@ -194,6 +196,7 @@ export const runTextScan = async (rootDirectory: string, options: RunTextScanOpt
             message,
             recommendation: recommendation ?? d.recommendation,
             tags: (d.tags ?? []).slice().sort(),
+            confidence: confidenceOf(d),
             evidenceKey: createHash("sha256").update(`${d.id} ${message} ${evidenceText}`).digest("hex").slice(0, 16),
           });
         },

@@ -152,13 +152,15 @@ node-doctor explain <id> | <file>:<line>        why a diagnostic fired (with a c
 node-doctor install [--client <name>]           install the agent skill
 node-doctor install --git-hook                  install an advisory pre-commit hook
 node-doctor ci                                  scaffold a GitHub Actions workflow
+node-doctor conventions [dir]                   write CLAUDE.md/AGENTS.md from your stack
+node-doctor ratchet init|check                  lock current debt; fail only on new findings
 node-doctor mcp                                 run as an MCP server
 node-doctor init                                scaffold a config
 node-doctor version                             version + platform + Node runtime
 
 Output   --json · --json-compact · --score · --json-out · --sarif-out · --html-out
          --md-out · --annotations · --color / --no-color
-Scan     --fix · --dead-code · --cache · --watch · --audit · --max-duration <sec>
+Scan     --fix · --fix-diff (emit autofixes as a patch) · --dead-code · --cache · --watch · --audit · --max-duration <sec>
          --no-parallel (analyze files serially; default is a concurrency pool)
 Scope    --only <glob> · --diff [base] · --staged · --scope <lines|files>
          --changed-files-from <f> · --include-untracked
@@ -166,7 +168,7 @@ Monorepo --project <name|path> (repeatable) · --no-workspaces
 Gate     --blocking <error|warning|none>
 Display  --category <c> (repeatable) · --no-warnings · --verbose
 Config   --config <path> · --ignore-tag <tag>
-Fix      --yes,-y · --agent <claude|codex|cursor> · --print · --review
+Fix      --yes,-y · --agent <claude|codex|cursor> · --print · --review · --verify
 ```
 
 Exit codes: `0` no blocking findings · `1` blocking findings · `2` tool error.
@@ -228,6 +230,13 @@ npx node-doctor@latest mcp             # …or run as an MCP server
 ```json
 { "mcpServers": { "node-doctor": { "command": "npx", "args": ["node-doctor", "mcp"] } } }
 ```
+
+Six MCP tools: `scan`, `scan_diff`, `diagnostics`, `explain`, `deslop`, and **`check_snippet`** —
+which lints a fragment *before* the agent writes it to disk, the cheapest feedback loop available.
+
+Every finding carries a **confidence** (`high`/`medium`/`low`) so an agent can auto-fix what is
+certain and escalate what is not, and every report carries a **provenance** record (tool version,
+ruleset hash, config hash) so a CI result is reproducible and explainable.
 
 ## Programmatic API
 

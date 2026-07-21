@@ -56,6 +56,7 @@ describe("issue url", () => {
     id: "x", filePath: "/x/a.js", normalizedFilePath: "a.js", line: 3, column: 5,
     plugin: "node-doctor", diagnostic: "no-eval-with-input", title: "eval", category: "Security",
     severity: "error", message: "bad", recommendation: "don't", tags: [],
+    confidence: "high",
   };
   test("buildIssueUrl encodes the finding; undefined without a repo", () => {
     const url = buildIssueUrl(finding, "git+https://github.com/o/r.git")!;
@@ -72,11 +73,12 @@ describe("issue url", () => {
 
 const oneFindingReport = (): ScanReport => ({
   schemaVersion: 2,
+  provenance: { toolVersion: "0.0.0", rulesetHash: "t", configHash: "t", capabilities: [] },
   project: { name: "x", rootDirectory: "/x", capabilities: ["node"], analyzedFileCount: 1, totalLines: 10, complete: true, parseFailures: [] },
   diagnosticsRun: 1,
   diagnosticsAvailable: 1,
   findings: [
-    { id: "x", filePath: "/x/a.js", normalizedFilePath: "a.js", line: 2, column: 3, plugin: "node-doctor", diagnostic: "no-eval-with-input", title: "eval", category: "Security", severity: "error", message: "m", recommendation: "r", tags: [] },
+    { id: "x", filePath: "/x/a.js", normalizedFilePath: "a.js", line: 2, column: 3, plugin: "node-doctor", diagnostic: "no-eval-with-input", title: "eval", category: "Security", severity: "error", message: "m", recommendation: "r", tags: [], confidence: "high" },
   ],
   score: { score: 40, label: "critical", weighted: 2, perThousandLines: 200, byCategory: { Security: 1, Reliability: 0, Bugs: 0, Performance: 0, Maintainability: 0 } },
 });

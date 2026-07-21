@@ -15,6 +15,8 @@ export type Command =
   | "mcp"
   | "fix"
   | "ci"
+  | "conventions"
+  | "ratchet"
   | "version";
 
 // "rules" is accepted as a legacy alias for "diagnostics".
@@ -31,6 +33,8 @@ const COMMANDS = new Set<string>([
   "mcp",
   "fix",
   "ci",
+  "conventions",
+  "ratchet",
   "version",
   "rules",
 ]);
@@ -70,6 +74,7 @@ export interface ParsedArgs {
   yes: boolean;
   print: boolean;
   review: boolean;
+  verify: boolean; // (fix) re-scan and machine-verify after the agent runs
   agent?: string;
   verbose: boolean;
   blocking: "error" | "warning" | "none";
@@ -114,6 +119,8 @@ export interface ParsedArgs {
   agentHooks: boolean; // `install --agent-hooks`
   packageScript: boolean; // `install --package-script`
   skill?: string; // `install --skill improve-node`
+  fixDiff: boolean; // emit safe autofixes as a unified diff instead of writing
+  overwrite: boolean; // (conventions) overwrite an existing file
   errors: string[];
 }
 
@@ -187,6 +194,7 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
     yes: false,
     print: false,
     review: false,
+    verify: false,
     verbose: false,
     blocking: "error",
     ignoreTags: [],
@@ -209,6 +217,8 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
     gitHook: false,
     agentHooks: false,
     packageScript: false,
+    fixDiff: false,
+    overwrite: false,
     errors: [],
   };
 
@@ -255,6 +265,10 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
     }
     if (token === "--review") {
       result.review = true;
+      continue;
+    }
+    if (token === "--verify") {
+      result.verify = true;
       continue;
     }
     if (token === "--verbose" || token === "-v") {
@@ -316,6 +330,14 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
     }
     if (token === "--package-script") {
       result.packageScript = true;
+      continue;
+    }
+    if (token === "--fix-diff") {
+      result.fixDiff = true;
+      continue;
+    }
+    if (token === "--overwrite") {
+      result.overwrite = true;
       continue;
     }
     if (token === "--workspaces") {

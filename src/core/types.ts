@@ -25,6 +25,18 @@ export type Severity = "error" | "warn";
 export type Scope = "file" | "project";
 
 /**
+ * How certain the analyzer is that a finding is a real defect — the signal an
+ * agent uses to decide between auto-fixing and escalating to a human (§54/§101).
+ *
+ * - `high`   — an unambiguous shape or a proven taint path. Safe to act on.
+ * - `medium` — a strong heuristic (receiver names, structural patterns). Review.
+ * - `low`    — a threshold/style judgement. Advisory only; never auto-fix.
+ */
+export type Confidence = "high" | "medium" | "low";
+
+export const CONFIDENCES: readonly Confidence[] = ["high", "medium", "low"];
+
+/**
  * The five categories in a fixed order used for deterministic grouping and as
  * the authoritative list for scoring.
  */
@@ -72,6 +84,8 @@ export interface Finding {
   recommendation: string;
   /** Sorted family tags. */
   tags: string[];
+  /** How certain the analyzer is — drives agent auto-fix vs. escalate (§54). */
+  confidence: Confidence;
   /** A corrective hint when a nearby disable comment almost matched (near-miss). */
   suppressionHint?: string;
   /**
@@ -144,11 +158,33 @@ export interface Diagnostic {
   tags?: string[];
   /** false → opt-in only. Default true. */
   defaultEnabled?: boolean;
+  /**
+   * How certain this diagnostic is when it fires. Omit to take the derived
+   * default (see `confidenceOf`): opt-in/threshold → low, warn → medium,
+   * error → high. Declare it explicitly to correct a weaker heuristic.
+   */
+  confidence?: Confidence;
   /** The fix, naming the mechanism. */
   recommendation: string;
   /** Build the visitor map for one file. */
   create(ctx: DiagnosticContext): Visitors;
 }
+
+/**
+ * The effective confidence for a diagnostic. The default is principled and
+ * explainable rather than hand-tuned per rule: a threshold/style judgement is
+ * advisory (`low`), a warning is a strong heuristic (`medium`), and an error
+ * fires only on an unambiguous shape or proven taint (`high`).
+ */
+export const confidenceOf = (d: {
+  confidence?: Confidence;
+  severity: Severity;
+  defaultEnabled?: boolean;
+}): Confidence => {
+  if (d.confidence) return d.confidence;
+  if (d.defaultEnabled === false) return "low";
+  return d.severity === "error" ? "high" : "medium";
+};
 
 /**
  * Identity function that validates a diagnostic's shape at module load. The returned

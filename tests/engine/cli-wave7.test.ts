@@ -13,6 +13,7 @@ import { renderDeltaMarkdown, renderReportMarkdown, SUMMARY_MARKER } from "../..
 import type { ScanReport } from "../../src/core/scan.ts";
 
 const finding = (over: Partial<Finding>): Finding => ({
+  confidence: "high" as const,
   id: `${over.normalizedFilePath ?? "a.ts"}::${over.line ?? 1}:1::node-doctor/${over.diagnostic ?? "d"}::x`,
   filePath: `/x/${over.normalizedFilePath ?? "a.ts"}`,
   normalizedFilePath: "a.ts",
@@ -171,6 +172,7 @@ describe("markdown reporters", () => {
   test("renderReportMarkdown: score header + findings", () => {
     const report = {
       schemaVersion: 2,
+      provenance: { toolVersion: "0.0.0", rulesetHash: "t", configHash: "t", capabilities: [] },
       project: { name: "svc", rootDirectory: "/x", capabilities: [], analyzedFileCount: 3, totalLines: 100, complete: true, parseFailures: [] },
       diagnosticsRun: 1,
       diagnosticsAvailable: 1,
