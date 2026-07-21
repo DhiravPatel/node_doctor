@@ -29,9 +29,11 @@ Express handler with no error path, a `readFileSync` on the request path, an N+1
 across a loop, a `Promise.all` that opens a socket per row, injection and
 secret-handling sinks.
 
-It runs **62 diagnostics**, produces a transparent **0–100 health score** entirely
-on your machine — no network, no telemetry — and can push the same knowledge
-**upstream into your coding agent** as an installable skill and an MCP tool.
+It runs **73 diagnostics** — including a whole-tree scan for **committed secrets**
+in `.env`, config, CI, and key files — produces a transparent **0–100 health
+score** entirely on your machine (no network, no telemetry), and can push the
+same knowledge **upstream into your coding agent** as an installable skill and an
+MCP tool.
 
 ## Quick start
 
@@ -70,8 +72,10 @@ Typical output on a codebase that needs help:
 
 ## Features
 
-- **62 diagnostics** across Security, Reliability, Bugs, Performance, and
+- **73 diagnostics** across Security, Reliability, Bugs, Performance, and
   Maintainability — each with a valid + invalid test; FP-prone ones are opt-in.
+- **Whole-tree secret scan** — committed credentials in `.env`, YAML/CI configs,
+  and `*.pem`/`*.key` files, gated to git-tracked files so a local `.env` is safe.
 - **Cross-file call graph** — flags a blocking sink in a helper reached from a
   handler *through other files*.
 - **CI baseline delta** — reports only the findings your PR introduced.
@@ -88,37 +92,115 @@ Typical output on a codebase that needs help:
 
 | Category | Focus | Score weight | Count |
 | --- | --- | --- | --- |
-| **Security** | Injection, secrets, auth | 2.0 | 24 |
+| **Security** | Injection, secrets, auth, deserialization, committed-secret scan | 2.0 | 31 |
 | **Reliability** | Crashes, hangs, lifecycle | 1.5 | 17 |
 | **Bugs** | Logic errors, wrong results | 1.5 | 7 |
 | **Performance** | Event-loop stalls, N+1 | 1.0 | 9 |
-| **Maintainability** | Structure, hygiene, dead code | 0.5 | 5 |
+| **Maintainability** | Structure, hygiene, dead code, complexity | 0.5 | 9 |
 
 Run `node-doctor diagnostics` for the full catalog with gating.
+
+## Fix with an AI agent
+
+Found the bugs — now hand them to the agent that can fix them. `node-doctor fix`
+scans, then offers to pass every finding straight to a coding agent (Claude Code,
+Codex, or Cursor) with a precise, root-cause-first instruction prompt:
+
+```bash
+npx node-doctor@latest fix .
+```
+
+```
+  38 findings · 21/100 critical
+
+  What would you like to do?
+    1) Fix with Claude Code  (claude)
+    c) Copy the prompt to your clipboard
+    p) Print the prompt
+    s) Skip
+  > 1
+
+  → Handing 38 finding(s) to Claude Code. It runs in auto-accept mode and will
+    fix them end-to-end, then re-scan to confirm.
+```
+
+The prompt groups findings by root cause, names the exact fix for each, and tells
+the agent to **fix the cause — never suppress** — then re-run node.doctor to
+verify. It only lists agents actually installed on your machine; on a
+non-interactive shell (or with `--print`) it prints the prompt instead of
+launching anything.
+
+```bash
+node-doctor fix .            # scan, then pick an agent from the menu
+node-doctor fix . --yes      # skip the menu, launch the first available agent
+node-doctor fix . --agent claude   # choose the agent explicitly
+node-doctor fix . --review   # agent asks before each edit (no auto-accept)
+node-doctor fix . --print    # just print the prompt for your own agent
+```
 
 ## Command-line
 
 ```
 node-doctor [directory] [options]
-node-doctor diagnostics                         list diagnostics and gating
+node-doctor fix [directory]                     scan, then hand findings to an AI agent
+node-doctor diagnostics [--json] [filters]      list diagnostics + effective severity/source
+node-doctor diagnostics set|enable|disable <id> <sev>   edit the config in place
+node-doctor diagnostics category <c> <sev> | ignore-tag <t>
 node-doctor delta --baseline <f> --current <f>  report only introduced findings
 node-doctor deslop [directory]                  dead-code scan
-node-doctor explain <id> | <file>:<line>        why a diagnostic fired
+node-doctor explain <id> | <file>:<line>        why a diagnostic fired (with a code frame)
 node-doctor install [--client <name>]           install the agent skill
+node-doctor install --git-hook                  install an advisory pre-commit hook
+node-doctor ci                                  scaffold a GitHub Actions workflow
 node-doctor mcp                                 run as an MCP server
 node-doctor init                                scaffold a config
+node-doctor version                             version + platform + Node runtime
 
-Options  --json · --json-out · --sarif-out · --html-out · --annotations
-         --fix · --cache · --watch · --blocking <error|warning|none>
-         --ignore-tag · --only · --diff · --staged · --config
+Output   --json · --json-compact · --score · --json-out · --sarif-out · --html-out
+         --md-out · --annotations · --color / --no-color
+Scan     --fix · --dead-code · --cache · --watch · --audit · --max-duration <sec>
+         --no-parallel (analyze files serially; default is a concurrency pool)
+Scope    --only <glob> · --diff [base] · --staged · --scope <lines|files>
+         --changed-files-from <f> · --include-untracked
+Monorepo --project <name|path> (repeatable) · --no-workspaces
+Gate     --blocking <error|warning|none>
+Display  --category <c> (repeatable) · --no-warnings · --verbose
+Config   --config <path> · --ignore-tag <tag>
+Fix      --yes,-y · --agent <claude|codex|cursor> · --print · --review
 ```
 
 Exit codes: `0` no blocking findings · `1` blocking findings · `2` tool error.
+
+**Config** lives in `node-doctor.config.json` (or `.jsonc`/`.js`, or a `nodeDoctor`
+key in `package.json`), resolved by walking up to the repo root. A generated
+[JSON Schema](./schema/node-doctor.config.schema.json) gives editors autocomplete.
+Per-path `overrides` re-severity or disable diagnostics for a glob; `rootDir`
+redirects the scan.
+
+**Monorepos** are detected automatically: point node.doctor at a workspace root
+(npm/yarn/bun `workspaces` or `pnpm-workspace.yaml`) and it scans every member
+package, scores each separately, and reports a worst-of health score. Each
+member's config layers over the root config. Use `--project <name|path>` to scan
+one, or `--no-workspaces` to treat the root as a single project.
 
 ## Continuous integration
 
 The **baseline delta** makes node.doctor adoptable on a legacy codebase from day
 one: scan the base branch, scan the head branch, and report only the difference.
+Matching is **evidence-based** (diagnostic + message + the triggering code), so
+moving a finding to a new line or file doesn't read as newly introduced — only a
+genuinely new defect fails the check.
+
+Scaffold the whole thing in one command:
+
+```bash
+npx node-doctor@latest ci        # writes .github/workflows/node-doctor.yml
+```
+
+The bundled [GitHub Action](./.github/action.yml) runs the baseline delta and, on
+a pull request, **upserts a summary comment**, posts **inline review comments** on
+the changed lines, and publishes a **commit status** with the health score. Or
+wire it by hand:
 
 ```yaml
 - run: |
@@ -129,15 +211,18 @@ one: scan the base branch, scan the head branch, and report only the difference.
     npx node-doctor@latest delta --baseline base.json --current head.json --blocking error
 ```
 
-A ready-to-use GitHub Action ships at [`.github/action.yml`](./.github/action.yml).
+For local enforcement, `node-doctor install --git-hook` writes an advisory
+pre-commit hook that scans staged files.
 
 ## Agent integration
 
 Push node.doctor's knowledge into the agent that writes the code:
 
 ```bash
-npx node-doctor@latest install   # writes a skill into Claude Code, Cursor, Windsurf, …
-npx node-doctor@latest mcp        # …or run as an MCP server
+npx node-doctor@latest install         # skill → detected clients (Claude Code, Cursor, …)
+npx node-doctor@latest install --skill improve-node   # a read-only audit-then-plan skill
+npx node-doctor@latest install --agent-hooks          # post-edit hooks (feedback as it edits)
+npx node-doctor@latest mcp             # …or run as an MCP server
 ```
 
 ```json
@@ -147,14 +232,20 @@ npx node-doctor@latest mcp        # …or run as an MCP server
 ## Programmatic API
 
 ```js
-import { scanProject } from "node-doctor";
+import { diagnose } from "node-doctor";
 
-const report = await scanProject({ rootDirectory: "./service" });
+const report = await diagnose("./service");                  // one project
 console.log(report.score.score, report.score.label, report.findings.length);
+
+const batch = await diagnose({ directories: ["a", "b"] });   // many, resilient
+console.log(batch.ok, batch.score.score);                    // worst-of aggregate
 ```
 
-Exports include `scanProject`, `lintSource`, `computeDelta`, `calculateScore`,
-`renderReport`, `runDeslop`, `DIAGNOSTICS`, and `DIAGNOSTICS_BY_ID`.
+Exports include `diagnose`, `scanProject`, `scanWorkspaces`, `lintSource`,
+`computeDelta`, `calculateScore`, `renderReport`/`renderReportMarkdown`,
+`runDeslop`, `runTextScan`, `DIAGNOSTICS`, and `DIAGNOSTICS_BY_ID`. node.doctor
+also ships as an **ESLint plugin** (`node-doctor/eslint`) and an **oxlint plugin**
+(`node-doctor/oxlint`) — both re-run the same engine over file-scope diagnostics.
 
 ## Requirements
 

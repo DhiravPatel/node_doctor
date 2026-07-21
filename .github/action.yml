@@ -22,6 +22,18 @@ inputs:
     description: "Optional path to write a SARIF 2.1.0 report for code scanning upload."
     required: false
     default: ""
+  github-token:
+    description: "Token for PR comments, inline review, and commit status."
+    required: false
+    default: ${{ github.token }}
+  comment:
+    description: "Post/update a PR summary comment (and inline review). true | false."
+    required: false
+    default: "true"
+  commit-status:
+    description: "Publish a commit status with the health score. true | false."
+    required: false
+    default: "true"
 
 runs:
   using: "composite"
@@ -38,7 +50,7 @@ runs:
             --json-out "$RUNNER_TEMP/baseline.json" --blocking none || true
           git checkout --detach "${{ github.sha }}" || true
         else
-          echo '{"schemaVersion":1,"diagnostics":[]}' > "$RUNNER_TEMP/baseline.json"
+          echo '{"schemaVersion":2,"findings":[]}' > "$RUNNER_TEMP/baseline.json"
         fi
 
     - name: Scan head
@@ -50,7 +62,46 @@ runs:
         npx --yes node-doctor@${{ inputs.version }} "${{ inputs.directory }}" \
           --json-out "$RUNNER_TEMP/current.json" --blocking none $ARGS
 
-    - name: Report introduced findings only
+    - name: Compute delta (introduced vs baseline)
+      shell: bash
+      run: |
+        npx --yes node-doctor@${{ inputs.version }} delta \
+          --baseline "$RUNNER_TEMP/baseline.json" \
+          --current "$RUNNER_TEMP/current.json" \
+          --blocking none --json > "$RUNNER_TEMP/delta.json"
+
+    - name: PR summary comment
+      if: ${{ inputs.comment == 'true' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        node "${{ github.action_path }}/scripts/render-comment.mjs" \
+          "$RUNNER_TEMP/delta.json" "$RUNNER_TEMP/current.json" || true
+
+    - name: Inline PR review
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        node "${{ github.action_path }}/scripts/post-review.mjs" "$RUNNER_TEMP/delta.json" || true
+
+    - name: Commit status (health score)
+      if: ${{ inputs.commit-status == 'true' && always() }}
+      shell: bash
+      run: |
+        SCORE=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$RUNNER_TEMP/current.json','utf8')).score.score)" 2>/dev/null || echo "")
+        LABEL=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$RUNNER_TEMP/current.json','utf8')).score.label)" 2>/dev/null || echo "")
+        if [ -z "$SCORE" ]; then exit 0; fi
+        STATE=$(node -e "const d=JSON.parse(require('fs').readFileSync('$RUNNER_TEMP/delta.json','utf8'));const b='${{ inputs.blocking }}';const f=d.introduced||[];let bad=false;if(b==='warning')bad=f.length>0;else if(b!=='none')bad=f.some(x=>x.severity==='error');console.log(bad?'failure':'success')" 2>/dev/null || echo "success")
+        curl -sS -X POST \
+          -H "Authorization: Bearer ${{ inputs.github-token }}" \
+          -H "Accept: application/vnd.github+json" \
+          "${{ github.api_url }}/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+          -d "{\"state\":\"$STATE\",\"context\":\"node.doctor\",\"description\":\"Health $SCORE/100 ($LABEL)\"}" > /dev/null || true
+
+    - name: Gate on introduced findings
       shell: bash
       run: |
         npx --yes node-doctor@${{ inputs.version }} delta \

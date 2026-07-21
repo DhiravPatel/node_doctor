@@ -158,3 +158,33 @@ export const applySuppressions = <T extends FindingLike>(
     reasonMissing: [...reasonMissingSet.values()].sort((a, b) => a.line - b.line || a.column - b.column),
   };
 };
+
+/**
+ * For a finding that still fired, detect an *almost-right* nearby disable comment
+ * and return a corrective hint. Catches the two common mistakes: a disable that
+ * names the wrong diagnostic id, and a `disable-next-line` placed a few lines too
+ * high. Returns null when there's no near-miss.
+ */
+export const suppressionNearMiss = (diag: FindingLike, directives: Directive[]): string | null => {
+  const onTargetLine = (d: Directive): boolean =>
+    (d.kind === "next-line" && d.line + 1 === diag.line) || (d.kind === "line" && d.line === diag.line);
+
+  // Case A: a disable sits exactly where it should but names a different id.
+  for (const d of directives) {
+    if (!onTargetLine(d)) continue;
+    if (d.diagnostics && !d.diagnostics.has(diag.diagnostic)) {
+      const listed = [...d.diagnostics].map((x) => `\`${x}\``).join(", ");
+      return `a disable comment here targets ${listed}, not \`${diag.diagnostic}\` — did you mean \`node-doctor/${diag.diagnostic}\`?`;
+    }
+  }
+
+  // Case B: a disable-next-line for THIS diagnostic is a few lines too high.
+  for (const d of directives) {
+    if (d.kind !== "next-line" || !applies(d, diag.diagnostic)) continue;
+    const gap = diag.line - (d.line + 1);
+    if (gap >= 1 && gap <= 4) {
+      return `a \`disable-next-line\` for this diagnostic is ${gap} line(s) too high — move it directly above line ${diag.line}.`;
+    }
+  }
+  return null;
+};

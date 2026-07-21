@@ -35,6 +35,10 @@
       "types": "./dist/adapters/eslint.d.ts",
       "import": "./dist/adapters/eslint.js"
     },
+    "./oxlint": {
+      "types": "./dist/adapters/oxlint.d.ts",
+      "import": "./dist/adapters/oxlint.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -53,6 +57,8 @@
     "test:coverage": "node --test --experimental-test-coverage",
     "gen:registry": "node scripts/gen-registry.ts",
     "check:registry": "node scripts/gen-registry.ts --check",
+    "gen:schema": "node scripts/gen-config-schema.ts",
+    "check:schema": "node scripts/gen-config-schema.ts --check",
     "scan": "node src/cli/run.ts",
     "bench": "node bench/corpus.ts",
     "prepack": "npm run build",

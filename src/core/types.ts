@@ -72,6 +72,14 @@ export interface Finding {
   recommendation: string;
   /** Sorted family tags. */
   tags: string[];
+  /** A corrective hint when a nearby disable comment almost matched (near-miss). */
+  suppressionHint?: string;
+  /**
+   * Position-independent identity (diagnostic + message + triggering code),
+   * used by the baseline delta so a line shift or file move doesn't read as a
+   * new finding. The positional `id` remains the display/dedupe key.
+   */
+  evidenceKey?: string;
 }
 
 /** Per-finding sharpening a diagnostic may apply at report time. */

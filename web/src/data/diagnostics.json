@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 62,
-  "defaultOn": 50,
-  "optIn": 12,
+  "total": 70,
+  "defaultOn": 55,
+  "optIn": 15,
   "byCategory": {
-    "Security": 24,
+    "Security": 28,
+    "Maintainability": 9,
     "Reliability": 17,
     "Bugs": 7,
-    "Performance": 9,
-    "Maintainability": 5
+    "Performance": 9
   },
   "categoryWeights": {
     "Security": 2,
@@ -32,6 +32,20 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Do not combine `credentials: true` with a reflected origin. Use an explicit allowlist (`origin: ['https://app.example.com']`) or a validating function that only calls back `true` for known origins."
+    },
+    {
+      "id": "deep-nesting",
+      "title": "Control flow nested too deeply",
+      "category": "Maintainability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "complexity"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Flatten the nesting: return early / use guard clauses, extract inner blocks into helper functions, or invert conditions. Deeply nested branches are hard to follow and test."
     },
     {
       "id": "express-async-handler-unprotected",
@@ -84,6 +98,51 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Attach a JSON `schema` to the route (`{ schema: { body, querystring, params } }`). Fastify validates and serializes against it before the handler runs; without one the route accepts arbitrary input."
+    },
+    {
+      "id": "high-cyclomatic-complexity",
+      "title": "Function is too complex",
+      "category": "Maintainability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "complexity"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Reduce branching: extract sub-decisions into well-named helper functions, replace flag chains with a lookup table or polymorphism, and use guard clauses. Aim for a cyclomatic complexity at or below 15."
+    },
+    {
+      "id": "jwt-missing-expiration",
+      "title": "JWT signed without an expiration",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "auth",
+        "jwt"
+      ],
+      "requires": [
+        "jsonwebtoken"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Give every token a lifetime: `jwt.sign(payload, key, { expiresIn: '15m' })`, or set an `exp` claim in the payload. A token with no expiry stays valid forever if leaked."
+    },
+    {
+      "id": "max-function-length",
+      "title": "Function is too long",
+      "category": "Maintainability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "complexity"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Extract cohesive blocks into named helper functions so each function does one thing. Aim for functions that fit on a screen."
     },
     {
       "id": "nest-missing-validation-pipe",
@@ -144,6 +203,21 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Collect the promises and `await Promise.all(items.map((x) => work(x)))` instead of awaiting inside the loop. If the collection is caller-sized, bound the fan-out with `p-limit`."
+    },
+    {
+      "id": "no-circular-imports",
+      "title": "Circular import between modules",
+      "category": "Maintainability",
+      "severity": "warn",
+      "scope": "project",
+      "tags": [
+        "architecture",
+        "imports"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Break the cycle: extract the shared symbols into a third module both import, use a type-only import (`import type`) if it's only for types, or defer the import to call time. Cyclic value imports evaluate to `undefined` at load and cause TDZ errors under ESM."
     },
     {
       "id": "no-console-log-in-committed-code",
@@ -218,6 +292,21 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Remove or merge the duplicate route — the later registration shadows the earlier one. Keep one handler per (method, path)."
+    },
+    {
+      "id": "no-error-leak-to-client",
+      "title": "Error stack or raw error sent to the client",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "error-handling",
+        "info-leak"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Log the error server-side and return a generic message (`res.status(500).json({ error: 'Internal error' })`). Never send `err.stack` or the raw error object — they leak paths, versions, and internal details."
     },
     {
       "id": "no-eval-with-input",
@@ -518,6 +607,21 @@
       "recommendation": "Never call `process.exit`/`process.abort` from a handler. Respond, then drain and shut down outside the request (`scheduleGracefulShutdown()` → `server.close()` on SIGTERM). Reserve `process.exit` for top-level fatal handlers."
     },
     {
+      "id": "no-prototype-pollution",
+      "title": "Prototype pollution via caller-controlled object key",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "injection",
+        "prototype-pollution"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Reject the dangerous keys before writing (`if (key === '__proto__' || key === 'constructor' || key === 'prototype') return;`), use a `Map`, or store data on a `Object.create(null)` bag. Never write to an object with an unvalidated caller-supplied key."
+    },
+    {
       "id": "no-query-in-loop",
       "title": "Database query inside a loop (N+1)",
       "category": "Performance",
@@ -775,6 +879,21 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Store the handle and `clearInterval(handle)` on shutdown, or call `handle.unref()` so the interval does not by itself keep the process alive."
+    },
+    {
+      "id": "no-unsafe-deserialization",
+      "title": "Unsafe deserialization of caller-controlled data",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "deserialization",
+        "injection"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Never deserialize untrusted input with a code-executing deserializer. Use `JSON.parse` for data; for YAML use `js-yaml` v4+ `load` (safe by default) or pass `{ schema: JSON_SCHEMA }`. Drop `node-serialize`/`funcster` `unserialize` on request data entirely."
     },
     {
       "id": "no-unsafe-regexp-from-input",

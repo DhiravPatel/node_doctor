@@ -19,6 +19,22 @@ const TOOLS = [
   ["node_doctor_deslop", "Find unused files, exports, and dependencies."],
 ];
 
+const FIX_MENU = `$ npx node-doctor@latest fix .
+
+  38 findings · 21/100 critical
+
+  What would you like to do?
+    1) Fix with Claude Code  (claude)
+    2) Fix with Codex        (codex)
+    c) Copy the prompt to your clipboard
+    p) Print the prompt
+    s) Skip
+  > 1
+
+  → Handing 38 finding(s) to Claude Code. It runs in
+    auto-accept mode and will fix them end-to-end,
+    then re-scan to confirm.`;
+
 const QUESTIONS = [
   ["Where does a post-await rejection go?", "Is there a try/catch that calls next(err), or an async wrapper? An unhandled rejection after the first await hangs the client."],
   ["Does anything block the event loop?", "Any *Sync call, a big JSON.parse, a CPU loop, or a catastrophic-backtracking regex on the request path freezes every concurrent request."],
@@ -85,6 +101,49 @@ export function AgentPage() {
               ))}
             </div>
           </Reveal>
+        </div>
+      </section>
+
+      <section className="divider">
+        <div className="wrap">
+          <Reveal>
+            <div className="eyebrow">the other direction — fix, don't just find</div>
+            <h2 className="section-title">Found the bugs? Hand them straight to your agent.</h2>
+            <p className="section-lead">
+              <code>node-doctor fix</code> scans, then passes every finding to a coding agent — Claude Code,
+              Codex, or Cursor — with a root-cause-first prompt that names the exact fix for each and forbids
+              suppression. It only offers the agents actually installed on your machine.
+            </p>
+          </Reveal>
+          <div className="split">
+            <Reveal>
+              <div className="card">
+                <div className="kicker">one command, then pick an agent</div>
+                <CopyCommand text="npx node-doctor@latest fix ." />
+                <pre className="code">{FIX_MENU}</pre>
+                <p style={{ marginBottom: 0 }}>
+                  On a non-interactive shell — or with <code>--print</code> — it prints the prompt instead of
+                  launching anything. <code>--yes</code> skips the menu, <code>--agent</code> picks one,
+                  <code> --review</code> makes the agent ask before each edit.
+                </p>
+              </div>
+            </Reveal>
+            <Reveal delay={80}>
+              <div className="card">
+                <div className="kicker">what the agent is told</div>
+                <ul className="check-list">
+                  <li>Findings grouped by root cause, ranked by severity — fix the cause once, in one place.</li>
+                  <li>The exact mechanism per finding: shell → <code>execFile</code>, SQL → bound params, a path → a containment check.</li>
+                  <li>
+                    <b style={{ color: "var(--ink)" }}>Never suppress to pass.</b> A false positive is a bug to
+                    report, not silence.
+                  </li>
+                  <li>Verify against the real tool — re-run <code>npx node-doctor@latest .</code> and confirm the score rose.</li>
+                  <li>Explain each fix in plain language, so you learn why it mattered.</li>
+                </ul>
+              </div>
+            </Reveal>
+          </div>
         </div>
       </section>
 

@@ -92,9 +92,14 @@ export const collectModuleFacts = (
       if (isFunctionLike(value)) exportedFunctions.set("default", value);
       continue;
     } else if (stmt.type === "ImportDeclaration") {
+      // Type-only imports (`import type …`) are erased at runtime — they form no
+      // runtime edge, so they never resolve to a callable and never close a
+      // runtime import cycle. Exclude them from the graph.
+      if (stmt.importKind === "type") continue;
       const source = stmt.source?.value;
       for (const spec of (stmt.specifiers as AstNode[]) ?? []) {
         if (spec.local?.type !== "Identifier") continue;
+        if (spec.importKind === "type") continue; // inline `import { type X }`
         const imported =
           spec.type === "ImportDefaultSpecifier"
             ? "default"
@@ -141,6 +146,14 @@ export interface ProjectGraph {
   effectsOf(fn: AstNode): EffectSummary;
   /** Every blocking sync-IO site reachable from a handler through helpers. */
   reachableSyncIoSites(): ReachableEffect[];
+  /** Resolve an in-project import specifier to a module file path (or null). */
+  resolveImport(spec: string, fromFile: string): string | null;
+  /** In-project import edges: file path → set of imported file paths. */
+  importEdges(): Map<string, Set<string>>;
+  /** Is the import edge from→to on a cycle? */
+  isCycleEdge(fromFile: string, toFile: string): boolean;
+  /** Does the project contain any import cycle? */
+  hasCycles(): boolean;
 }
 
 /** Resolve a relative import specifier to an absolute file key in `modules`. */
@@ -256,11 +269,69 @@ export const buildProjectGraph = (moduleFactsList: ModuleFacts[]): ProjectGraph 
     });
   }
 
+  const resolveImport = (spec: string, fromFile: string): string | null =>
+    resolveModule(spec, fromFile, modules)?.filePath ?? null;
+
+  let importEdgesCache: Map<string, Set<string>> | null = null;
+  const importEdges = (): Map<string, Set<string>> => {
+    if (importEdgesCache) return importEdgesCache;
+    const edges = new Map<string, Set<string>>();
+    for (const facts of modules.values()) {
+      const targets = new Set<string>();
+      for (const { source } of facts.imports.values()) {
+        const t = resolveModule(source, facts.filePath, modules);
+        if (t && t.filePath !== facts.filePath) targets.add(t.filePath);
+      }
+      edges.set(facts.filePath, targets);
+    }
+    importEdgesCache = edges;
+    return edges;
+  };
+
+  let cycleEdgesCache: Map<string, Set<string>> | null = null;
+  const cycleEdges = (): Map<string, Set<string>> => {
+    if (cycleEdgesCache) return cycleEdgesCache;
+    const edges = importEdges();
+    const reachableFrom = (start: string): Set<string> => {
+      const seen = new Set<string>();
+      const stack = [...(edges.get(start) ?? [])];
+      while (stack.length > 0) {
+        const n = stack.pop()!;
+        if (seen.has(n)) continue;
+        seen.add(n);
+        for (const m of edges.get(n) ?? []) stack.push(m);
+      }
+      return seen;
+    };
+    const reach = new Map<string, Set<string>>();
+    for (const from of edges.keys()) reach.set(from, reachableFrom(from));
+    // Edge from->to is on a cycle iff `to` can reach back to `from`.
+    const out = new Map<string, Set<string>>();
+    for (const [from, targets] of edges) {
+      for (const to of targets) {
+        if (reach.get(to)?.has(from)) {
+          const set = out.get(from) ?? new Set<string>();
+          set.add(to);
+          out.set(from, set);
+        }
+      }
+    }
+    cycleEdgesCache = out;
+    return out;
+  };
+  const isCycleEdge = (fromFile: string, toFile: string): boolean =>
+    cycleEdges().get(fromFile)?.has(toFile) ?? false;
+  const hasCycles = (): boolean => cycleEdges().size > 0;
+
   const graph: ProjectGraph = {
     modules,
     resolveCallee,
     isReachableFromHandler: (fn) => reachable.has(fn),
     effectsOf,
+    resolveImport,
+    importEdges,
+    isCycleEdge,
+    hasCycles,
     reachableSyncIoSites: () => {
       const sites: ReachableEffect[] = [];
       const seen = new Set<AstNode>();

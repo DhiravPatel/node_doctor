@@ -41,6 +41,10 @@ import { noSendAfterNext } from "../diagnostics/http/no-send-after-next.ts";
 import { noTrustProxyTrue } from "../diagnostics/http/no-trust-proxy-true.ts";
 import { requireErrorHandlingMiddleware } from "../diagnostics/http/require-error-handling-middleware.ts";
 // maintainability
+import { deepNesting } from "../diagnostics/maintainability/deep-nesting.ts";
+import { highCyclomaticComplexity } from "../diagnostics/maintainability/high-cyclomatic-complexity.ts";
+import { maxFunctionLength } from "../diagnostics/maintainability/max-function-length.ts";
+import { noCircularImports } from "../diagnostics/maintainability/no-circular-imports.ts";
 import { noConsoleLogInCommittedCode } from "../diagnostics/maintainability/no-console-log-in-committed-code.ts";
 import { noDeadAsync } from "../diagnostics/maintainability/no-dead-async.ts";
 import { noDuplicateRouteDefinition } from "../diagnostics/maintainability/no-duplicate-route-definition.ts";
@@ -55,7 +59,9 @@ import { noUnboundedModuleCache } from "../diagnostics/reliability/no-unbounded-
 import { noUnclearedModuleInterval } from "../diagnostics/reliability/no-uncleared-module-interval.ts";
 import { requireSigtermHandler } from "../diagnostics/reliability/require-sigterm-handler.ts";
 // security
+import { jwtMissingExpiration } from "../diagnostics/security/jwt-missing-expiration.ts";
 import { noDisabledTlsVerification } from "../diagnostics/security/no-disabled-tls-verification.ts";
+import { noErrorLeakToClient } from "../diagnostics/security/no-error-leak-to-client.ts";
 import { noEvalWithInput } from "../diagnostics/security/no-eval-with-input.ts";
 import { noExecWithInterpolation } from "../diagnostics/security/no-exec-with-interpolation.ts";
 import { noFunctionConstructorWithInput } from "../diagnostics/security/no-function-constructor-with-input.ts";
@@ -66,9 +72,11 @@ import { noMathRandomForToken } from "../diagnostics/security/no-math-random-for
 import { noNosqlObjectInjection } from "../diagnostics/security/no-nosql-object-injection.ts";
 import { noOpenRedirect } from "../diagnostics/security/no-open-redirect.ts";
 import { noPathTraversal } from "../diagnostics/security/no-path-traversal.ts";
+import { noPrototypePollution } from "../diagnostics/security/no-prototype-pollution.ts";
 import { noSqlTemplateInterpolation } from "../diagnostics/security/no-sql-template-interpolation.ts";
 import { noSsrfUnvalidatedUrl } from "../diagnostics/security/no-ssrf-unvalidated-url.ts";
 import { noTimingUnsafeSecretCompare } from "../diagnostics/security/no-timing-unsafe-secret-compare.ts";
+import { noUnsafeDeserialization } from "../diagnostics/security/no-unsafe-deserialization.ts";
 import { noUnsafeRegexpFromInput } from "../diagnostics/security/no-unsafe-regexp-from-input.ts";
 import { noVmRunUntrusted } from "../diagnostics/security/no-vm-run-untrusted.ts";
 import { noWeakCipher } from "../diagnostics/security/no-weak-cipher.ts";
@@ -113,6 +121,10 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noTrustProxyTrue,
   requireErrorHandlingMiddleware,
   // maintainability
+  deepNesting,
+  highCyclomaticComplexity,
+  maxFunctionLength,
+  noCircularImports,
   noConsoleLogInCommittedCode,
   noDeadAsync,
   noDuplicateRouteDefinition,
@@ -127,7 +139,9 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noUnclearedModuleInterval,
   requireSigtermHandler,
   // security
+  jwtMissingExpiration,
   noDisabledTlsVerification,
+  noErrorLeakToClient,
   noEvalWithInput,
   noExecWithInterpolation,
   noFunctionConstructorWithInput,
@@ -138,9 +152,11 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noNosqlObjectInjection,
   noOpenRedirect,
   noPathTraversal,
+  noPrototypePollution,
   noSqlTemplateInterpolation,
   noSsrfUnvalidatedUrl,
   noTimingUnsafeSecretCompare,
+  noUnsafeDeserialization,
   noUnsafeRegexpFromInput,
   noVmRunUntrusted,
   noWeakCipher,

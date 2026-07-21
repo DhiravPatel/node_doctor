@@ -1,0 +1,272 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://node.doctor/schema/node-doctor.config.schema.json",
+  "title": "node-doctor config",
+  "description": "Configuration for node.doctor (node-doctor.config.json / package.json#nodeDoctor).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "diagnostics": {
+      "type": "object",
+      "description": "Per-diagnostic severity override.",
+      "propertyNames": {
+        "enum": [
+          "cors-credentials-reflect",
+          "deep-nesting",
+          "express-async-handler-unprotected",
+          "express-missing-return-after-response",
+          "fastify-missing-schema",
+          "high-cyclomatic-complexity",
+          "jwt-missing-expiration",
+          "max-function-length",
+          "nest-missing-validation-pipe",
+          "no-async-array-callback",
+          "no-async-executor",
+          "no-await-in-loop-over-independent-work",
+          "no-circular-imports",
+          "no-committed-env-secret",
+          "no-committed-private-key",
+          "no-console-log-in-committed-code",
+          "no-db-connection-per-request",
+          "no-dead-async",
+          "no-disabled-tls-verification",
+          "no-duplicate-route-definition",
+          "no-error-leak-to-client",
+          "no-eval-with-input",
+          "no-exec-with-interpolation",
+          "no-external-call-inside-open-transaction",
+          "no-findmany-then-filter-in-js",
+          "no-function-constructor-with-input",
+          "no-hardcoded-secret-literal",
+          "no-infinite-retry-without-backoff",
+          "no-jwt-decode-as-verify",
+          "no-jwt-none-algorithm",
+          "no-large-json-parse-in-request-path",
+          "no-listener-added-per-request",
+          "no-math-random-for-token",
+          "no-missing-await-on-query",
+          "no-missing-body-size-limit",
+          "no-missing-catch-on-async-iife",
+          "no-missing-stream-error-handler",
+          "no-nosql-object-injection",
+          "no-open-redirect",
+          "no-path-traversal",
+          "no-process-exit-in-request-path",
+          "no-prototype-pollution",
+          "no-query-in-loop",
+          "no-race-without-timeout",
+          "no-redos-prone-regex",
+          "no-redundant-try-catch-rethrow",
+          "no-secret-in-config-file",
+          "no-send-after-next",
+          "no-sql-template-interpolation",
+          "no-ssrf-unvalidated-url",
+          "no-swallowed-error-empty-catch",
+          "no-sync-bcrypt-in-request-path",
+          "no-sync-io-in-request-path",
+          "no-sync-io-reachable-from-handler",
+          "no-throw-in-finally",
+          "no-timing-unsafe-secret-compare",
+          "no-trust-proxy-true",
+          "no-unbounded-module-cache",
+          "no-unbounded-promise-all",
+          "no-uncleared-module-interval",
+          "no-unsafe-deserialization",
+          "no-unsafe-regexp-from-input",
+          "no-vm-run-untrusted",
+          "no-weak-cipher",
+          "no-weak-hash-for-password",
+          "prefer-node-protocol-imports",
+          "require-error-handling-middleware",
+          "require-fetch-timeout",
+          "require-jwt-algorithms-allowlist",
+          "require-pagination-limit",
+          "require-secure-cookie-flags",
+          "require-sigterm-handler",
+          "secret-in-env-fallback"
+        ]
+      },
+      "additionalProperties": {
+        "enum": [
+          "off",
+          "warn",
+          "error"
+        ]
+      }
+    },
+    "ignoreTags": {
+      "type": "array",
+      "description": "Diagnostic families to disable.",
+      "items": {
+        "enum": [
+          "architecture",
+          "async",
+          "auth",
+          "complexity",
+          "concurrency",
+          "cors",
+          "crypto",
+          "db",
+          "deserialization",
+          "error-handling",
+          "event-loop",
+          "express",
+          "fastify",
+          "fs",
+          "hygiene",
+          "imports",
+          "info-leak",
+          "injection",
+          "jwt",
+          "lifecycle",
+          "memory",
+          "n+1",
+          "nest",
+          "network",
+          "performance",
+          "prototype-pollution",
+          "reliability",
+          "secrets",
+          "security"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "ignore": {
+      "type": "array",
+      "description": "Extra path globs to skip.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "blocking": {
+      "description": "Default exit policy.",
+      "enum": [
+        "error",
+        "warning",
+        "none"
+      ]
+    },
+    "rootDir": {
+      "type": "string",
+      "description": "Redirect the scan to another directory (resolved against this file)."
+    },
+    "overrides": {
+      "type": "array",
+      "description": "Per-path severity overrides.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "files",
+          "diagnostics"
+        ],
+        "properties": {
+          "files": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "diagnostics": {
+            "type": "object",
+            "propertyNames": {
+              "enum": [
+                "cors-credentials-reflect",
+                "deep-nesting",
+                "express-async-handler-unprotected",
+                "express-missing-return-after-response",
+                "fastify-missing-schema",
+                "high-cyclomatic-complexity",
+                "jwt-missing-expiration",
+                "max-function-length",
+                "nest-missing-validation-pipe",
+                "no-async-array-callback",
+                "no-async-executor",
+                "no-await-in-loop-over-independent-work",
+                "no-circular-imports",
+                "no-committed-env-secret",
+                "no-committed-private-key",
+                "no-console-log-in-committed-code",
+                "no-db-connection-per-request",
+                "no-dead-async",
+                "no-disabled-tls-verification",
+                "no-duplicate-route-definition",
+                "no-error-leak-to-client",
+                "no-eval-with-input",
+                "no-exec-with-interpolation",
+                "no-external-call-inside-open-transaction",
+                "no-findmany-then-filter-in-js",
+                "no-function-constructor-with-input",
+                "no-hardcoded-secret-literal",
+                "no-infinite-retry-without-backoff",
+                "no-jwt-decode-as-verify",
+                "no-jwt-none-algorithm",
+                "no-large-json-parse-in-request-path",
+                "no-listener-added-per-request",
+                "no-math-random-for-token",
+                "no-missing-await-on-query",
+                "no-missing-body-size-limit",
+                "no-missing-catch-on-async-iife",
+                "no-missing-stream-error-handler",
+                "no-nosql-object-injection",
+                "no-open-redirect",
+                "no-path-traversal",
+                "no-process-exit-in-request-path",
+                "no-prototype-pollution",
+                "no-query-in-loop",
+                "no-race-without-timeout",
+                "no-redos-prone-regex",
+                "no-redundant-try-catch-rethrow",
+                "no-secret-in-config-file",
+                "no-send-after-next",
+                "no-sql-template-interpolation",
+                "no-ssrf-unvalidated-url",
+                "no-swallowed-error-empty-catch",
+                "no-sync-bcrypt-in-request-path",
+                "no-sync-io-in-request-path",
+                "no-sync-io-reachable-from-handler",
+                "no-throw-in-finally",
+                "no-timing-unsafe-secret-compare",
+                "no-trust-proxy-true",
+                "no-unbounded-module-cache",
+                "no-unbounded-promise-all",
+                "no-uncleared-module-interval",
+                "no-unsafe-deserialization",
+                "no-unsafe-regexp-from-input",
+                "no-vm-run-untrusted",
+                "no-weak-cipher",
+                "no-weak-hash-for-password",
+                "prefer-node-protocol-imports",
+                "require-error-handling-middleware",
+                "require-fetch-timeout",
+                "require-jwt-algorithms-allowlist",
+                "require-pagination-limit",
+                "require-secure-cookie-flags",
+                "require-sigterm-handler",
+                "secret-in-env-fallback"
+              ]
+            },
+            "additionalProperties": {
+              "enum": [
+                "off",
+                "warn",
+                "error"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

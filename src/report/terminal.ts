@@ -8,12 +8,24 @@ import pc from "picocolors";
 import type { Category, Finding } from "../core/types.ts";
 import { CATEGORIES } from "../core/types.ts";
 import type { ScanReport } from "../core/scan.ts";
+import { renderCodeFrame } from "./code-frame.ts";
 
 export interface RenderOptions {
   verbose?: boolean;
   color?: boolean;
   version?: string;
+  /** Emit OSC-8 clickable hyperlinks on file locations (capable terminals). */
+  hyperlinks?: boolean;
+  /** Provide a file's source so verbose output can draw a code frame. */
+  sourceFor?: (finding: Finding) => string | undefined;
 }
+
+const OSC8 = `${String.fromCharCode(27)}]8;;`;
+const OSC8_ST = String.fromCharCode(27, 92); // ESC \
+
+/** Wrap `text` in an OSC-8 hyperlink to `target` when enabled. */
+const hyperlink = (target: string, text: string, enabled: boolean): string =>
+  enabled ? `${OSC8}${target}${OSC8_ST}${text}${OSC8}${OSC8_ST}` : text;
 
 type Colorize = (s: string) => string;
 
@@ -141,7 +153,16 @@ export const renderReport = (report: ScanReport, options: RenderOptions = {}): s
       const cap = verbose ? Infinity : DEFAULT_SITE_CAP;
       const shown = ruleDiags.slice(0, cap);
       for (const d of shown) {
-        lines.push(p.cyan(`     ${d.normalizedFilePath}:${d.line}:${d.column}`));
+        const loc = `${d.normalizedFilePath}:${d.line}:${d.column}`;
+        lines.push(p.cyan(`     ${hyperlink(`file://${d.filePath}`, loc, options.hyperlinks ?? false)}`));
+        if (d.suppressionHint) lines.push(p.yellow(`       ↳ suppression near-miss: ${d.suppressionHint}`));
+        if (verbose && options.sourceFor) {
+          const src = options.sourceFor(d);
+          if (src) {
+            const frame = renderCodeFrame({ sourceText: src, line: d.line, column: d.column, dim: p.dim, caret: p.red });
+            if (frame) lines.push(frame);
+          }
+        }
       }
       const remaining = ruleDiags.length - shown.length;
       if (remaining > 0) lines.push(p.dim(`     … ${remaining} more`));
@@ -151,6 +172,47 @@ export const renderReport = (report: ScanReport, options: RenderOptions = {}): s
     }
   }
 
+  lines.push("");
+  return lines.join("\n");
+};
+
+/** Render a monorepo/workspace report: worst-of headline + per-project scores. */
+export const renderWorkspaceReport = (
+  report: {
+    rootDirectory: string;
+    projects: Array<{ name: string; normalizedRoot: string; report: ScanReport }>;
+    score: { score: number; label: string };
+    worstProject: string | null;
+    projectCount: number;
+    totalFindings: number;
+  },
+  options: RenderOptions = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const version = options.version ? `v${options.version}` : "";
+  const lines: string[] = [""];
+
+  lines.push(`  ${p.bold("node.doctor")} ${p.dim(version)}  ${p.dim("workspace")} · ${p.bold(String(report.projectCount))} projects`);
+  lines.push(
+    `  ${bar(report.score.score, p)}  ${p.bold(`${report.score.score}/100`)}  ${scoreColor(report.score.label, p)(report.score.label)}  ${p.dim("(worst-of)")}`,
+  );
+  lines.push(p.dim(`  ${report.totalFindings} finding(s) across the workspace`));
+  lines.push("");
+
+  // Projects, worst score first.
+  const ordered = report.projects
+    .slice()
+    .sort((a, b) => a.report.score.score - b.report.score.score || (a.name < b.name ? -1 : 1));
+  for (const proj of ordered) {
+    const s = proj.report.score;
+    const count = proj.report.findings.length;
+    const mark = scoreColor(s.label, p);
+    lines.push(
+      `  ${mark(`${String(s.score).padStart(3)}/100`)}  ${p.bold(proj.name)} ${p.dim(proj.normalizedRoot)}  ${p.dim(`· ${count} finding(s)`)}`,
+    );
+  }
+  lines.push("");
+  lines.push(p.dim(`  Scan one project:  node-doctor . --project <name>`));
   lines.push("");
   return lines.join("\n");
 };
@@ -177,8 +239,9 @@ export const renderDelta = (
 
   lines.push(p.bold(`  ${introduced.length} new finding(s) introduced by this change:`));
   for (const d of introduced) {
+    const loc = `${d.normalizedFilePath}:${d.line}:${d.column}`;
     lines.push("");
-    lines.push(`  ${glyph(d.severity, p)} ${p.cyan(`${d.normalizedFilePath}:${d.line}:${d.column}`)}`);
+    lines.push(`  ${glyph(d.severity, p)} ${p.cyan(hyperlink(`file://${d.filePath}`, loc, options.hyperlinks ?? false))}`);
     lines.push(`    ${p.bold(d.title)}`);
     lines.push(`    ${d.message}`);
     lines.push(p.dim(`    → ${d.recommendation}`));

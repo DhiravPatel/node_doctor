@@ -1,6 +1,7 @@
 import { defineDiagnostic } from "../../core/types.ts";
 import type { AstNode } from "../../core/types.ts";
 import { staticMemberPath } from "../../core/ast.ts";
+import { SECRET_NAME_RE, KEY_PREFIX_RE, PLACEHOLDER_RE, looksSecretLike } from "../../core/secret-patterns.ts";
 
 /**
  * A credential embedded as a string literal in source. Committed secrets live
@@ -17,19 +18,6 @@ import { staticMemberPath } from "../../core/ast.ts";
  * Stays silent for: placeholders, strings under 8 chars, `process.env` reads,
  * and dictionary-word values with no secret-like entropy.
  */
-
-// Secret-shaped binding names (distinct segments to avoid matching "tokenizer").
-const SECRET_NAME_RE =
-  /(^|[._-])(secret|password|passwd|pwd|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|auth[_-]?token|credentials?)([._-]|$)/i;
-
-// Known provider key prefixes — an unambiguous shape, fired regardless of name.
-const KEY_PREFIX_RE = /^(sk_live_|sk_test_|sk-[A-Za-z0-9]|rk_live_|AKIA[0-9A-Z]{4}|ghp_|gho_|github_pat_|xox[baprs]-|AIza[0-9A-Za-z_-]{4}|-----BEGIN )/;
-
-const PLACEHOLDER_RE =
-  /^(changeme|change-me|placeholder|example|dummy|sample|redacted|your[-_.]|<.*>|\{.*\}|x{3,}|\.{3,})/i;
-
-const looksSecretLike = (v: string): boolean =>
-  /[0-9]/.test(v) || /[^A-Za-z0-9]/.test(v) || v.length >= 20 || (/[a-z]/.test(v) && /[A-Z]/.test(v));
 
 /** The binding name a string literal is assigned to, via its parent context. */
 const assignedName = (node: AstNode): string | null => {
