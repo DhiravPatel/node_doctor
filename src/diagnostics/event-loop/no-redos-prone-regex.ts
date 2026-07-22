@@ -21,9 +21,11 @@ import { getCalleeName, getStaticStringValue } from "../../core/ast.ts";
 
 /**
  * A group `(...)` whose body contains a `+`/`*` quantifier and which is itself
- * followed by a `+`, `*`, or `?` quantifier — the classic ReDoS trigger.
+ * repeated by a `+` or `*` — the classic ReDoS trigger. An *optional* group
+ * (`(?:x+)?`) is deliberately excluded: it matches at most once, so there is no
+ * exponential search space, and flagging it is a false positive.
  */
-const REDOS_SHAPE = /\([^)]*[+*][^)]*\)[+*?]/;
+const REDOS_SHAPE = /\([^)]*[+*][^)]*\)[+*]/;
 
 /** Pull a regex source string from a Literal or a `RegExp(...)` constructor. */
 const regexSourceOf = (node: AstNode): string | null => {

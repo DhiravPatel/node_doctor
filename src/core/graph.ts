@@ -19,6 +19,8 @@ import { walk, collectDescendants } from "./walk.ts";
 import { getMethodName, isFunctionLike } from "./ast.ts";
 import { summarizeEffects, type EffectSummary } from "./effects.ts";
 import { SYNC_IO_METHODS } from "./signals.ts";
+import { computeInterproceduralTaint, collectTaintedSinkSites } from "./interprocedural-taint.ts";
+import type { TaintedSinkSite } from "./interprocedural-taint.ts";
 
 /** Facts collected for one module during Phase A. */
 export interface ModuleFacts {
@@ -154,6 +156,12 @@ export interface ProjectGraph {
   isCycleEdge(fromFile: string, toFile: string): boolean;
   /** Does the project contain any import cycle? */
   hasCycles(): boolean;
+  /** Parameters of `fn` that carry caller-controlled data (§56, interprocedural). */
+  taintedParamsOf(fn: AstNode): Set<string>;
+  /** Hop trail handler → … → `fn`, for explaining a cross-file taint path. */
+  taintPathTo(fn: AstNode): string[];
+  /** Injection sinks in helpers that caller data reaches through the call graph. */
+  taintedSinkSites(): TaintedSinkSite[];
 }
 
 /** Resolve a relative import specifier to an absolute file key in `modules`. */
@@ -323,6 +331,15 @@ export const buildProjectGraph = (moduleFactsList: ModuleFacts[]): ProjectGraph 
     cycleEdges().get(fromFile)?.has(toFile) ?? false;
   const hasCycles = (): boolean => cycleEdges().size > 0;
 
+  // Interprocedural taint is only computed if a diagnostic actually asks for it.
+  let interproceduralTaint: import("./interprocedural-taint.ts").InterproceduralTaint | null = null;
+  const ensureTaint = (): import("./interprocedural-taint.ts").InterproceduralTaint => {
+    if (!interproceduralTaint) {
+      interproceduralTaint = computeInterproceduralTaint(graph);
+    }
+    return interproceduralTaint;
+  };
+
   const graph: ProjectGraph = {
     modules,
     resolveCallee,
@@ -332,6 +349,9 @@ export const buildProjectGraph = (moduleFactsList: ModuleFacts[]): ProjectGraph 
     importEdges,
     isCycleEdge,
     hasCycles,
+    taintedParamsOf: (fn) => ensureTaint().taintedParams.get(fn) ?? new Set<string>(),
+    taintPathTo: (fn) => ensureTaint().pathTo.get(fn) ?? [],
+    taintedSinkSites: () => collectTaintedSinkSites(graph, ensureTaint()),
     reachableSyncIoSites: () => {
       const sites: ReachableEffect[] = [];
       const seen = new Set<AstNode>();

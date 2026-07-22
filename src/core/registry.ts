@@ -16,6 +16,9 @@ import { noRaceWithoutTimeout } from "../diagnostics/async/no-race-without-timeo
 import { noSwallowedErrorEmptyCatch } from "../diagnostics/async/no-swallowed-error-empty-catch.ts";
 import { noUnboundedPromiseAll } from "../diagnostics/async/no-unbounded-promise-all.ts";
 import { requireFetchTimeout } from "../diagnostics/async/require-fetch-timeout.ts";
+// bugs
+import { noConstantCondition } from "../diagnostics/bugs/no-constant-condition.ts";
+import { noUnreachableCode } from "../diagnostics/bugs/no-unreachable-code.ts";
 // db
 import { noDbConnectionPerRequest } from "../diagnostics/db/no-db-connection-per-request.ts";
 import { noExternalCallInsideOpenTransaction } from "../diagnostics/db/no-external-call-inside-open-transaction.ts";
@@ -51,6 +54,7 @@ import { noDuplicateRouteDefinition } from "../diagnostics/maintainability/no-du
 import { noRedundantTryCatchRethrow } from "../diagnostics/maintainability/no-redundant-try-catch-rethrow.ts";
 import { preferNodeProtocolImports } from "../diagnostics/maintainability/prefer-node-protocol-imports.ts";
 // reliability
+import { noCrossRequestStateMutation } from "../diagnostics/reliability/no-cross-request-state-mutation.ts";
 import { noInfiniteRetryWithoutBackoff } from "../diagnostics/reliability/no-infinite-retry-without-backoff.ts";
 import { noListenerAddedPerRequest } from "../diagnostics/reliability/no-listener-added-per-request.ts";
 import { noMissingStreamErrorHandler } from "../diagnostics/reliability/no-missing-stream-error-handler.ts";
@@ -75,6 +79,7 @@ import { noPathTraversal } from "../diagnostics/security/no-path-traversal.ts";
 import { noPrototypePollution } from "../diagnostics/security/no-prototype-pollution.ts";
 import { noSqlTemplateInterpolation } from "../diagnostics/security/no-sql-template-interpolation.ts";
 import { noSsrfUnvalidatedUrl } from "../diagnostics/security/no-ssrf-unvalidated-url.ts";
+import { noTaintedSinkViaHelper } from "../diagnostics/security/no-tainted-sink-via-helper.ts";
 import { noTimingUnsafeSecretCompare } from "../diagnostics/security/no-timing-unsafe-secret-compare.ts";
 import { noUnsafeDeserialization } from "../diagnostics/security/no-unsafe-deserialization.ts";
 import { noUnsafeRegexpFromInput } from "../diagnostics/security/no-unsafe-regexp-from-input.ts";
@@ -96,6 +101,9 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noSwallowedErrorEmptyCatch,
   noUnboundedPromiseAll,
   requireFetchTimeout,
+  // bugs
+  noConstantCondition,
+  noUnreachableCode,
   // db
   noDbConnectionPerRequest,
   noExternalCallInsideOpenTransaction,
@@ -131,6 +139,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noRedundantTryCatchRethrow,
   preferNodeProtocolImports,
   // reliability
+  noCrossRequestStateMutation,
   noInfiniteRetryWithoutBackoff,
   noListenerAddedPerRequest,
   noMissingStreamErrorHandler,
@@ -155,6 +164,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noPrototypePollution,
   noSqlTemplateInterpolation,
   noSsrfUnvalidatedUrl,
+  noTaintedSinkViaHelper,
   noTimingUnsafeSecretCompare,
   noUnsafeDeserialization,
   noUnsafeRegexpFromInput,

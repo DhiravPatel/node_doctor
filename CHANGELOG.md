@@ -71,6 +71,53 @@ Verified at zero false positives across 213 files of real TypeScript; the
 - **`rootDir`** config redirect, resolved against the config file's own location.
 - **Generated JSON Schema** (`npm run gen:schema`) for editor autocomplete/validation.
 
+### Security & API depth
+
+- **`node-doctor surface`** (§70) — maps every externally reachable route with its
+  middleware chain and auth posture, and flags routes with no recognizable guard.
+  Route extraction is deliberately conservative: a path that is a bare variable is
+  not recorded, because it is indistinguishable from `cache.get(key)`.
+- **`node-doctor surface --baseline <f>`** (§78) — diffs the API surface and fails on
+  **breaking** changes: a removed route, or one that now requires auth it did not
+  before. Relaxed auth and added routes are reported as non-breaking.
+- **`node-doctor sbom`** (§67) — CycloneDX 1.5 or SPDX 2.3 for the dependency tree,
+  resolved from the lockfile (npm v2/v3, pnpm, yarn), offline and deterministic,
+  with correct percent-encoded purls for scoped packages.
+- **`--history`** (§68) — scans git history for credentials that were committed and
+  later deleted. A deleted secret is still in every clone; the report says
+  `ROTATE IT`. **The secret value is never emitted** — only the variable name.
+- **IaC security** (§72) — three text diagnostics for Terraform and CloudFormation:
+  `no-open-security-group` (ingress from `0.0.0.0/0`; egress and public web ports
+  deliberately exempt), `no-public-cloud-storage`, and `no-overbroad-iam-policy`
+  (fires only when action **and** resource are both wildcards). YAML/JSON must
+  prove it is IaC before any of them fire, so docker-compose and CI files are safe.
+
+Catalog: 77 → 80 diagnostics.
+
+### Semantic depth: interprocedural taint (§56) and control-flow
+
+- **Interprocedural taint** — the sound version of the intra-file heuristic. Taint now
+  flows forward from every request handler **across call boundaries by argument
+  position**, through the project call graph, carrying a hop trail. Exposed on
+  `ProjectGraph` (`taintedParamsOf`, `taintPathTo`, `taintedSinkSites`) and computed
+  lazily, so it costs nothing unless a diagnostic asks for it.
+- **`no-tainted-sink-via-helper`** (Security, cross-file) — caller data reaching an
+  `eval`/shell/SQL sink inside a helper, reported with the path that fed it
+  (`routes.js:handler → service.js:lookup → repo.js:findUser`). Every file looks
+  innocent alone; only the graph sees it. A parameterized query fed the same value,
+  and an identical sink no handler reaches, both stay silent.
+- **`no-cross-request-state-mutation`** (Reliability) — request-derived data assigned to
+  module-scope `let`/`var`, the footgun where one user's request overwrites state another
+  in-flight request reads. Requires the binding itself to carry the evidence, so a
+  same-named `catch` param or loop variable elsewhere in the file cannot implicate it.
+- **`no-unreachable-code`** and **`no-constant-condition`** (Bugs) — dead statements and
+  dead guards. Hoisted `function`/`var`, TypeScript `declare` forms, `while (true)`,
+  `do…while(false)` early-exit blocks, and the `while (m = re.exec(s))` assign-and-test
+  idiom are all deliberately silent; only the genuine `=`/`===` typo shape fires.
+
+Catalog: 73 → 77 diagnostics. Verified at zero false positives across ~10,000 real
+source files; canary and self-scan stay 100/100.
+
 ### Agent loop: conventions, verification, patches & the ratchet
 
 - **`node-doctor conventions`** (§50) — writes AGENTS.md / CLAUDE.md / .cursorrules

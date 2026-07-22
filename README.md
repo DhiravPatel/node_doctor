@@ -29,7 +29,7 @@ Express handler with no error path, a `readFileSync` on the request path, an N+1
 across a loop, a `Promise.all` that opens a socket per row, injection and
 secret-handling sinks.
 
-It runs **73 diagnostics** — including a whole-tree scan for **committed secrets**
+It runs **80 diagnostics** — including a whole-tree scan for **committed secrets**
 in `.env`, config, CI, and key files — produces a transparent **0–100 health
 score** entirely on your machine (no network, no telemetry), and can push the
 same knowledge **upstream into your coding agent** as an installable skill and an
@@ -72,12 +72,13 @@ Typical output on a codebase that needs help:
 
 ## Features
 
-- **73 diagnostics** across Security, Reliability, Bugs, Performance, and
+- **80 diagnostics** across Security, Reliability, Bugs, Performance, and
   Maintainability — each with a valid + invalid test; FP-prone ones are opt-in.
 - **Whole-tree secret scan** — committed credentials in `.env`, YAML/CI configs,
   and `*.pem`/`*.key` files, gated to git-tracked files so a local `.env` is safe.
-- **Cross-file call graph** — flags a blocking sink in a helper reached from a
-  handler *through other files*.
+- **Cross-file call graph + interprocedural taint** — flags a blocking sink, or an
+  injection sink fed by request data, in a helper reached from a handler *through other
+  files*, and names the whole path.
 - **CI baseline delta** — reports only the findings your PR introduced.
 - **`deslop`** dead-code scan — unused files, exports, and dependencies.
 - **MCP server** — call node.doctor as a native tool from any MCP client.
@@ -154,13 +155,15 @@ node-doctor install --git-hook                  install an advisory pre-commit h
 node-doctor ci                                  scaffold a GitHub Actions workflow
 node-doctor conventions [dir]                   write CLAUDE.md/AGENTS.md from your stack
 node-doctor ratchet init|check                  lock current debt; fail only on new findings
+node-doctor surface [--baseline <f>]            map routes + auth posture; diff for breaking changes
+node-doctor sbom [--framework spdx]             CycloneDX / SPDX bill of materials
 node-doctor mcp                                 run as an MCP server
 node-doctor init                                scaffold a config
 node-doctor version                             version + platform + Node runtime
 
 Output   --json · --json-compact · --score · --json-out · --sarif-out · --html-out
          --md-out · --annotations · --color / --no-color
-Scan     --fix · --fix-diff (emit autofixes as a patch) · --dead-code · --cache · --watch · --audit · --max-duration <sec>
+Scan     --fix · --fix-diff (emit autofixes as a patch) · --history (git-history secrets) · --dead-code · --cache · --watch · --audit · --max-duration <sec>
          --no-parallel (analyze files serially; default is a concurrency pool)
 Scope    --only <glob> · --diff [base] · --staged · --scope <lines|files>
          --changed-files-from <f> · --include-untracked

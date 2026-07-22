@@ -19,6 +19,9 @@ import { SECRET_NAME_RE, KEY_PREFIX_RE, PLACEHOLDER_RE, looksSecretLike } from "
  * and dictionary-word values with no secret-like entropy.
  */
 
+/** Characters of key material required after a provider prefix before it is a credential. */
+const MIN_KEY_MATERIAL = 8;
+
 /** The binding name a string literal is assigned to, via its parent context. */
 const assignedName = (node: AstNode): string | null => {
   const parent = node.parent;
@@ -52,8 +55,11 @@ export const noHardcodedSecretLiteral = defineDiagnostic({
       const value = node.value;
       if (value.length < 8) return;
 
-      // A known provider key shape is unambiguous — fire regardless of name.
-      if (KEY_PREFIX_RE.test(value)) {
+      // A known provider key shape is unambiguous — fire regardless of name, but
+      // only when actual key material follows the prefix. A bare `"sk_live_"`
+      // constant is what a *detector* is built from, not a credential.
+      const prefix = KEY_PREFIX_RE.exec(value);
+      if (prefix && value.length - prefix[0].length >= MIN_KEY_MATERIAL) {
         ctx.report(node, "A credential with a recognizable provider key prefix is hardcoded in source — move it to the environment or a secret manager.");
         return;
       }

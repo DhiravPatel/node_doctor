@@ -17,6 +17,8 @@ export type Command =
   | "ci"
   | "conventions"
   | "ratchet"
+  | "surface"
+  | "sbom"
   | "version";
 
 // "rules" is accepted as a legacy alias for "diagnostics".
@@ -35,6 +37,8 @@ const COMMANDS = new Set<string>([
   "ci",
   "conventions",
   "ratchet",
+  "surface",
+  "sbom",
   "version",
   "rules",
 ]);
@@ -121,6 +125,7 @@ export interface ParsedArgs {
   skill?: string; // `install --skill improve-node`
   fixDiff: boolean; // emit safe autofixes as a unified diff instead of writing
   overwrite: boolean; // (conventions) overwrite an existing file
+  history: boolean; // (scan) also scan git history for secrets
   errors: string[];
 }
 
@@ -219,6 +224,7 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
     packageScript: false,
     fixDiff: false,
     overwrite: false,
+    history: false,
     errors: [],
   };
 
@@ -338,6 +344,10 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
     }
     if (token === "--overwrite") {
       result.overwrite = true;
+      continue;
+    }
+    if (token === "--history") {
+      result.history = true;
       continue;
     }
     if (token === "--workspaces") {

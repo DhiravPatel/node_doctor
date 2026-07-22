@@ -33,6 +33,7 @@ import { renderCodeFrame } from "../report/code-frame.ts";
 import { buildIssueUrl } from "../report/issue-url.ts";
 import { DIAGNOSTICS, DIAGNOSTICS_BY_ID } from "../core/registry.ts";
 import { TEXT_DIAGNOSTICS } from "../diagnostics/secrets/index.ts";
+import { IAC_DIAGNOSTICS } from "../diagnostics/iac/index.ts";
 import { installSkill, CLIENTS, type SkillName } from "../skill/install.ts";
 import { detectInstalledClients } from "../install/detect-agents.ts";
 import { installAgentHooks } from "../install/agent-hooks.ts";
@@ -44,6 +45,13 @@ import { fixSource, FIXABLE_DIAGNOSTICS } from "../fix/index.ts";
 import { fixDiffForFile } from "../fix/diff.ts";
 import { writeConventions, CONVENTION_TARGETS } from "../core/conventions.ts";
 import { RATCHET_FILENAME, buildRatchet, compareToRatchet, readRatchet, writeRatchet } from "../core/ratchet.ts";
+import { extractRoutes, buildApiSurface, diffApiSurface, type RouteEntry } from "../core/api-surface.ts";
+import { buildSbom } from "../core/sbom.ts";
+import { scanGitHistoryForSecrets } from "../core/git-history-secrets.ts";
+import { parseSource } from "../core/parse.ts";
+import { attachParents } from "../core/walk.ts";
+import { createLocator } from "../core/location.ts";
+import { relative, sep } from "node:path";
 import { runAgentFix } from "../agent/fix.ts";
 import { lintSource } from "../core/scan.ts";
 import { shouldEnableDiagnostic, discoverProject } from "../core/project.ts";
@@ -271,6 +279,9 @@ Usage:
   node-doctor ci                         Scaffold a GitHub Actions workflow
   node-doctor conventions [dir]          Write CLAUDE.md/AGENTS.md from the detected stack
   node-doctor ratchet init|check         Lock current debt; fail only on new findings
+  node-doctor surface [--json-out f]     Map every route + its auth posture
+  node-doctor surface --baseline <f>     Diff the API surface; fail on breaking changes
+  node-doctor sbom [--framework spdx]    Emit a CycloneDX (or SPDX) SBOM
   node-doctor deslop [directory]         Dead-code scan (unused files/exports/deps)
   node-doctor explain <diagnostic-id>          Explain a diagnostic and its fix
   node-doctor explain <file>:<line>      Why a diagnostic fired at a location
@@ -296,6 +307,7 @@ Options:
   --max-duration <sec>   Stop scanning after N seconds (results become advisory)
   --no-parallel          Analyze files serially (default: bounded concurrency pool)
   --no-secrets           Skip the whole-tree secret/config-file scan (.env, YAML, keys)
+  --history              Also scan git history for secrets that were committed
   --project <name|path>  (monorepo) scan only matching workspace project(s)
   --no-workspaces        (monorepo) scan the root as a single project
   --yes, -y              (fix) launch the agent without the menu
@@ -355,7 +367,7 @@ const runDiagnostics = async (args: ParsedArgs): Promise<number> => {
 
   const catalog = [
     ...DIAGNOSTICS.map((d) => ({ d, scope: (d.scope ?? "file") as DiagnosticRow["scope"] })),
-    ...TEXT_DIAGNOSTICS.map((d) => ({ d, scope: "text" as DiagnosticRow["scope"] })),
+    ...[...TEXT_DIAGNOSTICS, ...IAC_DIAGNOSTICS].map((d) => ({ d, scope: "text" as DiagnosticRow["scope"] })),
   ];
   let rows: DiagnosticRow[] = catalog
     .sort((a, b) => (a.d.id < b.d.id ? -1 : 1))
@@ -621,6 +633,21 @@ const runScan = async (args: ParsedArgs, version: string): Promise<number> => {
   }
 
   if (args.annotations) process.stdout.write(toAnnotations(scopedReport) + "\n");
+
+  // §68 — history secrets are reported alongside the scan, not scored (they are
+  // historical facts about the repo, not defects in the current tree).
+  if (args.history) {
+    const historic = await scanGitHistoryForSecrets(dir);
+    if (historic.length > 0 && !args.json) {
+      process.stdout.write(`\n  Git history — ${historic.length} secret(s) committed in the past:\n`);
+      for (const h of historic.slice(0, 20)) {
+        process.stdout.write(
+          `    ${h.commit}  ${h.label}  ${h.file}${h.removedFromHead ? "  (deleted from HEAD — ROTATE IT)" : ""}\n`,
+        );
+      }
+      process.stdout.write("    A deleted secret is still in history and in every clone. Rotate, do not just delete.\n");
+    }
+  }
 
   // Time budget exhausted: results are advisory, not a clean bill of health.
   if (args.maxDuration !== undefined && !report.project.complete) {
@@ -1000,6 +1027,109 @@ const runRatchet = async (args: ParsedArgs, version: string): Promise<number> =>
   return cmp.passed ? 0 : 1;
 };
 
+/**
+ * §70/§78 — the attack-surface map and API breaking-change diff. Enumerates every
+ * route with its guard chain; with --baseline it diffs against a saved surface.
+ */
+const runSurface = async (args: ParsedArgs): Promise<number> => {
+  const { dir, config } = await resolveScanTarget(args);
+  const fg = (await import("fast-glob")).default;
+  const files = (
+    await fg([SOURCE_GLOB], {
+      cwd: dir,
+      ignore: [...BUILTIN_IGNORES, ...(config.ignore ?? [])],
+      absolute: true,
+      suppressErrors: true,
+    })
+  ).sort();
+
+  const routes: RouteEntry[] = [];
+  for (const file of files) {
+    let src: string;
+    try {
+      src = await readFile(file, "utf8");
+    } catch {
+      continue;
+    }
+    // Cheap pre-filter: no route verb in the text, no need to parse.
+    if (!/\.(get|post|put|patch|delete|del|options|head|all|route)\s*\(/.test(src)) continue;
+    const parsed = parseSource(file, src);
+    if (parsed.parseFailed) continue;
+    attachParents(parsed.program);
+    routes.push(
+      ...extractRoutes(parsed.program, relative(dir, file).split(sep).join("/"), createLocator(src)),
+    );
+  }
+  const surface = buildApiSurface(routes);
+
+  // --baseline <file>: diff instead of listing (§78).
+  if (args.baseline) {
+    let baselineRoutes: RouteEntry[];
+    try {
+      const raw = JSON.parse(await readFile(resolve(args.baseline), "utf8")) as { routes?: RouteEntry[] };
+      baselineRoutes = raw.routes ?? [];
+    } catch (err) {
+      process.stderr.write(`node-doctor surface: cannot read baseline — ${err instanceof Error ? err.message : String(err)}\n`);
+      return 2;
+    }
+    const changes = diffApiSurface(baselineRoutes, surface.routes);
+    const breaking = changes.filter((c) => c.breaking);
+    if (args.json) {
+      process.stdout.write((args.jsonCompact ? JSON.stringify({ changes }) : JSON.stringify({ changes }, null, 2)) + "\n");
+    } else if (changes.length === 0) {
+      process.stdout.write("\n  ✓ No API changes.\n\n");
+    } else {
+      process.stdout.write("\n");
+      for (const c of changes) {
+        process.stdout.write(`  ${c.breaking ? "✖ BREAKING" : "·         "}  ${c.route}  — ${c.detail}\n`);
+      }
+      process.stdout.write(`\n  ${breaking.length} breaking, ${changes.length - breaking.length} other.\n\n`);
+    }
+    return breaking.length > 0 && args.blocking !== "none" ? 1 : 0;
+  }
+
+  if (args.jsonOut) {
+    await writeFile(resolve(args.jsonOut), JSON.stringify(surface, null, 2) + "\n");
+  }
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(surface) : JSON.stringify(surface, null, 2)) + "\n");
+    return 0;
+  }
+
+  const p = useColor(args);
+  process.stdout.write(`\n  Attack surface — ${surface.routes.length} route(s), ${surface.unauthenticated.length} unauthenticated\n\n`);
+  for (const r of surface.routes) {
+    const mark = r.authenticated ? "🔒" : "🌐";
+    process.stdout.write(
+      `  ${mark} ${r.method.padEnd(7)}${r.path.padEnd(34)} ${r.middleware.join(" → ")}\n` +
+        `       ${r.normalizedFilePath}:${r.line}\n`,
+    );
+  }
+  if (surface.unauthenticated.length > 0) {
+    process.stdout.write(
+      `\n  ⚠ ${surface.unauthenticated.length} route(s) have no recognizable auth guard — confirm each is intentionally public.\n`,
+    );
+  }
+  process.stdout.write("\n");
+  void p;
+  return 0;
+};
+
+/** §67 — emit a CycloneDX or SPDX SBOM for the dependency tree (offline). */
+const runSbom = async (args: ParsedArgs): Promise<number> => {
+  const dir = resolve(args.positionals[0] ?? ".");
+  const format = args.framework === "spdx" ? "spdx" : "cyclonedx";
+  try {
+    const doc = await buildSbom(dir, { format });
+    if (args.jsonOut) await writeFile(resolve(args.jsonOut), doc + "\n");
+    else process.stdout.write(doc + "\n");
+    return 0;
+  } catch (err) {
+    process.stderr.write(`node-doctor sbom: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 2;
+  }
+};
+
 const runFix = async (args: ParsedArgs, version: string): Promise<number> => {
   const dir = resolve(args.positionals[0] ?? ".");
   const only = await resolveOnly(args, dir);
@@ -1086,6 +1216,10 @@ export const main = async (argv: string[]): Promise<number> => {
         return 0;
       case "conventions":
         return await runConventions(args);
+      case "sbom":
+        return await runSbom(args);
+      case "surface":
+        return await runSurface(args);
       case "ratchet":
         return await runRatchet(args, version);
       case "ci":

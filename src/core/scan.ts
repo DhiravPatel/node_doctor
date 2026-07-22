@@ -30,6 +30,7 @@ import { loadConfig, BUILTIN_IGNORES, effectiveSetting, settingsForFile, type No
 import { classifyFileContext, isRelaxedInContext } from "./file-context.ts";
 import { runTextScan, selectTextDiagnostics } from "./text-scan.ts";
 import { TEXT_DIAGNOSTICS } from "../diagnostics/secrets/index.ts";
+import { IAC_DIAGNOSTICS } from "../diagnostics/iac/index.ts";
 import { parseDirectives, applySuppressions, suppressionNearMiss } from "./suppress.ts";
 import { calculateScore, type ScoreResult } from "./score.ts";
 import { collectModuleFacts, buildProjectGraph, type ModuleFacts } from "./graph.ts";
@@ -44,6 +45,9 @@ import {
 } from "./cache.ts";
 import { DIAGNOSTICS } from "./registry.ts";
 import { toolVersion } from "./version.ts";
+
+/** Every text-scan diagnostic: committed secrets + infrastructure config. */
+const ALL_TEXT_DIAGNOSTICS = [...TEXT_DIAGNOSTICS, ...IAC_DIAGNOSTICS];
 
 export const SCHEMA_VERSION = 2;
 
@@ -711,7 +715,7 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
   const activeText =
     options.secrets === false
       ? []
-      : selectTextDiagnostics(TEXT_DIAGNOSTICS, config, ignoredTags, project.capabilities);
+      : selectTextDiagnostics(ALL_TEXT_DIAGNOSTICS, config, ignoredTags, project.capabilities);
   const textDiagnosticsRun = activeText.length;
   {
     if (activeText.length > 0) {
@@ -763,7 +767,7 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
       ),
     },
     diagnosticsRun: diagnostics.length + textDiagnosticsRun,
-    diagnosticsAvailable: DIAGNOSTICS.length + TEXT_DIAGNOSTICS.length,
+    diagnosticsAvailable: DIAGNOSTICS.length + ALL_TEXT_DIAGNOSTICS.length,
     findings,
     score,
   };
