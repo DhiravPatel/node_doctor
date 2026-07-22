@@ -1,0 +1,23 @@
+{
+  "findings": [
+    {
+      "id": "id1",
+      "filePath": "/repo/src/a.ts",
+      "normalizedFilePath": "src/a.ts",
+      "line": 10,
+      "column": 1,
+      "plugin": "core",
+      "diagnostic": "deep-nesting",
+      "title": "Deep nesting",
+      "category": "Maintainability",
+      "severity": "warning",
+      "message": "nested too deep 1",
+      "recommendation": "flatten",
+      "tags": [
+        "maintainability"
+      ],
+      "confidence": "medium",
+      "evidenceKey": "ev1"
+    }
+  ]
+}

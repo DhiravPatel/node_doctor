@@ -19,7 +19,9 @@ const entry = existsSync(distEntry) ? distEntry : srcEntry;
 try {
   const mod = await import(pathToFileURL(entry).href);
   const code = await mod.main(process.argv.slice(2));
-  process.exit(typeof code === "number" ? code : 0);
+  // Drain before exiting: stdout is async on a pipe, so a bare process.exit()
+  // discards whatever is still buffered and truncates a large --json report.
+  await mod.exitAfterFlush(typeof code === "number" ? code : 0);
 } catch (err) {
   if (err && err.code === "ERR_UNKNOWN_FILE_EXTENSION") {
     process.stderr.write(

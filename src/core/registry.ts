@@ -53,6 +53,9 @@ import { noDeadAsync } from "../diagnostics/maintainability/no-dead-async.ts";
 import { noDuplicateRouteDefinition } from "../diagnostics/maintainability/no-duplicate-route-definition.ts";
 import { noRedundantTryCatchRethrow } from "../diagnostics/maintainability/no-redundant-try-catch-rethrow.ts";
 import { preferNodeProtocolImports } from "../diagnostics/maintainability/prefer-node-protocol-imports.ts";
+// modernization
+import { noDeprecatedNodeApi } from "../diagnostics/modernization/no-deprecated-node-api.ts";
+import { noNodeBuiltinOnEdge } from "../diagnostics/modernization/no-node-builtin-on-edge.ts";
 // reliability
 import { noCrossRequestStateMutation } from "../diagnostics/reliability/no-cross-request-state-mutation.ts";
 import { noInfiniteRetryWithoutBackoff } from "../diagnostics/reliability/no-infinite-retry-without-backoff.ts";
@@ -138,6 +141,9 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noDuplicateRouteDefinition,
   noRedundantTryCatchRethrow,
   preferNodeProtocolImports,
+  // modernization
+  noDeprecatedNodeApi,
+  noNodeBuiltinOnEdge,
   // reliability
   noCrossRequestStateMutation,
   noInfiniteRetryWithoutBackoff,

@@ -1,0 +1,41 @@
+{
+  "name": "node-doctor-vscode",
+  "displayName": "node.doctor",
+  "description": "Deterministic static analysis for Node.js backends — inline, as you type.",
+  "version": "0.1.0",
+  "publisher": "node-doctor",
+  "license": "MIT",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Linters", "Programming Languages"],
+  "activationEvents": [
+    "onLanguage:javascript",
+    "onLanguage:typescript",
+    "onLanguage:javascriptreact",
+    "onLanguage:typescriptreact"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "node.doctor",
+      "properties": {
+        "nodeDoctor.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the node-doctor binary. Empty resolves node_modules/.bin, then npx."
+        },
+        "nodeDoctor.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the node.doctor language server."
+        }
+      }
+    },
+    "commands": [
+      { "command": "nodeDoctor.restart", "title": "node.doctor: Restart Language Server" },
+      { "command": "nodeDoctor.scanProject", "title": "node.doctor: Scan Whole Project" }
+    ]
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

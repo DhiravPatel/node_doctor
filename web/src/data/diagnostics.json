@@ -1,13 +1,13 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 70,
-  "defaultOn": 55,
+  "total": 76,
+  "defaultOn": 61,
   "optIn": 15,
   "byCategory": {
-    "Security": 28,
-    "Maintainability": 9,
-    "Reliability": 17,
-    "Bugs": 7,
+    "Security": 29,
+    "Maintainability": 10,
+    "Reliability": 19,
+    "Bugs": 9,
     "Performance": 9
   },
   "categoryWeights": {
@@ -234,6 +234,35 @@
       "recommendation": "Remove the stray `console.log`/`console.debug`, or route it through a structured logger (`logger.info(...)`). Keep `console.error`/`console.warn` for real findings."
     },
     {
+      "id": "no-constant-condition",
+      "title": "Condition can never vary",
+      "category": "Bugs",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "control-flow"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Make the test depend on runtime state, or delete the dead branch. If you meant to compare, use `===` instead of `=`; if assigning a constant in the condition is deliberate, wrap it in extra parentheses: `while ((x = 0))`."
+    },
+    {
+      "id": "no-cross-request-state-mutation",
+      "title": "Request data stored in module-scope mutable state",
+      "category": "Reliability",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "concurrency",
+        "state"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Keep request data on the request: use a `const` local inside the handler, hang it off `req`/`res.locals`, or thread it through `AsyncLocalStorage`. A module-scope `let`/`var` is shared by every concurrent request, so one caller's write is another caller's read."
+    },
+    {
       "id": "no-db-connection-per-request",
       "title": "Database client/pool constructed inside a handler",
       "category": "Performance",
@@ -262,6 +291,21 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Drop the `async` keyword if the function never awaits. Keep it only when the body uses `await`/`for await` or genuinely returns a promise."
+    },
+    {
+      "id": "no-deprecated-node-api",
+      "title": "Deprecated or removed Node API",
+      "category": "Maintainability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "deprecation",
+        "modernization"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Replace the deprecated API with its modern equivalent. These calls keep working until the runtime upgrade that removes them, at which point they become an outage rather than a warning."
     },
     {
       "id": "no-disabled-tls-verification",
@@ -548,6 +592,23 @@
       "recommendation": "Use `stream.pipeline(src, dest, cb)` (it forwards errors and cleans up), or attach `.on('error', handler)` to both the source and destination stream."
     },
     {
+      "id": "no-node-builtin-on-edge",
+      "title": "Node built-in used in an edge-runtime project",
+      "category": "Reliability",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "edge",
+        "modernization"
+      ],
+      "requires": [
+        "edge"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Replace the Node built-in with a Web API available at the edge (`fetch`, `crypto.subtle`, `Request`/`Response`, `WebSocketPair`), or run this module on a Node runtime instead of the edge."
+    },
+    {
       "id": "no-nosql-object-injection",
       "title": "NoSQL operator/object injection",
       "category": "Security",
@@ -788,6 +849,21 @@
       "recommendation": "Make the helper async and have the handler await it (`await fs.promises.readFile(...)`, `await execFile(...)`). A synchronous call in a helper on the request path blocks the event loop exactly as one written inline does."
     },
     {
+      "id": "no-tainted-sink-via-helper",
+      "title": "Caller-controlled data reaches an injection sink in a helper",
+      "category": "Security",
+      "severity": "error",
+      "scope": "project",
+      "tags": [
+        "injection",
+        "taint"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Parameterize the sink where it lives: bind SQL parameters (`db.query('… = $1', [value])`), use `execFile`/`spawn` with an argument array instead of a shell string, and never pass request data to `eval`/`Function`. Validating in the handler is not enough — the helper is the sink."
+    },
+    {
       "id": "no-throw-in-finally",
       "title": "throw or return inside a finally block",
       "category": "Bugs",
@@ -879,6 +955,20 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Store the handle and `clearInterval(handle)` on shutdown, or call `handle.unref()` so the interval does not by itself keep the process alive."
+    },
+    {
+      "id": "no-unreachable-code",
+      "title": "Unreachable code after a control-flow exit",
+      "category": "Bugs",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "control-flow"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Delete the dead statements, or move them above the return/throw/break/continue if they were meant to run. Control flow leaves the statement list at the terminator, so nothing after it executes (hoisted `function` and `var` declarations excepted)."
     },
     {
       "id": "no-unsafe-deserialization",

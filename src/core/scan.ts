@@ -33,7 +33,7 @@ import { TEXT_DIAGNOSTICS } from "../diagnostics/secrets/index.ts";
 import { IAC_DIAGNOSTICS } from "../diagnostics/iac/index.ts";
 import { parseDirectives, applySuppressions, suppressionNearMiss } from "./suppress.ts";
 import { calculateScore, type ScoreResult } from "./score.ts";
-import { collectModuleFacts, buildProjectGraph, type ModuleFacts } from "./graph.ts";
+import { collectModuleFacts, buildProjectGraph, type ModuleFacts, type WorkspacePackages } from "./graph.ts";
 import { summarizeEffects } from "./effects.ts";
 import {
   loadCache,
@@ -458,6 +458,19 @@ export interface ScanProjectOptions {
   parallel?: boolean;
   /** Run the whole-tree secret/config-file text scan (default true). */
   secrets?: boolean;
+  /**
+   * Workspace member name → source root (§96). With this set, a bare import of a
+   * sibling package resolves into the graph instead of dead-ending.
+   */
+  workspacePackages?: WorkspacePackages;
+  /**
+   * Module facts from sibling workspace packages. They join the Phase B graph so
+   * reachability can cross a package boundary, but they are never analyzed here —
+   * findings stay attributed to files inside this project.
+   */
+  externalModuleFacts?: ModuleFacts[];
+  /** Receives this project's Phase A module facts (the workspace scanner reuses them). */
+  onModuleFacts?: (facts: ModuleFacts[]) => void;
 }
 
 /** Pool size: 1 when parallel is off, else CPU count (or NODE_DOCTOR_CONCURRENCY), capped by file count. */
@@ -543,7 +556,9 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
   const cacheEnabled = options.cache === true;
   const cache: CacheStore = cacheEnabled ? await loadCache(cacheDir) : { version: 1, files: {} };
   const probe = cacheEnabled ? computeProbe(fileDiagnostics, effectiveSeverity, project.capabilities) : "";
-  const needFacts = projectDiagnostics.length > 0;
+  // The workspace pass needs this project's facts even when this project runs no
+  // project-scope diagnostic of its own — a cache hit must not swallow them.
+  const needFacts = projectDiagnostics.length > 0 || options.onModuleFacts !== undefined;
   const nextCache: CacheStore = { version: 1, files: {} };
 
   const recordParseFailure = (filePath: string, normalizedFilePath: string, message: string): void => {
@@ -662,10 +677,15 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
   }
 
   if (cacheEnabled) await saveCache(cacheDir, nextCache);
+  options.onModuleFacts?.(moduleFactsList);
 
   // Phase B — project pass (only if project-scope diagnostics are active).
   if (projectDiagnostics.length > 0) {
-    const graph = buildProjectGraph(moduleFactsList);
+    const external = options.externalModuleFacts ?? [];
+    const graph = buildProjectGraph(
+      external.length > 0 ? [...moduleFactsList, ...external] : moduleFactsList,
+      options.workspacePackages,
+    );
     for (const facts of moduleFactsList) {
       let sourceText: string;
       try {

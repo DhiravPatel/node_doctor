@@ -164,13 +164,39 @@ export interface ProjectGraph {
   taintedSinkSites(): TaintedSinkSite[];
 }
 
-/** Resolve a relative import specifier to an absolute file key in `modules`. */
+/**
+ * Workspace package name → its source root. Lets an import of `@acme/db` from
+ * `apps/api` resolve into the graph (§96). Threaded in by the scanner rather than
+ * held in module state, so two concurrent scans can never see each other's layout.
+ */
+export type WorkspacePackages = ReadonlyMap<string, string>;
+
+/** Resolve an import specifier to an absolute file key in `modules`. */
 const resolveModule = (
   spec: string,
   fromFile: string,
   modules: Map<string, ModuleFacts>,
+  workspacePackages: WorkspacePackages,
 ): ModuleFacts | null => {
-  if (!spec.startsWith(".")) return null; // bare/package import — not in-project
+  if (!spec.startsWith(".")) {
+    // A bare specifier is only in-project if it names a workspace member.
+    if (workspacePackages.size === 0) return null;
+    for (const [name, root] of workspacePackages) {
+      if (spec !== name && !spec.startsWith(name + "/")) continue;
+      const subpath = spec === name ? "" : spec.slice(name.length + 1);
+      const base = subpath ? resolvePath(root, subpath) : root;
+      if (modules.has(base)) return modules.get(base)!;
+      for (const ext of CANDIDATE_EXTENSIONS) {
+        const candidate = base.endsWith(ext) ? base : base + ext;
+        if (modules.has(candidate)) return modules.get(candidate)!;
+      }
+      // Bare package import → its entry point.
+      for (const entry of ["/src/index.ts", "/src/index.js", "/index.ts", "/index.js"]) {
+        if (modules.has(base + entry)) return modules.get(base + entry)!;
+      }
+    }
+    return null;
+  }
   const base = resolvePath(dirname(fromFile), spec);
   if (modules.has(base)) return modules.get(base)!;
   for (const ext of CANDIDATE_EXTENSIONS) {
@@ -186,7 +212,10 @@ const resolveModule = (
 };
 
 /** Build the project graph and compute reachability from handlers. */
-export const buildProjectGraph = (moduleFactsList: ModuleFacts[]): ProjectGraph => {
+export const buildProjectGraph = (
+  moduleFactsList: ModuleFacts[],
+  workspacePackages: WorkspacePackages = new Map(),
+): ProjectGraph => {
   const modules = new Map<string, ModuleFacts>();
   for (const facts of moduleFactsList) modules.set(facts.filePath, facts);
 
@@ -223,7 +252,7 @@ export const buildProjectGraph = (moduleFactsList: ModuleFacts[]): ProjectGraph 
       if (local) return local;
       const imp = facts.imports.get(name);
       if (imp) {
-        const target = resolveModule(imp.source, fromFile, modules);
+        const target = resolveModule(imp.source, fromFile, modules, workspacePackages);
         if (target) {
           const fn =
             target.exportedFunctions.get(imp.imported) ??
@@ -239,7 +268,7 @@ export const buildProjectGraph = (moduleFactsList: ModuleFacts[]): ProjectGraph 
       const imp = facts.imports.get(callee.object.name);
       const method = getMethodName(call);
       if (imp && imp.imported === "*" && method) {
-        const target = resolveModule(imp.source, fromFile, modules);
+        const target = resolveModule(imp.source, fromFile, modules, workspacePackages);
         if (target) {
           const fn = target.exportedFunctions.get(method);
           if (fn) return fn;
@@ -278,7 +307,7 @@ export const buildProjectGraph = (moduleFactsList: ModuleFacts[]): ProjectGraph 
   }
 
   const resolveImport = (spec: string, fromFile: string): string | null =>
-    resolveModule(spec, fromFile, modules)?.filePath ?? null;
+    resolveModule(spec, fromFile, modules, workspacePackages)?.filePath ?? null;
 
   let importEdgesCache: Map<string, Set<string>> | null = null;
   const importEdges = (): Map<string, Set<string>> => {
@@ -287,7 +316,7 @@ export const buildProjectGraph = (moduleFactsList: ModuleFacts[]): ProjectGraph 
     for (const facts of modules.values()) {
       const targets = new Set<string>();
       for (const { source } of facts.imports.values()) {
-        const t = resolveModule(source, facts.filePath, modules);
+        const t = resolveModule(source, facts.filePath, modules, workspacePackages);
         if (t && t.filePath !== facts.filePath) targets.add(t.filePath);
       }
       edges.set(facts.filePath, targets);
@@ -340,6 +369,16 @@ export const buildProjectGraph = (moduleFactsList: ModuleFacts[]): ProjectGraph 
     return interproceduralTaint;
   };
 
+  // Both site collections are whole-project walks, and Phase B calls them once
+  // per file — memoizing turns an accidental O(files x project) into O(project).
+  // On a 427-file package that is 17s → 1s.
+  //
+  // Frozen because memoizing makes the array shared: today every caller does a
+  // non-mutating .filter(), and a future in-place .sort() would silently corrupt
+  // the result for every later file. Freezing makes that a loud error instead.
+  let taintedSites: TaintedSinkSite[] | null = null;
+  let syncIoSites: ReachableEffect[] | null = null;
+
   const graph: ProjectGraph = {
     modules,
     resolveCallee,
@@ -351,8 +390,9 @@ export const buildProjectGraph = (moduleFactsList: ModuleFacts[]): ProjectGraph 
     hasCycles,
     taintedParamsOf: (fn) => ensureTaint().taintedParams.get(fn) ?? new Set<string>(),
     taintPathTo: (fn) => ensureTaint().pathTo.get(fn) ?? [],
-    taintedSinkSites: () => collectTaintedSinkSites(graph, ensureTaint()),
+    taintedSinkSites: () => (taintedSites ??= Object.freeze(collectTaintedSinkSites(graph, ensureTaint())) as TaintedSinkSite[]),
     reachableSyncIoSites: () => {
+      if (syncIoSites) return syncIoSites;
       const sites: ReachableEffect[] = [];
       const seen = new Set<AstNode>();
       for (const fn of reachable) {
@@ -384,7 +424,8 @@ export const buildProjectGraph = (moduleFactsList: ModuleFacts[]): ProjectGraph 
           }
         }
       }
-      return sites;
+      syncIoSites = Object.freeze(sites) as ReachableEffect[];
+      return syncIoSites;
     },
   };
 

@@ -29,7 +29,7 @@ Express handler with no error path, a `readFileSync` on the request path, an N+1
 across a loop, a `Promise.all` that opens a socket per row, injection and
 secret-handling sinks.
 
-It runs **80 diagnostics** — including a whole-tree scan for **committed secrets**
+It runs **82 diagnostics** — including a whole-tree scan for **committed secrets**
 in `.env`, config, CI, and key files — produces a transparent **0–100 health
 score** entirely on your machine (no network, no telemetry), and can push the
 same knowledge **upstream into your coding agent** as an installable skill and an
@@ -72,16 +72,28 @@ Typical output on a codebase that needs help:
 
 ## Features
 
-- **80 diagnostics** across Security, Reliability, Bugs, Performance, and
+- **82 diagnostics** across Security, Reliability, Bugs, Performance, and
   Maintainability — each with a valid + invalid test; FP-prone ones are opt-in.
 - **Whole-tree secret scan** — committed credentials in `.env`, YAML/CI configs,
   and `*.pem`/`*.key` files, gated to git-tracked files so a local `.env` is safe.
 - **Cross-file call graph + interprocedural taint** — flags a blocking sink, or an
   injection sink fed by request data, in a helper reached from a handler *through other
-  files*, and names the whole path.
+  files*, and names the whole path. In a monorepo the graph **crosses package
+  boundaries**: a handler in `apps/api` reaching a blocking read in `packages/db`
+  is a finding, attributed to the package that contains the code.
+- **Runtime-aware** — detects Bun, Deno, and edge runtimes (Cloudflare Workers,
+  Vercel Edge) and gates diagnostics accordingly; `node:fs` on the edge is an
+  error there and silent everywhere else.
+- **Modernization score** (`node-doctor modernize`) — a second number, separate
+  from health, that goes *up* as you retire deprecated APIs and unsupported Node
+  majors.
+- **CODEOWNERS routing** (`--owners`) and a **PR risk score** (`--risk`) — findings
+  grouped by the team that owns them, plus one explainable number for triage.
 - **CI baseline delta** — reports only the findings your PR introduced.
 - **`deslop`** dead-code scan — unused files, exports, and dependencies.
 - **MCP server** — call node.doctor as a native tool from any MCP client.
+- **Language server** (`node-doctor lsp`) + a VS Code extension — inline diagnostics,
+  hover, and quick fixes on the unsaved buffer, from the same engine as the CLI.
 - **Autofix** (`--fix`), self-contained **HTML report** (`--html-out`),
   **content-hash cache** (`--cache`), and **watch mode** (`--watch`).
 - **Config file** + **inline suppression** with mandatory reasons.
@@ -93,11 +105,11 @@ Typical output on a codebase that needs help:
 
 | Category | Focus | Score weight | Count |
 | --- | --- | --- | --- |
-| **Security** | Injection, secrets, auth, deserialization, committed-secret scan | 2.0 | 31 |
-| **Reliability** | Crashes, hangs, lifecycle | 1.5 | 17 |
-| **Bugs** | Logic errors, wrong results | 1.5 | 7 |
+| **Security** | Injection, secrets, auth, deserialization, committed-secret + IaC scan | 2.0 | 35 |
+| **Reliability** | Crashes, hangs, lifecycle, runtime portability | 1.5 | 19 |
+| **Bugs** | Logic errors, wrong results | 1.5 | 9 |
 | **Performance** | Event-loop stalls, N+1 | 1.0 | 9 |
-| **Maintainability** | Structure, hygiene, dead code, complexity | 0.5 | 9 |
+| **Maintainability** | Structure, hygiene, dead code, complexity, deprecated APIs | 0.5 | 10 |
 
 Run `node-doctor diagnostics` for the full catalog with gating.
 
@@ -157,7 +169,9 @@ node-doctor conventions [dir]                   write CLAUDE.md/AGENTS.md from y
 node-doctor ratchet init|check                  lock current debt; fail only on new findings
 node-doctor surface [--baseline <f>]            map routes + auth posture; diff for breaking changes
 node-doctor sbom [--framework spdx]             CycloneDX / SPDX bill of materials
+node-doctor modernize [directory]               modernization score: deprecated APIs + Node major
 node-doctor mcp                                 run as an MCP server
+node-doctor lsp                                 run as a language server (editors)
 node-doctor init                                scaffold a config
 node-doctor version                             version + platform + Node runtime
 
@@ -170,6 +184,7 @@ Scope    --only <glob> · --diff [base] · --staged · --scope <lines|files>
 Monorepo --project <name|path> (repeatable) · --no-workspaces
 Gate     --blocking <error|warning|none>
 Display  --category <c> (repeatable) · --no-warnings · --verbose
+         --owners (group findings by CODEOWNERS team) · --risk (PR risk score, with --diff)
 Config   --config <path> · --ignore-tag <tag>
 Fix      --yes,-y · --agent <claude|codex|cursor> · --print · --review · --verify
 ```

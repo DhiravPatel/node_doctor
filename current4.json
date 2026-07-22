@@ -1,0 +1,80 @@
+{
+  "findings": [
+    {
+      "id": "id1",
+      "filePath": "/repo/src/a.ts",
+      "normalizedFilePath": "src/a.ts",
+      "line": 10,
+      "column": 1,
+      "plugin": "core",
+      "diagnostic": "deep-nesting",
+      "title": "Deep nesting",
+      "category": "Maintainability",
+      "severity": "warning",
+      "message": "nested too deep 1",
+      "recommendation": "flatten",
+      "tags": [
+        "maintainability"
+      ],
+      "confidence": "medium",
+      "evidenceKey": "ev1"
+    },
+    {
+      "id": "id2",
+      "filePath": "/repo/src/b.ts",
+      "normalizedFilePath": "src/b.ts",
+      "line": 10,
+      "column": 1,
+      "plugin": "core",
+      "diagnostic": "deep-nesting",
+      "title": "Deep nesting",
+      "category": "Maintainability",
+      "severity": "warning",
+      "message": "nested too deep 2",
+      "recommendation": "flatten",
+      "tags": [
+        "maintainability"
+      ],
+      "confidence": "medium",
+      "evidenceKey": "ev2"
+    },
+    {
+      "id": "id3",
+      "filePath": "/repo/src/c.ts",
+      "normalizedFilePath": "src/c.ts",
+      "line": 10,
+      "column": 1,
+      "plugin": "core",
+      "diagnostic": "deep-nesting",
+      "title": "Deep nesting",
+      "category": "Maintainability",
+      "severity": "warning",
+      "message": "nested too deep 3",
+      "recommendation": "flatten",
+      "tags": [
+        "maintainability"
+      ],
+      "confidence": "medium",
+      "evidenceKey": "ev3"
+    },
+    {
+      "id": "id4",
+      "filePath": "/repo/src/d.ts",
+      "normalizedFilePath": "src/d.ts",
+      "line": 10,
+      "column": 1,
+      "plugin": "core",
+      "diagnostic": "deep-nesting",
+      "title": "Deep nesting",
+      "category": "Maintainability",
+      "severity": "warning",
+      "message": "nested too deep 4",
+      "recommendation": "flatten",
+      "tags": [
+        "maintainability"
+      ],
+      "confidence": "medium",
+      "evidenceKey": "ev4"
+    }
+  ]
+}

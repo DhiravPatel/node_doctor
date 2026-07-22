@@ -19,6 +19,8 @@ export type Command =
   | "ratchet"
   | "surface"
   | "sbom"
+  | "lsp"
+  | "modernize"
   | "version";
 
 // "rules" is accepted as a legacy alias for "diagnostics".
@@ -39,6 +41,8 @@ const COMMANDS = new Set<string>([
   "ratchet",
   "surface",
   "sbom",
+  "lsp",
+  "modernize",
   "version",
   "rules",
 ]);
@@ -126,6 +130,8 @@ export interface ParsedArgs {
   fixDiff: boolean; // emit safe autofixes as a unified diff instead of writing
   overwrite: boolean; // (conventions) overwrite an existing file
   history: boolean; // (scan) also scan git history for secrets
+  owners: boolean; // (scan) group findings by CODEOWNERS team
+  risk: boolean; // (delta) print a PR risk score
   errors: string[];
 }
 
@@ -225,6 +231,8 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
     fixDiff: false,
     overwrite: false,
     history: false,
+    owners: false,
+    risk: false,
     errors: [],
   };
 
@@ -348,6 +356,14 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
     }
     if (token === "--history") {
       result.history = true;
+      continue;
+    }
+    if (token === "--owners") {
+      result.owners = true;
+      continue;
+    }
+    if (token === "--risk") {
+      result.risk = true;
       continue;
     }
     if (token === "--workspaces") {

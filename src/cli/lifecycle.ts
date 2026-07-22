@@ -33,6 +33,30 @@ export const hardenProcess = (): void => {
   // Graceful termination with the conventional 128+signal exit codes.
   process.once("SIGINT", () => process.exit(130));
   process.once("SIGTERM", () => process.exit(143));
+};
+
+/**
+ * Exit only once stdout/stderr have actually drained.
+ *
+ * `process.stdout.write()` is asynchronous when stdout is a **pipe** (it is
+ * synchronous for files and TTYs), so `process.exit()` immediately after writing
+ * discards whatever is still buffered. That silently truncated `--json` at a pipe
+ * buffer boundary — `node-doctor . --json | jq` on a large repo emitted 64 KB of a
+ * 400 KB report and `jq` failed on invalid JSON, while the same run redirected to a
+ * file was complete. Draining first keeps the prompt exit without the data loss.
+ */
+export const exitAfterFlush = async (code: number): Promise<never> => {
+  const drain = (stream: NodeJS.WriteStream): Promise<void> =>
+    new Promise((done) => {
+      if (stream.writableLength === 0 || stream.writableEnded) return done();
+      stream.write("", () => done());
+    });
+  try {
+    await Promise.all([drain(process.stdout), drain(process.stderr)]);
+  } catch {
+    /* a closed pipe (EPIPE) is already handled above — never block the exit */
+  }
+  process.exit(code);
 
   // Windows consoles often default to a legacy code page (e.g. 437/1252) that
   // mangles the box-drawing and glyph characters in the terminal report. Switch

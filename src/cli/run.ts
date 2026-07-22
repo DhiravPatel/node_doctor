@@ -9,12 +9,14 @@ import { readFile, writeFile } from "node:fs/promises";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { resolve, join, dirname } from "node:path";
+import { resolve, join, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import { parseArgs, type ParsedArgs } from "./args.ts";
-import { hardenProcess } from "./lifecycle.ts";
+import { hardenProcess, exitAfterFlush } from "./lifecycle.ts";
+// Re-exported so bin/node-doctor.js (shipped verbatim, never compiled) can flush too.
+export { exitAfterFlush } from "./lifecycle.ts";
 import { startSpinner } from "./spinner.ts";
 import { applyConfigActions, parseConfigAction } from "./config-writer.ts";
 import { installCiWorkflow } from "./ci.ts";
@@ -23,7 +25,7 @@ import { scanProject } from "../core/scan.ts";
 import type { ScanReport } from "../core/scan.ts";
 import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
 import { renderReport, renderDelta, renderWorkspaceReport } from "../report/terminal.ts";
-import { isWorkspaceRoot, scanWorkspaces, workspaceFindings } from "../core/workspaces.ts";
+import { isWorkspaceRoot, scanWorkspaces, workspaceFindings, discoverWorkspaces } from "../core/workspaces.ts";
 import { toJson, toJsonError } from "../report/json.ts";
 import { toSarif } from "../report/sarif.ts";
 import { toAnnotations } from "../report/annotations.ts";
@@ -47,6 +49,8 @@ import { writeConventions, CONVENTION_TARGETS } from "../core/conventions.ts";
 import { RATCHET_FILENAME, buildRatchet, compareToRatchet, readRatchet, writeRatchet } from "../core/ratchet.ts";
 import { extractRoutes, buildApiSurface, diffApiSurface, type RouteEntry } from "../core/api-surface.ts";
 import { buildSbom } from "../core/sbom.ts";
+import { buildModernizationReport } from "../core/modernization.ts";
+import { loadCodeowners, groupByOwner, scorePrRisk } from "../core/ownership.ts";
 import { scanGitHistoryForSecrets } from "../core/git-history-secrets.ts";
 import { parseSource } from "../core/parse.ts";
 import { attachParents } from "../core/walk.ts";
@@ -58,6 +62,7 @@ import { shouldEnableDiagnostic, discoverProject } from "../core/project.ts";
 import { BUILTIN_IGNORES, loadConfig, loadConfigWithSource, effectiveSetting } from "../core/config.ts";
 import type { NodeDoctorConfig } from "../core/config.ts";
 import { startMcpServer } from "../mcp/server.ts";
+import { startLanguageServer } from "../lsp/server.ts";
 import type { Finding } from "../core/types.ts";
 
 /** Clickable OSC-8 links only in known-capable interactive terminals. */
@@ -282,11 +287,13 @@ Usage:
   node-doctor surface [--json-out f]     Map every route + its auth posture
   node-doctor surface --baseline <f>     Diff the API surface; fail on breaking changes
   node-doctor sbom [--framework spdx]    Emit a CycloneDX (or SPDX) SBOM
+  node-doctor modernize [dir]            Score how far the code is from current practice
   node-doctor deslop [directory]         Dead-code scan (unused files/exports/deps)
   node-doctor explain <diagnostic-id>          Explain a diagnostic and its fix
   node-doctor explain <file>:<line>      Why a diagnostic fired at a location
   node-doctor init [directory]           Scaffold a node-doctor.config.js
   node-doctor mcp                        Run as an MCP server (stdio) for agents
+  node-doctor lsp                        Run as a language server (stdio) for editors
   node-doctor fix [directory]            Scan, then hand the findings to an AI agent to fix
   node-doctor version                    Print version + platform + Node runtime
 
@@ -308,6 +315,8 @@ Options:
   --no-parallel          Analyze files serially (default: bounded concurrency pool)
   --no-secrets           Skip the whole-tree secret/config-file scan (.env, YAML, keys)
   --history              Also scan git history for secrets that were committed
+  --owners               Group findings by CODEOWNERS team
+  --risk                 (delta) print a PR risk score
   --project <name|path>  (monorepo) scan only matching workspace project(s)
   --no-workspaces        (monorepo) scan the root as a single project
   --yes, -y              (fix) launch the agent without the menu
@@ -634,6 +643,41 @@ const runScan = async (args: ParsedArgs, version: string): Promise<number> => {
 
   if (args.annotations) process.stdout.write(toAnnotations(scopedReport) + "\n");
 
+  // §89 — route findings to the team that owns the file.
+  if (args.owners && !args.json && shown.length > 0) {
+    const rules = await loadCodeowners(dir);
+    if (rules.length === 0) {
+      process.stderr.write("  (no CODEOWNERS file found — nothing to route)\n");
+    } else {
+      process.stdout.write("\n  By owner\n");
+      for (const group of groupByOwner(shown, rules)) {
+        process.stdout.write(`    ${group.owner.padEnd(24)} ${group.findings.length} finding(s)\n`);
+      }
+      process.stdout.write("\n");
+    }
+  }
+
+  // §90 — PR risk for the change under review. Only meaningful with a diff scope:
+  // without one, "introduced" would be the whole codebase, which is not a PR risk.
+  // Never silently ignored — that is what `--risk` did before, and a flag that does
+  // nothing is worse than one that fails.
+  if (args.risk) {
+    if (args.diff === undefined && !args.staged) {
+      process.stderr.write(
+        "node-doctor: --risk scores the change under review, so it needs a diff scope.\n" +
+          "  Use `--risk --diff [base]` or `--risk --staged`, or score two reports with\n" +
+          "  `node-doctor delta --baseline <f> --current <f> --risk`.\n",
+      );
+      return 2;
+    }
+    const risk = scorePrRisk(shown, new Set(shown.map((f) => f.normalizedFilePath)).size);
+    if (!args.json) {
+      process.stdout.write(`\n  PR risk: ${risk.level.toUpperCase()} (${risk.score})\n`);
+      for (const reason of risk.reasons) process.stdout.write(`    · ${reason}\n`);
+      process.stdout.write("\n");
+    }
+  }
+
   // §68 — history secrets are reported alongside the scan, not scored (they are
   // historical facts about the repo, not defects in the current tree).
   if (args.history) {
@@ -714,12 +758,23 @@ const runDelta = async (args: ParsedArgs): Promise<number> => {
       renderDeltaMarkdown(introduced, resolved, { headScore: current.score ? { score: current.score.score, label: current.score.label } : undefined }),
     );
   }
+  // Computed before the emit: a second top-level write would make `--json` output
+  // unparseable, and `jq` exits 0 on two documents, so the CI gate reads garbage.
+  const risk = args.risk
+    ? scorePrRisk(introduced, new Set(introduced.map((f) => f.normalizedFilePath)).size)
+    : undefined;
+
   if (args.json) {
-    process.stdout.write(JSON.stringify({ introduced, resolved }, null, 2) + "\n");
+    process.stdout.write(JSON.stringify(risk ? { introduced, resolved, risk } : { introduced, resolved }, null, 2) + "\n");
   } else {
     process.stdout.write(
       renderDelta(introduced, resolved, { color: useColor(args), hyperlinks: supportsHyperlinks(args) }) + "\n",
     );
+    if (risk) {
+      process.stdout.write(`\n  PR risk: ${risk.level.toUpperCase()} (${risk.score})\n`);
+      for (const reason of risk.reasons) process.stdout.write(`    · ${reason}\n`);
+      process.stdout.write("\n");
+    }
   }
   return deltaHasBlocking(introduced, args.blocking) ? 1 : 0;
 };
@@ -1130,6 +1185,51 @@ const runSbom = async (args: ParsedArgs): Promise<number> => {
   }
 };
 
+/** §85 — how far this codebase is from current practice, tracked separately from health. */
+const runModernize = async (args: ParsedArgs): Promise<number> => {
+  const { dir, config } = await resolveScanTarget(args);
+  const report = await scanProject({ rootDirectory: dir, config, parallel: args.parallel, secrets: false });
+
+  // A workspace root's own manifest usually declares no `engines`, so scoring from
+  // it alone reports "no engines.node declared" and silently drops the 25-point EOL
+  // penalty even when every member targets an end-of-life Node. Take the OLDEST
+  // major any member declares — that is the one the whole tree has to run on.
+  let capabilities = report.project.capabilities;
+  if (await isWorkspaceRoot(dir)) {
+    const members = await discoverWorkspaces(dir);
+    const selected = args.projectFilter.length > 0
+      ? members.filter((m) => args.projectFilter.some((sel) => m.endsWith(sel) || basename(m) === sel))
+      : members;
+    const majors: number[] = [];
+    for (const member of selected) {
+      const caps = (await discoverProject(member)).capabilities;
+      for (const c of caps) if (c.startsWith("node:")) majors.push(Number(c.slice(5)));
+    }
+    const oldest = majors.filter(Number.isFinite).sort((a, b) => a - b)[0];
+    if (oldest !== undefined) {
+      capabilities = [...capabilities.filter((c) => !c.startsWith("node:")), `node:${oldest}`];
+    }
+  }
+
+  const mod = buildModernizationReport(report.findings, capabilities, report.project.totalLines, report.project.complete && report.project.parseFailures.length === 0);
+  // Honest coverage: a parse failure is a gap, never a silent "current" (§5.6).
+  const unparsed = report.project.parseFailures.length;
+  if (args.json) {
+    const out = { ...mod, parseFailures: unparsed, complete: report.project.complete };
+    process.stdout.write((args.jsonCompact ? JSON.stringify(out) : JSON.stringify(out, null, 2)) + "\n");
+    return 0;
+  }
+  process.stdout.write(`\n  Modernization: ${mod.score}/100 (${mod.label})\n\n`);
+  for (const s of mod.signals) process.stdout.write(`    ${String(s.count).padStart(3)} × ${s.title}  (${s.diagnostic})\n`);
+  if (mod.signals.length > 0) process.stdout.write("\n");
+  for (const n of mod.notes) process.stdout.write(`    · ${n}\n`);
+  if (unparsed > 0) {
+    process.stdout.write(`    ⚠ ${unparsed} file(s) could not be parsed — this score is incomplete.\n`);
+  }
+  process.stdout.write("\n");
+  return 0;
+};
+
 const runFix = async (args: ParsedArgs, version: string): Promise<number> => {
   const dir = resolve(args.positionals[0] ?? ".");
   const only = await resolveOnly(args, dir);
@@ -1211,6 +1311,11 @@ export const main = async (argv: string[]): Promise<number> => {
         return await runExplain(args);
       case "init":
         return await runInit(args);
+      case "modernize":
+        return await runModernize(args);
+      case "lsp":
+        await startLanguageServer();
+        return 0;
       case "mcp":
         await startMcpServer();
         return 0;
@@ -1255,10 +1360,10 @@ const invokedDirectly = (): boolean => {
 
 if (invokedDirectly()) {
   main(process.argv.slice(2)).then(
-    (code) => process.exit(code),
+    (code) => exitAfterFlush(code),
     (err) => {
       process.stderr.write(`node-doctor: ${err instanceof Error ? err.stack : String(err)}\n`);
-      process.exit(2);
+      return exitAfterFlush(2);
     },
   );
 }

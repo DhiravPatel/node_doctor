@@ -64,9 +64,18 @@ const allDependencies = (pkg: PackageManifest): Record<string, string> => ({
 /**
  * Pure capability detection — testable without touching the filesystem.
  */
+export interface RuntimeMarkers {
+  /** bun.lockb / bunfig.toml present. */
+  bun?: boolean;
+  /** deno.json(c) present. */
+  deno?: boolean;
+  /** wrangler.toml, vercel edge config, or an `edge` runtime export. */
+  edge?: boolean;
+}
+
 export const detectCapabilities = (
   pkg: PackageManifest | null,
-  opts: { hasTsconfig?: boolean } = {},
+  opts: { hasTsconfig?: boolean } & RuntimeMarkers = {},
 ): Set<string> => {
   const caps = new Set<string>(["node"]);
   const manifest = pkg ?? {};
@@ -88,6 +97,20 @@ export const detectCapabilities = (
 
   const nodeMajor = majorVersion(manifest.engines?.node);
   if (nodeMajor !== null) caps.add(`node:${nodeMajor}`);
+
+  // Runtime detection (§94, §95). These are additive: a project can target Node
+  // and deploy some routes to the edge, and both rule sets should apply.
+  if (opts.bun || "bun-types" in deps || "@types/bun" in deps) caps.add("bun");
+  if (opts.deno) caps.add("deno");
+  // Deliberately NOT keyed on devDependencies: `wrangler` is a CLI and
+  // `@cloudflare/workers-types` is a types-only package, so both sit in the
+  // devDependencies of repos whose runtime is plain Node. Claiming "edge" from
+  // one of those turns every `node:fs` in a normal Express server into an error.
+  // A deploy manifest (wrangler.toml) or a runtime dependency is required.
+  const runtimeDeps = manifest.dependencies ?? {};
+  if (opts.edge || "@vercel/edge" in runtimeDeps || "@cloudflare/workers-types" in runtimeDeps) {
+    caps.add("edge");
+  }
 
   return caps;
 };
@@ -113,8 +136,20 @@ const readManifest = async (rootDirectory: string): Promise<PackageManifest | nu
 /** Discover a project's name and capabilities from disk. */
 export const discoverProject = async (rootDirectory: string): Promise<ProjectInfo> => {
   const pkg = await readManifest(rootDirectory);
-  const hasTsconfig = await exists(join(rootDirectory, "tsconfig.json"));
-  const capabilities = detectCapabilities(pkg, { hasTsconfig });
+  const [hasTsconfig, bunLock, bunfig, denoJson, denoJsonc, wrangler] = await Promise.all([
+    exists(join(rootDirectory, "tsconfig.json")),
+    exists(join(rootDirectory, "bun.lockb")),
+    exists(join(rootDirectory, "bunfig.toml")),
+    exists(join(rootDirectory, "deno.json")),
+    exists(join(rootDirectory, "deno.jsonc")),
+    exists(join(rootDirectory, "wrangler.toml")),
+  ]);
+  const capabilities = detectCapabilities(pkg, {
+    hasTsconfig,
+    bun: bunLock || bunfig,
+    deno: denoJson || denoJsonc,
+    edge: wrangler,
+  });
   const name = (pkg?.name && pkg.name.trim()) || basename(rootDirectory) || "project";
   return { name, rootDirectory, capabilities };
 };

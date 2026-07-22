@@ -11,7 +11,7 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
-### Diagnostics (62 → 70)
+### Diagnostics (62 → 82)
 
 - **`no-prototype-pollution`** (Security) — a write with a caller-controlled object
   key, or a literal `__proto__`/`constructor` write.
@@ -70,6 +70,134 @@ Verified at zero false positives across 213 files of real TypeScript; the
   (can even re-enable a globally-off diagnostic for specific files).
 - **`rootDir`** config redirect, resolved against the config file's own location.
 - **Generated JSON Schema** (`npm run gen:schema`) for editor autocomplete/validation.
+
+### Fixed
+
+- **`--json` was silently truncated when piped.** `process.stdout.write()` is
+  asynchronous on a pipe, so exiting immediately after the write discarded whatever
+  was still buffered: a 400 KB report came out as exactly 65,536 or 131,072 bytes —
+  a pipe-buffer boundary — so `node-doctor . --json | jq` failed on invalid JSON
+  while the identical run redirected to a file was complete. Both exit paths now
+  drain first. This affected every machine-readable mode on any repo large enough,
+  and only through a pipe, which is why a file-redirect test never saw it.
+- **False positives in `no-deprecated-node-api`.** The rule matched the last two
+  segments of a member path with no binding resolution, so it reported Prisma's
+  `db.domain.create()`, mem-fs's `generator.fs.exists()`, the `url-parse` package,
+  `this.domain.create()`, `opts.crypto.createCipher()`, and every `const fs = { exists }`
+  test mock. `new Buffer()` fired on any constructor merely *named* `Buffer` — a
+  local ring-buffer class, an import, even a parameter. The receiver must now resolve
+  to a real Node built-in imported in that file, and `Buffer` must be the global.
+  This loses `this.fs = require("fs"); this.fs.exists()`; under "a false positive is
+  a release blocker" that is the right trade.
+- **A devDependency no longer marks a whole project "edge".** `wrangler` is a CLI and
+  `@cloudflare/workers-types` is types-only, so both live in the devDependencies of
+  ordinary Node repos — and every `node:fs` in a plain Express server was reported as
+  an error with no escape hatch. Detection now requires a deploy manifest or a runtime
+  dependency.
+- **`no-node-builtin-on-edge` was wrong about what the edge provides.** Cloudflare
+  ships `net`, `tls`, `os`, `http`, `fs` and more under `nodejs_compat` — the documented
+  Hyperdrive pattern is literally `import net from "node:net"` — and the rule asserted
+  otherwise at error/high confidence without ever reading the compatibility flags. The
+  set is now only what no edge runtime provides. It also flagged type-only imports
+  (erased at compile time) and Node-only build scripts and bundler configs, which the
+  user cannot change.
+- **Cross-package findings were nondeterministic and could be dropped.** The §96 pass
+  ordered sibling module facts by scan-*completion* (I/O timing), which reached the
+  taint hop trail baked into the message and hashed into `evidenceKey` — so the same
+  tree produced different keys run to run and CI reported a pre-existing finding as
+  newly introduced. Separately, deduping by `evidenceKey` (deliberately
+  position-independent) swallowed a genuine cross-package finding whenever the package
+  already had a byte-identical boilerplate site, and the `--cache` fast path returned no
+  module facts at all, so a warm run silently lost every cross-package finding and
+  flipped the gate from fail to pass.
+- **CODEOWNERS matching routed findings to the wrong team.** `docs/*` and the ubiquitous
+  `packages/*` recursed into nested files (GitHub documents them as matching one level),
+  and `**` could not match zero directories, so `src/**/*.ts` missed `src/index.ts` and
+  even inverted last-match-wins.
+- **`delta --json --risk` emitted two top-level JSON documents**, so the output was
+  unparseable — and `jq` exits 0 on two documents, so a CI threshold gate read garbage
+  rather than failing.
+- **`modernize` claimed `100/100 (current)` over a tree it could not parse**, violating
+  the honest-coverage invariant `scan` enforces; and at a workspace root it read only
+  the root manifest, dropping the 25-point end-of-life penalty even when every member
+  declared an EOL Node.
+- **`--risk` was silently ignored** on the `scan --diff` path it is documented for. It
+  now works there, and fails loudly when given without a diff scope.
+- **`scorePrRisk` reported "no findings introduced" when findings were introduced**
+  (the fallback keyed off an unmatched reason bucket, not the finding count), printing a
+  reason that contradicted the non-zero score beside it.
+- **The §96 pass was superlinear in member count.** It rebuilt a whole-monorepo graph
+  once per imported member; it now uses only the transitive importers of that member,
+  which is the set that can actually reach into it. On 40 packages / 801 files:
+  **16.7s → 0.94s**, and linear rather than ~3× per doubling.
+- **Phase B was accidentally quadratic.** `taintedSinkSites()` and
+  `reachableSyncIoSites()` are whole-project AST walks, and the project pass calls
+  them **once per file** — so the walk ran once per file instead of once per scan.
+  On a 427-file package that was 17.9s of an 18s scan; a 4,000-file monorepo was
+  effectively unscannable. Both are now memoized per graph: the same package takes
+  **1.0s**, and the full 4,101-file, 11-project monorepo scans in **22s**. Locked in
+  by a regression test that asserts each collection is computed once per graph.
+
+### Runtime awareness & organizational routing (§83, §85, §89, §90, §94, §95, §96)
+
+- **Cross-package call graph (§96)** — in a workspace, the import graph now crosses
+  package boundaries: a handler in `apps/api` that reaches a `readFileSync` in
+  `packages/db` is a finding, where before each package was analyzed in isolation
+  and the request path simply vanished at the `@acme/db` specifier. Findings are
+  attributed to the package that **contains** the code, not the one that reaches it
+  — that is the team who has to fix it.
+  - Bounded by design: only members another member actually imports are revisited,
+    and results are deduplicated by `evidenceKey`, so what survives is exactly the
+    set that needed the cross-package edge to be seen at all.
+  - Workspace layout is threaded through `buildProjectGraph` rather than held in
+    module state, so two concurrent scans can never see each other's packages.
+- **Runtime detection (§94, §95)** — Bun (`bun.lockb`, `bunfig.toml`, `bun-types`),
+  Deno (`deno.json(c)`), and edge runtimes (`wrangler.toml`, `@vercel/edge`,
+  `@cloudflare/workers-types`) are detected and exposed as capabilities.
+- **`no-node-builtin-on-edge`** (Reliability) — importing `node:fs`,
+  `child_process`, `worker_threads` and friends in a project that targets an edge
+  runtime, where they do not exist. Gated on the `edge` capability, so it is
+  completely silent on a normal Node service. Handles both `import` and `require`.
+- **`no-deprecated-node-api`** (Maintainability, §83) — `url.parse`, `url.resolve`,
+  `util.isArray`, `util._extend`, `fs.exists`, `crypto.createCipher` /
+  `createDecipher`, `os.tmpDir`, `process.binding`, `domain.create`, and
+  `new Buffer()`. Matched on the member path, so `router.parse(x)` and
+  `queue.exists(k)` stay silent.
+- **`node-doctor modernize` (§85)** — a modernization score separate from the health
+  score, because the two diverge: code can be entirely correct and still be built on
+  `new Buffer` and a Node major that left support two years ago. Density-based (so a
+  large codebase is not punished for being large), with a 25-point penalty and an
+  explicit note when `engines.node` targets an end-of-life release.
+- **`--owners` (§89)** — group findings by CODEOWNERS team, following GitHub's
+  semantics (last matching rule wins; a rule with no owners deliberately clears
+  ownership). Unowned findings are grouped under `(unowned)` rather than dropped —
+  silently hiding a finding because nobody claimed the file is exactly how it goes
+  unfixed.
+- **`--risk` (§90)** — one explainable PR risk score on the delta path, from the
+  findings introduced and the breadth of the change, with plain-language reasons.
+  An unrecognized category can no longer produce `NaN` (which would have surfaced
+  as "low risk" and waved the change through).
+
+### Editor integration: a language server (§41, §53)
+
+- **`node-doctor lsp`** — a Language Server over stdio, so findings appear under the
+  cursor as you type instead of behind a CLI run. The wire protocol is hand-rolled
+  (Content-Length framing) rather than pulling in `vscode-languageserver`:
+  node.doctor still ships **zero runtime dependencies**, and the decoder is a pure
+  function, so the nasty cases — a header split across reads, two messages in one
+  chunk, a multi-byte character on a boundary — are unit-tested rather than hoped for.
+- Analyzes the **unsaved buffer**, so squiggles track what you are actually typing.
+  Per-document debounce with supersede; a newer edit cancels a stale analysis.
+- **A syntax error mid-edit keeps the last good diagnostics** rather than flashing
+  the list empty on every incomplete keystroke.
+- **Hover** cards (title, category, severity, the exact fix) and a **quick fix** that
+  inserts a suppression comment *with a mandatory reason placeholder* — a bare
+  suppression would only trade one finding for `suppression-without-reason`.
+- Only file-scope diagnostics run in the editor; cross-file and secret scanning stay
+  with the CLI, where they belong.
+- **VS Code extension** under `editors/vscode` — a thin client, so the editor can
+  never disagree with CI. Resolves the server as: setting → the workspace's pinned
+  `node_modules/.bin/node-doctor` → `npx`.
 
 ### Security & API depth
 

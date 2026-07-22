@@ -136,8 +136,10 @@ export const computeInterproceduralTaint = (graph: ProjectGraph): Interprocedura
   }
   const queue: Task[] = [];
 
-  // Seed from every request handler.
-  for (const facts of graph.modules.values()) {
+  // Seed from every request handler, in sorted path order — first arrival wins
+  // `pathTo`, so Map insertion order would decide which caller owns the hop trail.
+  for (const file of [...graph.modules.keys()].sort()) {
+    const facts = graph.modules.get(file)!;
     for (const handler of facts.handlers) {
       const seeded = seedHandlerTaint(handler);
       if (seeded.size === 0) continue;
