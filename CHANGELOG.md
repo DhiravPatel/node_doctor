@@ -11,6 +11,29 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Diagnostics — frontier wave D (§140/§137/§138)
+
+Three opt-in, precision-first rules anchored on the highest-severity item in the
+frontier catalog. Each was hardened against an adversarial false-positive hunt and
+produces zero findings on this repo's own source.
+
+- **`no-cross-tenant-cache-key`** (Security, §140) — the flagship: a cache write
+  (`cache.set`/`redis.set`) whose value depends on a user/tenant identity
+  (`req.user.id`, `req.tenantId`, …) that the key omits — so one user is served
+  another's data from cache. Fires only when the key is a fully-readable inline
+  expression proven to omit the id (opaque/variable keys stay silent), and excludes
+  audit-stamp fields (`createdBy`), per-session keys (`sess:${sid}`), and generic
+  non-cache receivers.
+- **`no-dropped-abort-signal`** (Reliability, §137) — a function that receives an
+  `AbortSignal` but makes an outbound `fetch`/`axios`/`got` call without forwarding
+  it, so a caller's abort leaves the request running. Excludes unix-signal params
+  (string-compared / interpolated / switched).
+- **`no-liveness-check-with-dependency`** (Reliability, §138) — a liveness probe
+  (`/healthz`, `/livez`, …) that checks a downstream dependency (DB / network /
+  Redis), turning one dependency failure into a fleet-wide restart. Segment-based
+  path matching (readiness paths and content routes like `/health-tips` excluded);
+  in-memory caches are not treated as a network dependency.
+
 ### Diagnostics — frontier wave C (§132/§135/§152)
 
 Three opt-in, precision-first rules for outage-class defects nothing else catches
@@ -55,7 +78,7 @@ provider-key / PEM patterns — never an entropy heuristic. The generated fences
 verified to actually cover what they flag (scan → write → re-scan reports zero
 exposed).
 
-### Diagnostics (62 → 123)
+### Diagnostics (62 → 126)
 
 Frontier wave B (FEATURE.md §147/§148) — two opt-in, precision-first rules
 (`defaultEnabled: false`, so they never affect the default health score), each

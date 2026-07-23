@@ -82,8 +82,10 @@ import { noSequentialIndependentAwaits } from "../diagnostics/performance/no-seq
 // reliability
 import { noCacheWithoutTtl } from "../diagnostics/reliability/no-cache-without-ttl.ts";
 import { noCrossRequestStateMutation } from "../diagnostics/reliability/no-cross-request-state-mutation.ts";
+import { noDroppedAbortSignal } from "../diagnostics/reliability/no-dropped-abort-signal.ts";
 import { noInfiniteRetryWithoutBackoff } from "../diagnostics/reliability/no-infinite-retry-without-backoff.ts";
 import { noListenerAddedPerRequest } from "../diagnostics/reliability/no-listener-added-per-request.ts";
+import { noLivenessCheckWithDependency } from "../diagnostics/reliability/no-liveness-check-with-dependency.ts";
 import { noLostAsyncContext } from "../diagnostics/reliability/no-lost-async-context.ts";
 import { noMissingStreamErrorHandler } from "../diagnostics/reliability/no-missing-stream-error-handler.ts";
 import { noRetryAmplification } from "../diagnostics/reliability/no-retry-amplification.ts";
@@ -93,6 +95,7 @@ import { noUnclearedModuleInterval } from "../diagnostics/reliability/no-unclear
 import { requireSigtermHandler } from "../diagnostics/reliability/require-sigterm-handler.ts";
 // security
 import { jwtMissingExpiration } from "../diagnostics/security/jwt-missing-expiration.ts";
+import { noCrossTenantCacheKey } from "../diagnostics/security/no-cross-tenant-cache-key.ts";
 import { noDisabledTlsVerification } from "../diagnostics/security/no-disabled-tls-verification.ts";
 import { noErrorLeakToClient } from "../diagnostics/security/no-error-leak-to-client.ts";
 import { noEvalWithInput } from "../diagnostics/security/no-eval-with-input.ts";
@@ -205,8 +208,10 @@ export const DIAGNOSTICS: Diagnostic[] = [
   // reliability
   noCacheWithoutTtl,
   noCrossRequestStateMutation,
+  noDroppedAbortSignal,
   noInfiniteRetryWithoutBackoff,
   noListenerAddedPerRequest,
+  noLivenessCheckWithDependency,
   noLostAsyncContext,
   noMissingStreamErrorHandler,
   noRetryAmplification,
@@ -216,6 +221,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   requireSigtermHandler,
   // security
   jwtMissingExpiration,
+  noCrossTenantCacheKey,
   noDisabledTlsVerification,
   noErrorLeakToClient,
   noEvalWithInput,

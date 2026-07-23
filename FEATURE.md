@@ -1252,12 +1252,16 @@ Timeouts must *decrease* down a call chain. When a caller's timeout is shorter t
 Propagate timeout values along the call graph and flag inconsistent budgets. The natural companion to §137 and a direct extension of the `require-fetch-timeout` rule that already ships.
 
 ## 137. Cancellation & AbortSignal Propagation ★ Differentiator
-**Status: Planned** · ⚙️ Now
+**Status: Detected** (`no-dropped-abort-signal`, opt-in) · ⚙️ Now
+
+**Shipped (opt-in), the file-local slice:** `no-dropped-abort-signal` (Reliability/warn/high) fires when a function that directly receives an `AbortSignal` (a `signal`/`abortSignal` param, or a destructured `{ signal }`) makes a cancellable outbound call — `fetch`/`axios`/`got` — in its own body without forwarding the signal, so an abort by the caller leaves the request running (orphaned work, a held connection). It only fires when the config slot is demonstrably present-without-`signal` or absent (a spread or opaque config → silent), and it excludes a `signal` param that is actually a **unix signal** (string-compared, switched, or interpolated as `${signal}` — a shutdown handler, not a cancellation token). Cross-file signal propagation through the call graph remains Planned.
 
 A client disconnects, the handler is aborted — and the three downstream calls it started keep running, holding connections and burning budget. Track whether an `AbortSignal` **propagates** from the request boundary through helpers to every outbound call, and flag the hop where it's dropped. Distinct from "has a timeout": this is about the signal surviving the call chain.
 
 ## 138. Health-Check Correctness & Cascading-Failure Risk ★
-**Status: Planned** · ⚙️ Now
+**Status: Detected** (`no-liveness-check-with-dependency`, opt-in) · ⚙️ Now
+
+**Shipped (opt-in), the high-value "too deep liveness" slice:** `no-liveness-check-with-dependency` (Reliability/warn/high) flags a route on a LIVENESS path (`/healthz`, `/livez`, `/ping`, `/healthcheck`, …) whose handler makes a downstream dependency call — a DB query, an outbound `fetch`/`axios`, or a networked Redis/memcached call — because when that dependency is slow or down, every pod reports unhealthy and the orchestrator restarts the whole fleet: one dependency failure becomes a total outage. Path matching is SEGMENT-based (so `/health-tips` and `/healthy-recipes` are content routes, not probes, and `/healthcheck`/`/health_check` are correctly caught), READINESS paths take precedence (they SHOULD check deps), and an in-memory cache read is NOT treated as a network dependency. The "too shallow always-200" case is deliberately not attempted (too noisy).
 
 Both failure modes of a health endpoint, statically:
 
@@ -1276,7 +1280,9 @@ Derive a fault-injection plan from the code: enumerate every external call site 
 # Part XXXIV — Data Correctness & Lineage
 
 ## 140. Cache-Key Correctness & Cross-Tenant Poisoning ★★ Flagship
-**Status: Planned** · ⚙️ Now
+**Status: Detected** (`no-cross-tenant-cache-key`, opt-in) · ⚙️ Now
+
+**Shipped, precision-first (opt-in) — the highest-severity item in this catalog.** `no-cross-tenant-cache-key` (Security/warn/high) flags a cache write `<cache>.set(key, value)` whose VALUE carries a user/tenant identity (`req.user.id`, `req.tenantId`, `ctx.state.user`, a bare `userId`/`tenantId`/…) that the KEY omits — the silent cross-tenant leak where user A's cached data is served to user B. It reasons only on what it can prove: the key must be a fully-readable inline expression (a template/string/concat, or a variable resolving to one) shown to omit the id — an OPAQUE key (a bare variable, a param, a key-building call) stays silent, since it may carry the id where it was built. Corpus-hardened against three FP classes: an id in an **audit stamp** (`createdBy: req.user.id`) of an otherwise-shared value, a **per-session key** (`sess:${sid}`, already per-user), and generic non-cache receivers (`store`). Cross-file value taint (an id injected one hop up) is a deliberate recall gap.
 
 **A cache key that omits a variable the cached value depends on is a data-leak bug, and §16 doesn't cover it.** If the response varies by `userId` or `tenantId` but the key is `` `orders:${status}` ``, one customer is served another's data — from cache, intermittently, and almost impossible to reproduce.
 

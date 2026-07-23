@@ -1,13 +1,13 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 123,
+  "total": 126,
   "defaultOn": 95,
-  "optIn": 28,
+  "optIn": 31,
   "byCategory": {
     "Performance": 12,
-    "Security": 57,
+    "Security": 58,
     "Maintainability": 10,
-    "Reliability": 30,
+    "Reliability": 32,
     "Bugs": 14
   },
   "categoryWeights": {
@@ -640,6 +640,21 @@
       "recommendation": "Keep request data on the request: use a `const` local inside the handler, hang it off `req`/`res.locals`, or thread it through `AsyncLocalStorage`. A module-scope `let`/`var` is shared by every concurrent request, so one caller's write is another caller's read."
     },
     {
+      "id": "no-cross-tenant-cache-key",
+      "title": "Cache key omits the tenant/user identity its value depends on",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "cache",
+        "security"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Include the user/tenant identifier in the cache key (e.g. `orders:${req.user.id}:${status}`) so each tenant's value is keyed separately. A key that omits the id lets one user be served another user's cached data."
+    },
+    {
       "id": "no-db-connection-per-request",
       "title": "Database client/pool constructed inside a handler",
       "category": "Performance",
@@ -698,6 +713,21 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Keep verification on. If the peer uses a private CA, provide it via the `ca` option (`{ ca: fs.readFileSync('ca.pem') }`) instead of disabling verification. `rejectUnauthorized: false` accepts any certificate and enables man-in-the-middle."
+    },
+    {
+      "id": "no-dropped-abort-signal",
+      "title": "Outbound call drops an in-scope AbortSignal",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "async",
+        "reliability"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Forward the received `AbortSignal` into the outbound request — pass `{ signal }` (or add `signal` to the existing options/config object) so an abort by the caller actually cancels the request instead of leaving it running."
     },
     {
       "id": "no-duplicate-route-definition",
@@ -906,6 +936,20 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Register listeners once at startup, or use `emitter.once(...)` inside the handler and remove it with `removeListener` when the request completes."
+    },
+    {
+      "id": "no-liveness-check-with-dependency",
+      "title": "Liveness probe checks a downstream dependency",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "reliability"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Keep the liveness probe trivial — return 200 without touching any dependency, so it only proves the process is alive. Move the DB/HTTP/Redis check to a separate readiness endpoint (`/readyz`): a failing readiness probe pulls the pod out of rotation instead of restarting it, so a shared-dependency blip degrades capacity gracefully rather than restarting the whole fleet."
     },
     {
       "id": "no-llm-output-in-sink",
