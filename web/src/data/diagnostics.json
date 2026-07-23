@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 113,
-  "defaultOn": 90,
+  "total": 118,
+  "defaultOn": 95,
   "optIn": 23,
   "byCategory": {
     "Performance": 11,
-    "Security": 54,
+    "Security": 55,
     "Maintainability": 10,
     "Reliability": 28,
-    "Bugs": 10
+    "Bugs": 14
   },
   "categoryWeights": {
     "Security": 2,
@@ -525,6 +525,20 @@
       "recommendation": "Collect the promises and `await Promise.all(items.map((x) => work(x)))` instead of awaiting inside the loop. If the collection is caller-sized, bound the fan-out with `p-limit`."
     },
     {
+      "id": "no-bigint-precision-loss",
+      "title": "BigInt coerced to a number loses precision",
+      "category": "Bugs",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "numeric"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Keep 64-bit ids as BigInt or convert losslessly with `String(x)` / `x.toString()`. `Number(x)` rounds any value above 2^53 to the nearest double, and `+x` throws `TypeError` on a BigInt."
+    },
+    {
       "id": "no-cache-without-ttl",
       "title": "Cache write with no TTL",
       "category": "Reliability",
@@ -1004,6 +1018,21 @@
       "recommendation": "Replace the Node built-in with a Web API available at the edge (`fetch`, `crypto.subtle`, `Request`/`Response`, `WebSocketPair`), or run this module on a Node runtime instead of the edge."
     },
     {
+      "id": "no-nondeterministic-stable-key",
+      "title": "Nondeterministic value used as a stable key",
+      "category": "Bugs",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "crypto"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Build the key from the stable logical inputs only. Sign/cache/deduplicate over the request's identifying fields; never seed a stable key with `Math.random()`/`crypto.randomUUID()` at call time. For an idempotency key, use the value the CLIENT sends (stable across its retries), not a fresh random draw."
+    },
+    {
       "id": "no-nosql-object-injection",
       "title": "NoSQL operator/object injection",
       "category": "Security",
@@ -1309,6 +1338,20 @@
       "recommendation": "Move the write to POST/PUT/PATCH/DELETE (and protect it with a CSRF token). GET must stay safe and idempotent: prefetchers, crawlers and a cross-site `<img src>` all trigger it with the victim's cookies, and CSRF defenses do not cover GET."
     },
     {
+      "id": "no-stateful-global-regex-test",
+      "title": "Stateful global/sticky regex reused with `.test()`/`.exec()`",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "correctness"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Drop the `g`/`y` flag for a membership check (`/^\\d+$/` instead of `/^\\d+$/g`) — a stateless regex gives the same answer every call. If you truly need the flag, reset `re.lastIndex = 0` before each `.test()`, or match against a fresh literal."
+    },
+    {
       "id": "no-swallowed-error-empty-catch",
       "title": "Empty catch swallows the error",
       "category": "Bugs",
@@ -1417,6 +1460,20 @@
       "recommendation": "Do not `throw` or `return` from `finally`; let the original completion of the try/catch propagate. Do side-effect cleanup (e.g. `await cleanup()`) there instead."
     },
     {
+      "id": "no-throw-literal",
+      "title": "Thrown value is not an Error",
+      "category": "Bugs",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "error-handling"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Throw an Error instance: `throw new Error(message)` (or a subclass). Only an Error carries a stack trace, satisfies `instanceof Error` handlers, and serializes to a readable message."
+    },
+    {
       "id": "no-timing-unsafe-secret-compare",
       "title": "Secret compared with a non-constant-time operator",
       "category": "Security",
@@ -1448,6 +1505,21 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Set `trust proxy` to the exact number of proxies in front of the app (e.g. `1`), a trusted subnet string, or a predicate function — not `true`. Trusting every hop lets any client spoof `X-Forwarded-For` and thus `req.ip`."
+    },
+    {
+      "id": "no-unanchored-security-regex",
+      "title": "Unanchored regex used in a URL/host security decision (auth/redirect bypass)",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "auth",
+        "injection"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Anchor the pattern at the start (`/^https:\\/\\/trusted\\.com$/`) so it matches the whole input, not a substring — or, better, parse the value (`new URL(target).host`) and compare the host against an explicit allowlist instead of matching a regex."
     },
     {
       "id": "no-unbounded-module-cache",

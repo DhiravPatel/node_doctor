@@ -11,7 +11,31 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
-### Diagnostics (62 → 113)
+### Diagnostics (62 → 118)
+
+Frontier wave A (FEATURE.md §145/§146/§150/§153) — five precision-first rules,
+each corpus-verified false-positive-free against ~30k files of real third-party
+source, plus a core scope-resolver fix (`catch` clause parameters are now modelled
+as their own block-scoped bindings, so a caught name no longer resolves to a
+like-named outer `const`):
+
+- **`no-unanchored-security-regex`** (Security/error, §146) — an unanchored regex
+  used as a boolean allow/deny gate on an untrusted URL/host (`/trusted\.com/.test(redirectUrl)`),
+  the auth/redirect bypass class. Requires a concrete host in the pattern (a bare
+  `://` scheme is absolute-URL detection, not an allowlist) and excludes the
+  current page's own `window.location` (self-detection).
+- **`no-stateful-global-regex-test`** (Bugs/error, §146) — a stored `g`/`y`-flagged
+  regex reused via `.test()`/`.exec()` across calls (the `lastIndex` flip-flop bug),
+  exempting the in-loop match-iteration idiom. Found real latent instances in
+  `mongoose` and `websocket-extensions`.
+- **`no-throw-literal`** (Bugs/warn, §153) — `throw` of a string/object/template/array
+  literal (stack-trace-losing); silent on `throw new X()` and re-throws.
+- **`no-bigint-precision-loss`** (Bugs/warn, §145) — `Number(x)`/`+x`/`parseInt(x)`
+  on a provably-BigInt value (the 2^53 precision-loss coercion).
+- **`no-nondeterministic-stable-key`** (Bugs/warn, §150) — a random source
+  (`Math.random()`, `crypto.randomUUID()`) flowing into an HMAC payload, cache key,
+  or idempotency key. Time sources are deliberately excluded (signed timestamps and
+  time-bucketed keys are legitimate and indistinguishable from a single file).
 
 - **`no-prototype-pollution`** (Security) — a write with a caller-controlled object
   key, or a literal `__proto__`/`constructor` write.

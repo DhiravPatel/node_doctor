@@ -28,8 +28,10 @@ import { noSwallowedErrorEmptyCatch } from "../diagnostics/async/no-swallowed-er
 import { noUnboundedPromiseAll } from "../diagnostics/async/no-unbounded-promise-all.ts";
 import { requireFetchTimeout } from "../diagnostics/async/require-fetch-timeout.ts";
 // bugs
+import { noBigintPrecisionLoss } from "../diagnostics/bugs/no-bigint-precision-loss.ts";
 import { noConstantCondition } from "../diagnostics/bugs/no-constant-condition.ts";
 import { noShadowedRoute } from "../diagnostics/bugs/no-shadowed-route.ts";
+import { noThrowLiteral } from "../diagnostics/bugs/no-throw-literal.ts";
 import { noUnreachableCode } from "../diagnostics/bugs/no-unreachable-code.ts";
 // config
 import { noNonNullEnvAccess } from "../diagnostics/config/no-nonnull-env-access.ts";
@@ -95,6 +97,7 @@ import { noHardcodedSecretLiteral } from "../diagnostics/security/no-hardcoded-s
 import { noJwtDecodeAsVerify } from "../diagnostics/security/no-jwt-decode-as-verify.ts";
 import { noJwtNoneAlgorithm } from "../diagnostics/security/no-jwt-none-algorithm.ts";
 import { noMathRandomForToken } from "../diagnostics/security/no-math-random-for-token.ts";
+import { noNondeterministicStableKey } from "../diagnostics/security/no-nondeterministic-stable-key.ts";
 import { noNosqlObjectInjection } from "../diagnostics/security/no-nosql-object-injection.ts";
 import { noOpenRedirect } from "../diagnostics/security/no-open-redirect.ts";
 import { noPathTraversal } from "../diagnostics/security/no-path-traversal.ts";
@@ -103,8 +106,10 @@ import { noSensitiveDataInLogs } from "../diagnostics/security/no-sensitive-data
 import { noSqlTemplateInterpolation } from "../diagnostics/security/no-sql-template-interpolation.ts";
 import { noSsrfUnvalidatedUrl } from "../diagnostics/security/no-ssrf-unvalidated-url.ts";
 import { noStateChangeOnGet } from "../diagnostics/security/no-state-change-on-get.ts";
+import { noStatefulGlobalRegexTest } from "../diagnostics/security/no-stateful-global-regex-test.ts";
 import { noTaintedSinkViaHelper } from "../diagnostics/security/no-tainted-sink-via-helper.ts";
 import { noTimingUnsafeSecretCompare } from "../diagnostics/security/no-timing-unsafe-secret-compare.ts";
+import { noUnanchoredSecurityRegex } from "../diagnostics/security/no-unanchored-security-regex.ts";
 import { noUnsafeDeserialization } from "../diagnostics/security/no-unsafe-deserialization.ts";
 import { noUnsafeRegexpFromInput } from "../diagnostics/security/no-unsafe-regexp-from-input.ts";
 import { noVmRunUntrusted } from "../diagnostics/security/no-vm-run-untrusted.ts";
@@ -140,8 +145,10 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noUnboundedPromiseAll,
   requireFetchTimeout,
   // bugs
+  noBigintPrecisionLoss,
   noConstantCondition,
   noShadowedRoute,
+  noThrowLiteral,
   noUnreachableCode,
   // config
   noNonNullEnvAccess,
@@ -207,6 +214,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noJwtDecodeAsVerify,
   noJwtNoneAlgorithm,
   noMathRandomForToken,
+  noNondeterministicStableKey,
   noNosqlObjectInjection,
   noOpenRedirect,
   noPathTraversal,
@@ -215,8 +223,10 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noSqlTemplateInterpolation,
   noSsrfUnvalidatedUrl,
   noStateChangeOnGet,
+  noStatefulGlobalRegexTest,
   noTaintedSinkViaHelper,
   noTimingUnsafeSecretCompare,
+  noUnanchoredSecurityRegex,
   noUnsafeDeserialization,
   noUnsafeRegexpFromInput,
   noVmRunUntrusted,

@@ -1181,3 +1181,242 @@ A third extension, covering **net-new, differentiated** capabilities beyond the 
 ## How this set was approached
 
 The discipline the catalog asks for is the one applied: **place bets one at a time, on precision.** Of §105–§130, the coherent, on-thesis, *precisely-implementable* subset shipped — the AI-feature security pack (§105–§109) plus `no-unchecked-required-env` (§124) — while the governance, correctness-pack, and fleet items that need attribution, an AI layer, cross-service reachability, or coverage data are marked **Planned/Vision** and left unbuilt rather than shipped noisy. A false positive in a "money safety" or "timezone" rule is worse than its absence; those stay **Planned** until they can be made precise. The invariants — deterministic offline core, local score, precision-first, AI-as-optional-layer — hold across §105–§130.
+
+---
+
+# node.doctor — Features (Frontier / §131–§158)
+
+A fourth extension. Everything here is **net-new** against §1–§130 — bug classes and capabilities the catalog has not touched, chosen for novelty over breadth. Same maturity legend (**Core** / **Detected** / **Planned** / **Vision**) and the same invariants (deterministic + offline core, local score, precision-first, AI-as-optional-layer).
+
+> **Buildability tag.** Because "new" is cheap and "shippable" is not, each feature carries a build signal:
+> **⚙️ Now** — implementable on the engine that exists today (import graph, request-path detection, cross-file taint, capability tokens). No new infrastructure.
+> **🔧 Needs depth** — requires analysis the engine does not yet have (schema parsing, type source, cross-service graph).
+> **🛰 Needs infra** — requires something outside the offline core (runtime data, hosted state, an AI layer).
+>
+> **★ Differentiator** / **★★ Flagship** carry their existing meaning. The eleven **⚙️ Now** items are the ones that could ship this quarter.
+
+**New parts:** XXXII Cost, Latency & Efficiency (§131–§134) · XXXIII Distributed Failure Reasoning (§135–§139) · XXXIV Data Correctness & Lineage (§140–§145) · XXXV Protocol & Input Semantics (§146–§150) · XXXVI Observability & Debuggability (§151–§153) · XXXVII Supply Chain, Packages & Topology (§154–§158).
+
+---
+
+# Part XXXII — Cost, Latency & Efficiency
+
+*Static analysis that reasons about **consequences in units engineers are measured on** — milliseconds and dollars — rather than pattern presence. §12 flags that an N+1 exists; this part says what it costs.*
+
+## 131. Cloud Cost Attribution (Code-Level FinOps) ★★ Flagship
+**Status: Planned** · 🔧 Needs depth
+
+Estimate the **cloud cost of a code path**, not of infrastructure. Infracost prices your Terraform; nobody prices your handler. Attach a cost model to the operations the call graph already sees: DB round trips per request, S3/API calls in a loop, cross-AZ egress, Lambda duration × memory, per-token LLM spend (§109).
+
+Output is a per-route cost profile — *"`GET /orders` costs ~$0.004/req; 87% of that is the N+1 at `repository.ts:88`"* — which converts a Performance finding into a budget line. Distinct from §103 (fix-impact simulation): §103 estimates the payoff of *fixing*; this prices the code as it stands.
+
+## 132. Static Latency Budget & Critical-Path Analysis ★★ Flagship
+**Status: Planned** · ⚙️ Now
+
+Compute each route's **serial critical path** from the call graph: count sequential `await`s that cross a network or disk boundary, identify awaits that are independent and could be parallel, and produce an estimated floor latency. Then check it against a declared SLO.
+
+*"This handler has 7 serial round trips; at a 20ms p50 per hop it cannot meet a 100ms SLO. Hops 3–5 are independent and parallelizable."* Genuinely novel, needs nothing the engine lacks, and it turns "slow API" from a vibe into arithmetic.
+
+## 133. Resource-Shape Right-Sizing ★
+**Status: Planned** · 🔧 Needs depth
+
+Cross-check configured resource shapes against what the code actually does: a DB pool of 100 behind a service that never exceeds 4 concurrent queries, a Lambda at 128MB doing image processing, `UV_THREADPOOL_SIZE` defaults under heavy `fs`/crypto load, worker counts vs. actual CPU-bound work. Config and code, judged against each other.
+
+## 134. Energy & Carbon Footprint Estimation
+**Status: Vision** · 🛰 Needs infra
+
+The sustainability sibling of §131: translate the same operation counts into estimated energy and CO₂e per request. Increasingly a reporting requirement in the EU, and no code-level tool offers it. Lower conviction than §131 — included for completeness, and it rides the same cost model.
+
+---
+
+# Part XXXIII — Distributed Failure Reasoning
+
+*How the system behaves when something downstream is slow or broken. §10 catches a single retry with no backoff; this part reasons about failure **across** the graph.*
+
+## 135. Retry Amplification & Thundering-Herd Analysis ★★ Flagship
+**Status: Planned** · ⚙️ Now
+
+**Multiplicative retries are a famous outage cause and no linter models them.** Service A retries 3×, calling B which retries 3×, calling C which retries 3× — one user request becomes 27 hits on a struggling database, and the retry storm *is* the outage.
+
+Walk the call graph, multiply the retry factors along each path, and flag paths whose amplification exceeds a threshold. Also flags retries without jitter (synchronized herds) and retries wrapped around already-retrying clients (SDKs that retry internally). Pure graph arithmetic on data the engine already has.
+
+## 136. Timeout Budget Consistency ★ Differentiator
+**Status: Planned** · ⚙️ Now
+
+Timeouts must *decrease* down a call chain. When a caller's timeout is shorter than its callee's, the caller gives up while the callee keeps working — orphaned work, wasted connections, and a leak that only appears under load. When it's longer, failures surface far later than they should.
+
+Propagate timeout values along the call graph and flag inconsistent budgets. The natural companion to §137 and a direct extension of the `require-fetch-timeout` rule that already ships.
+
+## 137. Cancellation & AbortSignal Propagation ★ Differentiator
+**Status: Planned** · ⚙️ Now
+
+A client disconnects, the handler is aborted — and the three downstream calls it started keep running, holding connections and burning budget. Track whether an `AbortSignal` **propagates** from the request boundary through helpers to every outbound call, and flag the hop where it's dropped. Distinct from "has a timeout": this is about the signal surviving the call chain.
+
+## 138. Health-Check Correctness & Cascading-Failure Risk ★
+**Status: Planned** · ⚙️ Now
+
+Both failure modes of a health endpoint, statically:
+
+- **Too shallow** — returns `200` unconditionally, so the orchestrator keeps routing traffic to a pod whose DB connection is dead.
+- **Too deep** — checks every downstream dependency, so one slow non-critical service makes every pod report unhealthy and the whole fleet gets restarted. A liveness probe that checks dependencies is a self-inflicted cascading outage.
+
+Also flags health checks that share a connection pool with request traffic (the pool starves, the probe fails, the pod is killed mid-incident).
+
+## 139. Static Chaos Scenario Generation ★ Differentiator
+**Status: Vision** · 🛰 Needs infra
+
+Derive a fault-injection plan from the code: enumerate every external call site the graph knows about and generate the concrete scenarios worth testing — *"what happens when the payment API returns 503 here?"*, *"when this Redis call hangs?"* — ranked by blast radius (§120). Static analysis that authors your chaos experiments instead of guessing at them.
+
+---
+
+# Part XXXIV — Data Correctness & Lineage
+
+## 140. Cache-Key Correctness & Cross-Tenant Poisoning ★★ Flagship
+**Status: Planned** · ⚙️ Now
+
+**A cache key that omits a variable the cached value depends on is a data-leak bug, and §16 doesn't cover it.** If the response varies by `userId` or `tenantId` but the key is `` `orders:${status}` ``, one customer is served another's data — from cache, intermittently, and almost impossible to reproduce.
+
+Compare the variables that flow into the cached *value* against those that flow into the *key*; flag the difference. The same analysis catches keys built from object iteration order or `JSON.stringify` of an unordered object (non-deterministic keys → silent cache misses). This is the highest-severity item in this document and it is reachable with today's taint engine.
+
+## 141. Pagination Correctness ★
+**Status: Planned** · ⚙️ Now
+
+Offset pagination over mutable data silently drops and duplicates rows as records are inserted between page fetches — the classic "the report is missing three orders and nobody knows why." Flags: `OFFSET`/`skip` without a stable, unique sort key; pagination over a table with active writes where a cursor is the correct pattern; and inconsistent sort keys between the count query and the page query.
+
+## 142. Dead Schema & Unused Column Detection ★★ Flagship
+**Status: Planned** · 🔧 Needs depth (schema parsing)
+
+§20 finds dead *code*; nothing finds dead *data*. Cross the ORM schema against every read and write the codebase performs, and report columns, tables, indexes, and enum values that no code path touches. Also the inverse — code referencing fields the schema no longer has (drift that only fails at runtime).
+
+Unused columns are migration debt, backup cost, and compliance surface (a `ssn` column nothing reads is pure liability). Nobody ships this.
+
+## 143. Data Access Map & Route → Entity Lineage ★★ Flagship
+**Status: Planned** · 🔧 Needs depth
+
+Generate the matrix of **which routes touch which tables, and how** (read/write/delete). Falls out of the call graph plus ORM detection, and it is the substrate for a surprising amount:
+
+- Security review: *which unauthenticated endpoints write to `payments`?*
+- Blast radius on the data side: *if I change this table, which 14 endpoints care?*
+- The grounding layer for codebase Q&A (§99) and PII flow (§73).
+- Service extraction: which routes cluster around which entities.
+
+## 144. Query Plan Simulation ★
+**Status: Vision** · 🔧 Needs depth
+
+Statically extract every query the code can issue, reconstruct it against the parsed schema, and reason about the plan without a live database: full scans on unindexed predicates, joins missing an index, `SELECT *` on wide tables, sorts that will spill. Turns §14's "missing index" heuristic into an evidence-backed claim.
+
+## 145. Serialization & Precision Safety ★
+**Status: Detected** (`no-bigint-precision-loss`) · ⚙️ Now
+
+The quiet data-corruption class at the JSON boundary: `BigInt` (or a 64-bit DB id) serialized into a JS number and silently losing precision above 2^53, `Date` objects crossing a boundary and becoming strings that are then compared as dates, `undefined` vs `null` asymmetry through `JSON.stringify`, circular references that throw only on a rare code path, and `Decimal`/`NUMERIC` columns coerced to float on the way out.
+
+**Shipped:** `no-bigint-precision-loss` (Bugs/warn/high) flags `Number(x)`/`+x`/`parseInt(x)` where `x` is a provably-BigInt value (a `123n` literal, a `BigInt(...)` call, or a binding to either) — the exact `2^53` precision-loss coercion. It stays silent on `String(bigint)`/`.toString()` and any operand it cannot prove is a BigInt (including a catch-parameter that shadows an outer BigInt const — the scope resolver now models `catch` bindings). The remaining sub-classes (Date/undefined/Decimal boundaries) are still Planned.
+
+---
+
+# Part XXXV — Protocol & Input Semantics
+
+## 146. Validation Regex Correctness ★★ Flagship
+**Status: Detected** (`no-unanchored-security-regex`, `no-stateful-global-regex-test`) · ⚙️ Now
+
+**A validation regex missing its anchors is an auth bypass, and it is everywhere.** `/https:\/\/trusted\.com/.test(url)` matches `https://evil.com/?x=https://trusted.com`. `/admin/` matches `superadmin`. §11 covers ReDoS (performance); this covers *correctness*, which is the security half.
+
+**Shipped, precision-first:**
+- `no-unanchored-security-regex` (Security/error/high) fires only when an unanchored regex is used as a boolean allow/deny **gate** (`.test()`/`.exec()`/non-global `.match()`), the tested operand is named like an untrusted URL/host (`redirectUrl`, `origin`, `referer`, …) but **not** the current page's own `window.location` (self-detection), and the pattern names a **concrete host** (`trusted\.com`, an IP, `localhost`) — a bare `://` scheme is deliberately not enough, since `/https?:\/\//` is absolute-URL detection with no host to bypass. It is silent on any start-anchored pattern and on extraction (`const host = url.match(/…\/([^/]+)/)[1]`). Verified against a 30k-file real-world corpus: **zero false positives** after this gating.
+- `no-stateful-global-regex-test` (Bugs/error/high) flags a stored `g`/`y`-flagged regex literal reused via `.test()`/`.exec()` across calls (the `lastIndex` flip-flop bug), while exempting the in-loop match-iteration idiom (`while (RE.exec(s))` / `while (RE.test(s))`). It found genuine latent instances of this bug in `mongoose` and `websocket-extensions` during corpus testing.
+
+The recall half (`/admin/` matching `superadmin` on privilege checks) is a deliberate silence — too noisy for `error` — and remains Planned.
+
+Flags: unanchored regexes used in a security decision (origin, redirect, role, path allowlist), `.` matching unintended characters in a domain check, missing `u` flag where it matters, and `test()` on a `/g` regex (stateful `lastIndex` — alternating true/false across calls, a genuinely evil bug).
+
+## 147. HTTP Caching & Privacy Semantics ★★ Flagship
+**Status: Planned** · ⚙️ Now
+
+An authenticated response served without `Cache-Control: private, no-store` can be cached by a CDN or shared proxy and handed to the next user. Same class of leak as §140, one layer up the stack, and equally uncovered.
+
+Flags: authenticated routes with public/absent cache directives, `Vary` omitting `Authorization` or `Cookie`, `ETag` computed over user-specific data on a shared-cacheable response, and `s-maxage` on personalized content.
+
+## 148. Unicode Normalization & Homoglyph Safety ★
+**Status: Planned** · ⚙️ Now
+
+Identity comparisons on un-normalized strings: two different byte sequences render identically, so `admin` and `аdmin` (Cyrillic а) are distinct keys but visually identical — account spoofing. Flags missing `.normalize()` before comparing or storing identity strings (usernames, emails, tenant slugs), case-folding with `toLowerCase()` where locale-aware folding is required (the Turkish dotless-ı bug), and length checks in code units on user-supplied text.
+
+## 149. Content-Type & Encoding Confusion ★
+**Status: Planned** · ⚙️ Now
+
+Parser confusion at the request boundary: trusting a client-declared `Content-Type` to select a parser, accepting `application/json` bodies on endpoints that assume form encoding (or vice versa), charset mismatches that defeat downstream sanitization, and uploads whose extension is trusted over their magic bytes.
+
+## 150. Nondeterminism in Keys, Signatures & Idempotency ★
+**Status: Detected** (`no-nondeterministic-stable-key`) · ⚙️ Now
+
+`Date.now()`, `Math.random()`, `process.pid`, `Object.keys` order, or `Set`/`Map` iteration flowing into something that **must be stable**: a cache key, an HMAC payload, an idempotency key, an ETag, a deduplication hash. The value differs per call, so the cache never hits, the signature never verifies, or the "idempotent" retry creates a duplicate charge. A precise, narrow, taint-shaped rule — and a bug that is brutal to debug by hand.
+
+**Shipped, precision-first:** `no-nondeterministic-stable-key` (Bugs/warn/high) flags a **random** source (`Math.random()`, `crypto.randomUUID()`) flowing into an HMAC/hash `.update()`, a `cache.set`/`redis.set` key, or an `idempotencyKey`/`cacheKey`/`dedupeKey`/`etag` property — the flagship being `idempotencyKey: crypto.randomUUID()` (a retried request charges twice). It deliberately excludes **time** sources (`Date.now()`, `hrtime`, `performance.now()`): a timestamp in a stable-key sink is far more often correct than not — a *signed request* transmits the timestamp alongside the signature, and a *time-bucketed* cache/rate-limit key (`` `rl:${u}:${Math.floor(Date.now()/1000)}` ``) is intentionally stable for its window — and the two cannot be told apart from a single file, so a random draw (which has no legitimate stable-key use) is the only unambiguous signal. Corpus-verified false-positive-free.
+
+---
+
+# Part XXXVI — Observability & Debuggability
+
+## 151. Observability Coverage Score ★ Differentiator
+**Status: Planned** · ⚙️ Now
+
+§21 asks "are there logs?"; this asks **"could you actually debug this route at 3am?"** Score each route on whether its failure paths emit anything, whether errors carry a correlation ID, whether external calls are timed, and whether the catch blocks that swallow errors do so silently. Report per-route coverage and a codebase-level score — the observability equivalent of test coverage, which does not currently exist.
+
+## 152. Async Context Propagation Integrity ★★ Flagship
+**Status: Planned** · ⚙️ Now
+
+`AsyncLocalStorage` — the mechanism behind request IDs, tenant context, and distributed tracing in modern Node — **breaks silently**. Context is lost across `EventEmitter` callbacks, some pooled-connection boundaries, `setTimeout` chains established outside the run scope, and worker threads. The symptom is a request ID that vanishes halfway through a trace, or worse, a *tenant* context that vanishes.
+
+Track the context boundary through the call graph and flag the exact hop where it is dropped. Nothing detects this today, and it is painful enough that people give up on tracing over it.
+
+## 153. Error Taxonomy & Response Consistency ★
+**Status: Detected** (`no-throw-literal`) · ⚙️ Now
+
+Whether the service speaks one error language: the same failure mapped to different status codes in different handlers, error shapes that vary across routes (`{error}` vs `{message}` vs `{errors:[]}`), thrown strings and bare objects instead of `Error` instances (losing stack traces), `instanceof` checks against error classes that cross a module boundary, and internal error codes with no catalog. Extends §9 from "is there handling" to "is the handling coherent."
+
+**Shipped:** `no-throw-literal` (Bugs/warn/high) flags `throw` of a string/object/template/array literal (or an identifier resolving to one) — the stack-trace-losing anti-pattern that ESLint's own `no-throw-literal` targets (corpus hits in `react-dom`, `@reduxjs/toolkit`, `react-native`, several carrying `// eslint-disable-line no-throw-literal`). It is silent on `throw new X()`, `throw err` (a caught/param binding — the scope resolver now models `catch` params so an outer const of the same name never leaks in), and `throw factory()`. The broader consistency checks (status-code and error-shape coherence across routes) remain Planned.
+
+---
+
+# Part XXXVII — Supply Chain, Packages & Topology
+
+## 154. Phantom & Undeclared Dependency Detection ★
+**Status: Planned** · ⚙️ Now
+
+The exact inverse of §19's unused-package check, and a nastier failure: a package **imported but not declared**, working locally only because a hoisted transitive dependency happens to provide it. It breaks the moment the tree changes, the package manager switches, or a Docker build installs with `--production`. Also flags imports of transitive dependencies (using a package you never declared) and `devDependencies` imported by production code.
+
+## 155. Internal Package API Semver Linting ★
+**Status: Planned** · 🔧 Needs depth
+
+§78 does semver for your **HTTP** API; this does it for your **package exports**. In a monorepo, diff a package's public surface between revisions — removed exports, narrowed parameter types, changed return shapes, newly-required options — and flag breaking changes shipped without a major bump. Reuses the baseline-delta machinery, applied to an export surface instead of a finding set.
+
+## 156. Lockfile Integrity & Build Reproducibility ★
+**Status: Planned** · ⚙️ Now
+
+Whether a build is reproducible from the repo alone: `package.json` ranges that drift from the lockfile, dependencies pinned by tag or git ref rather than version, lockfile absent or stale relative to the manifest, mixed package-manager lockfiles in one tree, and install scripts that fetch at build time (unpinned network dependencies inside a "reproducible" build).
+
+## 157. Queue & Topic Topology Mapping ★ Differentiator
+**Status: Planned** · 🔧 Needs depth
+
+§29 checks a consumer in isolation; this maps the **graph**: who publishes to each topic/queue, who consumes it, and what falls out of that — orphan topics with a publisher and no consumer (messages into the void), consumers subscribed to topics nothing publishes (dead code that looks alive), payload-shape mismatches between publisher and consumer, and cycles where a consumer publishes back to its own upstream. The event-driven equivalent of the import graph, and just as revealing.
+
+## 158. Agent Context Hygiene ★★ Flagship
+**Status: Planned** · ⚙️ Now
+
+**A new privacy surface that exists only because agents read your repo.** When an agent loads files into context, secrets, customer data fixtures, key material, and internal credentials go with them — to a model, and often to a log.
+
+Scan for files that should never enter an LLM context (reusing the §68 secret detectors plus data-shaped fixtures and dumps), report which are currently exposed, and **generate the ignore files** — `.aiignore`, `.cursorignore`, Claude Code permission rules — that keep them out. Directly on-thesis, uncovered by anyone, and it fits the engine that already ships.
+
+---
+
+## Honest read: what to actually build
+
+Twenty-eight more features do not make the product better; **three of them, built to the precision bar, might.** My ranking if I were choosing:
+
+1. **§140 Cache-Key Correctness** — the highest-severity bug in this document (silent cross-tenant data leaks), reachable with today's taint engine, and demo-able in one slide. It also strengthens §114 multi-tenancy, which is currently held back on precision.
+2. **§146 Validation Regex Correctness** — an auth bypass class that is genuinely everywhere, cheap to detect precisely (anchors are syntactic), and easy to keep false-positive-free by gating on security-decision context.
+3. **§158 Agent Context Hygiene** — squarely the thesis, no competitor, reuses the secret detectors that already ship, and it produces an *artifact* (the ignore files), which makes it sticky rather than advisory.
+
+Then, in a second wave: **§135 retry amplification** and **§152 async context propagation**, because both are pure call-graph reasoning on infrastructure you already have, and both catch outages nothing else catches. **§132 latency budgets** and **§143 data access maps** are the two that most change how people *use* the tool — they turn it from a linter into a system-reasoning instrument.
+
+The rest is a menu. The discipline from the base catalog still governs: a false positive in §140 or §146 would be worse than never shipping them, and the invariants — deterministic offline core, local score, precision-first, AI-as-optional-layer — hold across §131–§158 without exception.

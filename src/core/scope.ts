@@ -34,7 +34,7 @@ export interface Binding {
 }
 
 interface Scope {
-  kind: "module" | "function";
+  kind: "module" | "function" | "catch";
   node: AstNode;
   parent: Scope | null;
   bindings: Map<string, Binding>;
@@ -46,8 +46,15 @@ const FUNCTION_TYPES = new Set([
   "ArrowFunctionExpression",
 ]);
 
+// A `catch (e)` clause introduces its own block scope whose only binding is the
+// caught parameter. Modelling it (rather than hoisting like `let`/`const`) is a
+// *precision* fix, not a recall one: without it a `catch (id)` that shadows an
+// outer `const id = …` resolves to the wrong, outer binding and every rule that
+// asks "what does `id` point at?" is misled. Block-scoped `let`/`const` inside
+// the catch body correctly land here too; a `var` that would hoist past it only
+// loses recall (resolves to null → no finding), never precision.
 const isScopeNode = (node: AstNode): boolean =>
-  node.type === "Program" || FUNCTION_TYPES.has(node.type);
+  node.type === "Program" || node.type === "CatchClause" || FUNCTION_TYPES.has(node.type);
 
 /** Collect the identifier names bound by a (possibly destructuring) pattern. */
 const patternNames = (pattern: AstNode | null | undefined, out: [AstNode, string][]): void => {
@@ -88,13 +95,13 @@ export class ScopeResolver {
   }
 
   private build(program: AstNode): void {
-    // Pass 1: create a Scope for every function; wire parents.
+    // Pass 1: create a Scope for every function and catch clause; wire parents.
     walk(program, {
       enter: (node, parent) => {
-        if (FUNCTION_TYPES.has(node.type)) {
+        if (FUNCTION_TYPES.has(node.type) || node.type === "CatchClause") {
           const parentScope = this.enclosingScope(parent);
           this.scopes.set(node, {
-            kind: "function",
+            kind: node.type === "CatchClause" ? "catch" : "function",
             node,
             parent: parentScope,
             bindings: new Map(),
@@ -119,7 +126,7 @@ export class ScopeResolver {
                   kind,
                   declNode,
                   initNode: decl.init ?? null,
-                  scopeKind: target.kind,
+                  scopeKind: ScopeResolver.kindOf(target),
                 });
               }
             }
@@ -133,7 +140,7 @@ export class ScopeResolver {
                 kind: "function",
                 declNode: node,
                 initNode: node,
-                scopeKind: target.kind,
+                scopeKind: ScopeResolver.kindOf(target),
               });
             }
             this.defineParams(node);
@@ -143,6 +150,20 @@ export class ScopeResolver {
           case "ArrowFunctionExpression":
             this.defineParams(node);
             break;
+          case "CatchClause": {
+            // `catch (param)` — bind the caught value in the catch's own scope so
+            // it shadows any like-named outer binding. `catch {}` (no binding)
+            // simply has an empty scope.
+            const scope = this.scopes.get(node);
+            if (scope && node.param) {
+              const names: [AstNode, string][] = [];
+              patternNames(node.param, names);
+              for (const [declNode, name] of names) {
+                this.define(scope, { name, kind: "param", declNode, initNode: null, scopeKind: "function" });
+              }
+            }
+            break;
+          }
           case "ClassDeclaration": {
             if (node.id?.type === "Identifier") {
               const target = this.enclosingScope(node.parent);
@@ -151,7 +172,7 @@ export class ScopeResolver {
                 kind: "class",
                 declNode: node,
                 initNode: node,
-                scopeKind: target.kind,
+                scopeKind: ScopeResolver.kindOf(target),
               });
             }
             break;
@@ -191,6 +212,11 @@ export class ScopeResolver {
 
   private define(scope: Scope, binding: Binding): void {
     if (!scope.bindings.has(binding.name)) scope.bindings.set(binding.name, binding);
+  }
+
+  /** A binding's `scopeKind` only distinguishes module from everything else. */
+  private static kindOf(scope: Scope): "module" | "function" {
+    return scope.kind === "module" ? "module" : "function";
   }
 
   /** The nearest scope that owns `node` (walking up through parents). */
