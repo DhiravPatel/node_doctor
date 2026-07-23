@@ -62,11 +62,22 @@ const paramNamesAt = (fn: AstNode, index: number): string[] => {
   return out;
 };
 
+/**
+ * One step in a source→sink data-flow path: the function reached, the file it
+ * lives in, and its byte offset — so a reviewer (or the `paths` command) can show
+ * the exact `file:line` of every hop, not just a label.
+ */
+export interface TaintHop {
+  label: string;
+  filePath: string;
+  offset: number;
+}
+
 export interface InterproceduralTaint {
   /** Function node → the names of its parameters that carry caller data. */
   taintedParams: Map<AstNode, Set<string>>;
   /** Function node → the hop trail (handler → … → this function). */
-  pathTo: Map<AstNode, string[]>;
+  pathTo: Map<AstNode, TaintHop[]>;
 }
 
 /** An injection sink inside a helper, fed by caller data through the call graph. */
@@ -76,8 +87,10 @@ export interface TaintedSinkSite {
   /** The sink call node — from the graph's AST, reported by offset. */
   node: AstNode;
   kind: "eval" | "shell" | "sql";
-  /** Hop trail: handler → … → the helper holding the sink. */
+  /** Hop trail labels: handler → … → the helper holding the sink. */
   via: string[];
+  /** The same trail with a location per hop, for the attack-path view (§121). */
+  hops: TaintHop[];
 }
 
 /** A readable label for a function, for the hop trail in a message. */
@@ -118,7 +131,7 @@ const MAX_DEPTH = 12;
  */
 export const computeInterproceduralTaint = (graph: ProjectGraph): InterproceduralTaint => {
   const taintedParams = new Map<AstNode, Set<string>>();
-  const pathTo = new Map<AstNode, string[]>();
+  const pathTo = new Map<AstNode, TaintHop[]>();
 
   // Which module does each function live in? (needed to resolve its calls)
   const fnFile = new Map<AstNode, string>();
@@ -144,7 +157,7 @@ export const computeInterproceduralTaint = (graph: ProjectGraph): Interprocedura
       const seeded = seedHandlerTaint(handler);
       if (seeded.size === 0) continue;
       taintedParams.set(handler, seeded);
-      pathTo.set(handler, [labelOf(handler, facts.filePath)]);
+      pathTo.set(handler, [{ label: labelOf(handler, facts.filePath), filePath: facts.filePath, offset: (handler.start as number) ?? 0 }]);
       queue.push({ fn: handler, depth: 0 });
     }
   }
@@ -195,7 +208,7 @@ export const computeInterproceduralTaint = (graph: ProjectGraph): Interprocedura
         taintedParams.set(callee, merged);
         if (!pathTo.has(callee)) {
           const calleeFile = fnFile.get(callee) ?? file;
-          pathTo.set(callee, [...(pathTo.get(fn) ?? []), labelOf(callee, calleeFile)]);
+          pathTo.set(callee, [...(pathTo.get(fn) ?? []), { label: labelOf(callee, calleeFile), filePath: calleeFile, offset: (callee.start as number) ?? 0 }]);
         }
         queue.push({ fn: callee, depth: depth + 1 });
       },
@@ -239,7 +252,8 @@ export const collectTaintedSinkSites = (
       if (!tainted || tainted.size === 0) continue;
       // A handler's own body is already covered by the intra-file diagnostics.
       if (facts.handlers.has(fn)) continue;
-      const via = taint.pathTo.get(fn) ?? [];
+      const hops = taint.pathTo.get(fn) ?? [];
+      const via = hops.map((h) => h.label);
 
       walk(fn.body ?? fn, {
         enter: (call) => {
@@ -266,6 +280,7 @@ export const collectTaintedSinkSites = (
             node: call,
             kind,
             via,
+            hops,
           });
         },
       });

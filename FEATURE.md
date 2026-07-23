@@ -153,13 +153,14 @@ Capability tokens are derived per framework and gate framework-specific rules.
 - Service definition validation.
 
 ## 4. Route Analysis
-**Status: Planned** (registration detection is Core; the checks below build on it)
+**Status: Core (partial)** — route registration + `node-doctor surface` mapping are Core; `no-duplicate-route-definition` (opt-in) and `no-shadowed-route` (a static route made unreachable by an earlier parameter route on the same Express router, order-based-matching only) ship today. The rest below build on registration detection.
 
-- Unused routes (registered, never reachable/referenced).
-- Duplicate routes.
+- Unused routes (registered, never reachable/referenced) *(Planned)*.
+- Duplicate routes — `no-duplicate-route-definition` (opt-in). **Core**.
+- Route shadowing / precedence — `no-shadowed-route` (a parameter route swallowing a later static route). **Core**.
 - Missing middleware (auth/validation/body-limit on routes that need it).
 - Public sensitive routes (admin/internal exposed without a guard).
-- Route conflicts and precedence (wildcard before specific).
+- Route conflicts and precedence (wildcard before specific) — partially covered by `no-shadowed-route`.
 - Route hierarchy and mount-tree mapping.
 - Route documentation coverage.
 - Route complexity (handler size, branching).
@@ -1138,7 +1139,7 @@ A third extension, covering **net-new, differentiated** capabilities beyond the 
 **Status: Core** — `node-doctor impact <files> | --diff`. Walks the import graph backward from the changed files to every transitive dependent, marks the route-bearing ones, and reports the blast radius (human + `--json`). Deterministic reachability, cross-package in a workspace.
 
 ## 121. Exploitability Proof & Attack-Path Visualization ★ Differentiator
-**Status: Core (partial)** — cross-file taint findings already name the full source→sink hop trail (§56); a dedicated visualization command is **Planned**.
+**Status: Core** — `node-doctor paths`. For every injection sink fed by request data, renders the exact source→sink chain the taint engine resolved — request handler → each helper hop → the `eval`/shell/SQL sink — with `file:line` at every step (human + `--json`). Deterministic proof that a finding is reachable, not a heuristic; exits 1 on a proven path so CI can gate on it.
 
 ## 122. Semantic Duplicate & Divergence Detection ★ Differentiator
 **Status: Vision** (AST + dataflow fingerprinting).

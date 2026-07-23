@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 112,
-  "defaultOn": 89,
+  "total": 113,
+  "defaultOn": 90,
   "optIn": 23,
   "byCategory": {
     "Performance": 11,
     "Security": 54,
     "Maintainability": 10,
     "Reliability": 28,
-    "Bugs": 9
+    "Bugs": 10
   },
   "categoryWeights": {
     "Security": 2,
@@ -1243,6 +1243,25 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Never log the credential itself. Log a presence check or a fingerprint instead (`{ hasToken: Boolean(token) }`, `token.slice(-4)`), or run the payload through a redaction step — pino's `redact` option, or an explicit `redact()`/`mask()` helper."
+    },
+    {
+      "id": "no-shadowed-route",
+      "title": "Route made unreachable by an earlier, more general route",
+      "category": "Bugs",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "express",
+        "routing"
+      ],
+      "requires": [
+        "express"
+      ],
+      "disabledWhen": [
+        "fastify"
+      ],
+      "optIn": false,
+      "recommendation": "Register the specific route BEFORE the parameter route on the same router — matching is top-to-bottom and stops at the first hit, so `/users/:id` before `/users/me` swallows `/users/me`. Move the static route up, or add a constraint (`:id(\\d+)`) so the param cannot match it."
     },
     {
       "id": "no-sql-template-interpolation",

@@ -22,6 +22,7 @@ export type Command =
   | "lsp"
   | "modernize"
   | "impact"
+  | "paths"
   | "version";
 
 // "rules" is accepted as a legacy alias for "diagnostics".
@@ -45,6 +46,7 @@ const COMMANDS = new Set<string>([
   "lsp",
   "modernize",
   "impact",
+  "paths",
   "version",
   "rules",
 ]);

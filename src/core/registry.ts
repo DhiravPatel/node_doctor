@@ -29,6 +29,7 @@ import { noUnboundedPromiseAll } from "../diagnostics/async/no-unbounded-promise
 import { requireFetchTimeout } from "../diagnostics/async/require-fetch-timeout.ts";
 // bugs
 import { noConstantCondition } from "../diagnostics/bugs/no-constant-condition.ts";
+import { noShadowedRoute } from "../diagnostics/bugs/no-shadowed-route.ts";
 import { noUnreachableCode } from "../diagnostics/bugs/no-unreachable-code.ts";
 // config
 import { noNonNullEnvAccess } from "../diagnostics/config/no-nonnull-env-access.ts";
@@ -140,6 +141,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   requireFetchTimeout,
   // bugs
   noConstantCondition,
+  noShadowedRoute,
   noUnreachableCode,
   // config
   noNonNullEnvAccess,

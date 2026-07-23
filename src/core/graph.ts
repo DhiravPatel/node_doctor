@@ -389,7 +389,7 @@ export const buildProjectGraph = (
     isCycleEdge,
     hasCycles,
     taintedParamsOf: (fn) => ensureTaint().taintedParams.get(fn) ?? new Set<string>(),
-    taintPathTo: (fn) => ensureTaint().pathTo.get(fn) ?? [],
+    taintPathTo: (fn) => (ensureTaint().pathTo.get(fn) ?? []).map((h) => h.label),
     taintedSinkSites: () => (taintedSites ??= Object.freeze(collectTaintedSinkSites(graph, ensureTaint())) as TaintedSinkSite[]),
     reachableSyncIoSites: () => {
       if (syncIoSites) return syncIoSites;

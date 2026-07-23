@@ -11,7 +11,7 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
-### Diagnostics (62 → 112)
+### Diagnostics (62 → 113)
 
 - **`no-prototype-pollution`** (Security) — a write with a caller-controlled object
   key, or a literal `__proto__`/`constructor` write.
@@ -70,6 +70,34 @@ Verified at zero false positives across 213 files of real TypeScript; the
   (can even re-enable a globally-off diagnostic for specific files).
 - **`rootDir`** config redirect, resolved against the config file's own location.
 - **Generated JSON Schema** (`npm run gen:schema`) for editor autocomplete/validation.
+
+### Route shadowing (§4)
+
+- **`no-shadowed-route`** (Bugs, warn, high confidence). A route made unreachable by
+  an earlier, more general route on the same Express router — `router.get("/users/:id")`
+  registered before `router.get("/users/me")` makes `/users/me` dead, because Express
+  matches top-to-bottom and stops at the first hit. The handler you wrote never runs;
+  the request quietly hits the wrong one. It is the routing bug that survives review
+  because both lines are correct in isolation and only their *order* is wrong.
+  - Precise by construction and sound toward silence: same receiver, same file, same
+    method (or an earlier `.all`), a fully-static victim, and — the key guard — a
+    **constrained** parameter (`:id(\\d+)`) is never assumed to match, so it does not
+    shadow `/me`. **Gated to Express and disabled when Fastify is present**, because
+    the claim rests on order-based matching; Fastify and hapi resolve by a radix tree
+    where a static route wins regardless of order, so the same code is not a bug there.
+    Zero false positives across 4,155 corpus files.
+
+### Exploitability proof / attack paths (§121)
+
+- **`node-doctor paths`.** A security finding matters only if it is *reachable*, and
+  the interprocedural taint engine already computes the exact call chain that carries
+  caller input from a request handler to an injection sink. This surfaces that chain
+  as a navigable source→sink path — handler → each named helper → the `eval`/shell/SQL
+  sink — with `file:line` at every hop (human + `--json`). It is the proof, not a
+  heuristic assertion, that the finding is exploitable, and it exits 1 on a proven
+  path so a build can gate on reachable injections. The taint engine now records a
+  location per hop (not just a label) to power it. Deterministic — the path is the one
+  the graph resolved; an unresolvable dynamic call produced no path to begin with.
 
 ### Change-impact / blast radius (§120)
 
@@ -239,6 +267,17 @@ CSS lexer's `token` variable, `DOMPurify.sanitize` two assignments upstream — 
 every one is fixed with a regression test.
 
 ### Fixed
+
+- **`lintSource` now honors capability gating (`requires`/`disabledWhen`).** It
+  previously filtered a caller-supplied diagnostic list only by `scope`, so the
+  ESLint and oxlint adapters — which pass their own list and a hardcoded capability
+  set — ran capability-gated rules on the wrong stack (an Express-only route rule
+  firing on a Fastify project through the adapter). Every consumer of `lintSource`
+  now applies the same gate the CLI/LSP/MCP already did. Found by an adversarial
+  review of `no-shadowed-route`, alongside a second false positive where two
+  `express.Router()` instances sharing the variable name `router` (the router-factory
+  pattern) were conflated; the rule now resolves the receiver to its `ctx.scope`
+  binding, so distinct instances are never compared and a reassigned receiver resets.
 
 - **`--json` was silently truncated when piped.** `process.stdout.write()` is
   asynchronous on a pipe, so exiting immediately after the write discarded whatever

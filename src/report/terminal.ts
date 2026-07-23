@@ -291,3 +291,33 @@ export const renderImpact = (
   }
   return lines.join("\n");
 };
+
+/**
+ * §121 — source→sink attack paths: for each injection sink fed by request data,
+ * the exact chain of calls that carries caller input to it. The proof a finding
+ * is reachable, laid out step by step from the request handler to the sink.
+ */
+export const renderAttackPaths = (
+  paths: readonly import("../core/attack-paths.ts").AttackPath[],
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+  if (paths.length === 0) {
+    lines.push(p.dim("  No caller-controlled data reaches an injection sink through the call graph."));
+    lines.push("");
+    return lines.join("\n");
+  }
+  lines.push(`  ${p.bold(String(paths.length))} exploitable path(s) — caller data reaching an injection sink:`);
+  for (const path of paths) {
+    lines.push("");
+    lines.push(`  ${p.red("▸")} ${p.bold(path.sinkKind)}`);
+    path.steps.forEach((s, i) => {
+      const arrow = i === 0 ? "source" : `  ↓  `;
+      lines.push(`      ${p.dim(arrow)}  ${s.label}  ${p.cyan(`${s.normalizedFilePath}:${s.line}`)}`);
+    });
+    lines.push(`      ${p.red("  ↓  ")}  ${p.red("sink")}  ${p.cyan(`${path.sink.normalizedFilePath}:${path.sink.line}`)}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+};

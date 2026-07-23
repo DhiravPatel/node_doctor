@@ -412,7 +412,14 @@ export interface LintSourceResult {
 /** Lint a single source string with no filesystem access. */
 export const lintSource = (options: LintSourceOptions): LintSourceResult => {
   const capabilities = options.capabilities ?? new Set(["node"]);
-  const diagnostics = (options.diagnostics ?? DIAGNOSTICS).filter((r) => (r.scope ?? "file") === "file");
+  // Honor capability gating here, not just in scanProject's selector: a caller
+  // that hands `lintSource` its own diagnostic list — the ESLint/oxlint adapters,
+  // a custom host — must not run a rule whose `requires`/`disabledWhen` are unmet,
+  // or a capability-gated rule (e.g. an Express-only route rule) fires on the
+  // wrong stack (a Fastify project) straight through the adapter surface.
+  const diagnostics = (options.diagnostics ?? DIAGNOSTICS).filter(
+    (r) => (r.scope ?? "file") === "file" && capabilitiesSatisfied(r, capabilities),
+  );
   const effectiveSeverity = new Map<string, Severity>();
   const normalizedFilePath = options.filePath.split(sep).join("/");
 

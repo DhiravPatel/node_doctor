@@ -24,7 +24,7 @@ import { installGitHook } from "../install/git-hook.ts";
 import { scanProject } from "../core/scan.ts";
 import type { ScanReport } from "../core/scan.ts";
 import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
-import { renderReport, renderDelta, renderWorkspaceReport, renderImpact } from "../report/terminal.ts";
+import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths } from "../report/terminal.ts";
 import { isWorkspaceRoot, scanWorkspaces, workspaceFindings, discoverWorkspaces } from "../core/workspaces.ts";
 import { toJson, toJsonError } from "../report/json.ts";
 import { toSarif } from "../report/sarif.ts";
@@ -50,6 +50,7 @@ import { extractRoutes, buildApiSurface, diffApiSurface, type RouteEntry } from 
 import { buildSbom } from "../core/sbom.ts";
 import { buildModernizationReport } from "../core/modernization.ts";
 import { buildImpactGraph, computeImpact } from "../core/impact.ts";
+import { collectAttackPaths } from "../core/attack-paths.ts";
 import { loadCodeowners, groupByOwner, scorePrRisk } from "../core/ownership.ts";
 import { scanGitHistoryForSecrets } from "../core/git-history-secrets.ts";
 import { parseSource } from "../core/parse.ts";
@@ -1107,6 +1108,23 @@ const runRatchet = async (args: ParsedArgs, version: string): Promise<number> =>
  * route with its guard chain; with --baseline it diffs against a saved surface.
  */
 /**
+ * §121 — exploitability proof: every source→sink attack path in the project.
+ */
+const runPaths = async (args: ParsedArgs): Promise<number> => {
+  const { dir, config } = await resolveScanTarget(args);
+  const graph = await buildImpactGraph(dir, { config, parallel: args.parallel });
+  const paths = await collectAttackPaths(graph, dir);
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(paths) : JSON.stringify(paths, null, 2)) + "\n");
+    return 0;
+  }
+  process.stdout.write(renderAttackPaths(paths, { color: useColor(args) }));
+  // Exit 1 when an exploitable path exists and CI is gating — a proven-reachable
+  // injection is exactly what should fail a build.
+  return paths.length > 0 && args.blocking !== "none" ? 1 : 0;
+};
+
+/**
  * §120 — blast radius of a change. Reuses `resolveOnly` so the same
  * `--diff`/`--staged`/`--only`/`--changed-files-from` plumbing every other scoped
  * command uses names the changed files; explicit positional paths also work.
@@ -1392,6 +1410,8 @@ export const main = async (argv: string[]): Promise<number> => {
         return await runSurface(args);
       case "impact":
         return await runImpact(args);
+      case "paths":
+        return await runPaths(args);
       case "ratchet":
         return await runRatchet(args, version);
       case "ci":

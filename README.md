@@ -29,7 +29,7 @@ Express handler with no error path, a `readFileSync` on the request path, an N+1
 across a loop, a `Promise.all` that opens a socket per row, injection and
 secret-handling sinks.
 
-It runs **112 diagnostics** — including a whole-tree scan for **committed secrets**
+It runs **113 diagnostics** — including a whole-tree scan for **committed secrets**
 in `.env`, config, CI, and key files — produces a transparent **0–100 health
 score** entirely on your machine (no network, no telemetry), and can push the
 same knowledge **upstream into your coding agent** as an installable skill and an
@@ -72,7 +72,7 @@ Typical output on a codebase that needs help:
 
 ## Features
 
-- **112 diagnostics** across Security, Reliability, Bugs, Performance, and
+- **113 diagnostics** across Security, Reliability, Bugs, Performance, and
   Maintainability — each with a valid + invalid test; FP-prone ones are opt-in.
 - **Whole-tree secret scan** — committed credentials in `.env`, YAML/CI configs,
   and `*.pem`/`*.key` files, gated to git-tracked files so a local `.env` is safe.
@@ -116,6 +116,10 @@ Typical output on a codebase that needs help:
   unindexed foreign key).
 - **CODEOWNERS routing** (`--owners`) and a **PR risk score** (`--risk`) — findings
   grouped by the team that owns them, plus one explainable number for triage.
+- **Exploitability proof** (`node-doctor paths`) — for every injection sink fed by
+  request data, the exact source→sink chain the taint engine resolved: request
+  handler → each helper → the `eval`/shell/SQL sink, with `file:line` at every hop.
+  Proof a finding is *reachable*, not a heuristic; exits 1 on a proven path.
 - **Change-impact / blast radius** (`node-doctor impact`) — from the import graph,
   which routes and files a change reaches downstream. `impact --diff main` answers
   "what does my PR touch?" before review: *your two-line change to `db/pool.ts` is
@@ -138,7 +142,7 @@ Typical output on a codebase that needs help:
 | --- | --- | --- | --- |
 | **Security** | Injection, secrets, auth, deserialization, GraphQL/gRPC + AI-feature security, committed-secret + IaC/container/CI scan | 2.0 | 54 |
 | **Reliability** | Crashes, hangs, lifecycle, runtime portability, deploy config, migrations, env drift | 1.5 | 28 |
-| **Bugs** | Logic errors, wrong results | 1.5 | 9 |
+| **Bugs** | Logic errors, wrong results, dead routes | 1.5 | 10 |
 | **Performance** | Event-loop stalls, N+1, AI cost | 1.0 | 11 |
 | **Maintainability** | Structure, hygiene, dead code, complexity, deprecated APIs | 0.5 | 10 |
 
@@ -200,6 +204,7 @@ node-doctor conventions [dir]                   write CLAUDE.md/AGENTS.md from y
 node-doctor ratchet init|check                  lock current debt; fail only on new findings
 node-doctor surface [--baseline <f>]            map routes + auth posture; diff for breaking changes
 node-doctor impact <files…> | --diff [base]     blast radius: what routes/files a change reaches
+node-doctor paths [directory]                   source→sink attack paths (exploitability proof)
 node-doctor sbom [--framework spdx]             CycloneDX / SPDX bill of materials
 node-doctor modernize [directory]               modernization score: deprecated APIs + Node major
 node-doctor mcp                                 run as an MCP server
