@@ -65,6 +65,12 @@ export const noHardcodedSecretLiteral = defineDiagnostic({
       }
 
       if (PLACEHOLDER_RE.test(value)) return;
+      // A real credential token is a single contiguous string — interior whitespace
+      // means natural-language prose (a UI label, a help message, a description)
+      // that merely sits in a secret-shaped field, not a secret. `credentials =
+      // "See the wiki for setup"` is not a leak. (Provider-key shapes, handled
+      // above, never contain spaces, so this cannot mask them.)
+      if (/\s/.test(value.trim())) return;
       if (!looksSecretLike(value)) return;
 
       const name = assignedName(node);

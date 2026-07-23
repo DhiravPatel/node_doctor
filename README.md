@@ -29,7 +29,7 @@ Express handler with no error path, a `readFileSync` on the request path, an N+1
 across a loop, a `Promise.all` that opens a socket per row, injection and
 secret-handling sinks.
 
-It runs **118 diagnostics** — including a whole-tree scan for **committed secrets**
+It runs **120 diagnostics** — including a whole-tree scan for **committed secrets**
 in `.env`, config, CI, and key files — produces a transparent **0–100 health
 score** entirely on your machine (no network, no telemetry), and can push the
 same knowledge **upstream into your coding agent** as an installable skill and an
@@ -72,7 +72,7 @@ Typical output on a codebase that needs help:
 
 ## Features
 
-- **118 diagnostics** across Security, Reliability, Bugs, Performance, and
+- **120 diagnostics** across Security, Reliability, Bugs, Performance, and
   Maintainability — each with a valid + invalid test; FP-prone ones are opt-in.
 - **Whole-tree secret scan** — committed credentials in `.env`, YAML/CI configs,
   and `*.pem`/`*.key` files, gated to git-tracked files so a local `.env` is safe.
@@ -124,6 +124,14 @@ Typical output on a codebase that needs help:
   which routes and files a change reaches downstream. `impact --diff main` answers
   "what does my PR touch?" before review: *your two-line change to `db/pool.ts` is
   reachable from 14 routes.* Deterministic graph reachability, not a heuristic.
+- **Agent context hygiene** (`node-doctor context`) — a new privacy surface that
+  exists only because agents read your repo. It finds the on-disk files an AI agent
+  must never load into context — `.env` files, private keys, credential files, DB
+  dumps, and configs with an embedded provider key — reports which are not yet
+  fenced off, and with `--write` generates the ignore artifacts that keep them out
+  (`.aiignore`, `.cursorignore`, and Claude Code `Read()` deny rules). Source code
+  is never flagged — an agent is *supposed* to read your code. Deterministic and
+  idempotent: re-running reproduces byte-identical artifacts.
 - **CI baseline delta** — reports only the findings your PR introduced.
 - **`deslop`** dead-code scan — unused files, exports, and dependencies.
 - **MCP server** — call node.doctor as a native tool from any MCP client.
@@ -205,6 +213,7 @@ node-doctor ratchet init|check                  lock current debt; fail only on 
 node-doctor surface [--baseline <f>]            map routes + auth posture; diff for breaking changes
 node-doctor impact <files…> | --diff [base]     blast radius: what routes/files a change reaches
 node-doctor paths [directory]                   source→sink attack paths (exploitability proof)
+node-doctor context [dir] [--write]             find files an AI agent must not read; --write fences them off
 node-doctor sbom [--framework spdx]             CycloneDX / SPDX bill of materials
 node-doctor modernize [directory]               modernization score: deprecated APIs + Node major
 node-doctor mcp                                 run as an MCP server

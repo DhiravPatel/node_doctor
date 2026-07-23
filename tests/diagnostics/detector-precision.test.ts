@@ -22,6 +22,13 @@ describe("no-hardcoded-secret-literal: prefix constants are not credentials", ()
     expectSilent("no-hardcoded-secret-literal", `const password = "changeme";`);
     expectFires("no-hardcoded-secret-literal", `const password = "S3cr3t!longEnoughValue";`);
   });
+  test("silent on a natural-language value with interior whitespace (a label, not a secret)", () => {
+    // A credential token is a single contiguous string; a value with a space is
+    // prose that merely sits in a secret-shaped field.
+    expectSilent("no-hardcoded-secret-literal", `const credentials = "Credential files";`);
+    expectSilent("no-hardcoded-secret-literal", `const apiKey = "See the wiki for setup steps";`);
+    expectSilent("no-hardcoded-secret-literal", `const token = { "secret-content": "Files containing a secret" };`);
+  });
 });
 
 describe("no-redos-prone-regex: an optional group cannot backtrack catastrophically", () => {

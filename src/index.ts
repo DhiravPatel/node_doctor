@@ -99,6 +99,10 @@ export { ALL_TEXT_DIAGNOSTICS } from "./diagnostics/text-diagnostics.ts";
 // §120 — blast-radius / change-impact over the import graph.
 export { buildImpactGraph, computeImpact } from "./core/impact.ts";
 export type { ImpactReport, Dependent } from "./core/impact.ts";
+// §158 — agent context hygiene: detect secrets/keys an AI agent can read and
+// generate the ignore artifacts (.aiignore/.cursorignore/Claude deny) to fence them off.
+export { scanAgentContext, applyContextHygiene, buildIgnoreEntries } from "./core/agent-context.ts";
+export type { ContextHygieneReport, SensitiveFile, SensitiveCategory } from "./core/agent-context.ts";
 
 // Config
 export { loadConfig, BUILTIN_IGNORES } from "./core/config.ts";

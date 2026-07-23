@@ -61,6 +61,7 @@ import { fastifyMissingSchema } from "../diagnostics/http/fastify-missing-schema
 import { nestMissingValidationPipe } from "../diagnostics/http/nest-missing-validation-pipe.ts";
 import { noMissingBodySizeLimit } from "../diagnostics/http/no-missing-body-size-limit.ts";
 import { noSendAfterNext } from "../diagnostics/http/no-send-after-next.ts";
+import { noSharedCacheAuthenticatedResponse } from "../diagnostics/http/no-shared-cache-authenticated-response.ts";
 import { noTrustProxyTrue } from "../diagnostics/http/no-trust-proxy-true.ts";
 import { requireErrorHandlingMiddleware } from "../diagnostics/http/require-error-handling-middleware.ts";
 // maintainability
@@ -110,6 +111,7 @@ import { noStatefulGlobalRegexTest } from "../diagnostics/security/no-stateful-g
 import { noTaintedSinkViaHelper } from "../diagnostics/security/no-tainted-sink-via-helper.ts";
 import { noTimingUnsafeSecretCompare } from "../diagnostics/security/no-timing-unsafe-secret-compare.ts";
 import { noUnanchoredSecurityRegex } from "../diagnostics/security/no-unanchored-security-regex.ts";
+import { noUnnormalizedIdentityComparison } from "../diagnostics/security/no-unnormalized-identity-comparison.ts";
 import { noUnsafeDeserialization } from "../diagnostics/security/no-unsafe-deserialization.ts";
 import { noUnsafeRegexpFromInput } from "../diagnostics/security/no-unsafe-regexp-from-input.ts";
 import { noVmRunUntrusted } from "../diagnostics/security/no-vm-run-untrusted.ts";
@@ -178,6 +180,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   nestMissingValidationPipe,
   noMissingBodySizeLimit,
   noSendAfterNext,
+  noSharedCacheAuthenticatedResponse,
   noTrustProxyTrue,
   requireErrorHandlingMiddleware,
   // maintainability
@@ -227,6 +230,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noTaintedSinkViaHelper,
   noTimingUnsafeSecretCompare,
   noUnanchoredSecurityRegex,
+  noUnnormalizedIdentityComparison,
   noUnsafeDeserialization,
   noUnsafeRegexpFromInput,
   noVmRunUntrusted,

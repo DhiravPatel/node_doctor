@@ -1330,16 +1330,20 @@ The recall half (`/admin/` matching `superadmin` on privilege checks) is a delib
 Flags: unanchored regexes used in a security decision (origin, redirect, role, path allowlist), `.` matching unintended characters in a domain check, missing `u` flag where it matters, and `test()` on a `/g` regex (stateful `lastIndex` — alternating true/false across calls, a genuinely evil bug).
 
 ## 147. HTTP Caching & Privacy Semantics ★★ Flagship
-**Status: Planned** · ⚙️ Now
+**Status: Detected** (`no-shared-cache-authenticated-response`, opt-in) · ⚙️ Now
 
 An authenticated response served without `Cache-Control: private, no-store` can be cached by a CDN or shared proxy and handed to the next user. Same class of leak as §140, one layer up the stack, and equally uncovered.
+
+**Shipped, precision-first (opt-in):** `no-shared-cache-authenticated-response` (Security/warn/high) fires when a request handler serializes user-identity data into the response *body* AND sets a shared-cacheable `Cache-Control` (`public` or a positive `s-maxage`, not `private`/`no-store`). The body-reaching requirement is the precision crux — an identity read used only to gate access (`if (!req.user) return res.sendStatus(401)`) or to validate a CSRF token does not personalize the payload, so those stay silent. It is also silent when the response is correctly keyed with `Vary: Authorization`/`Cookie` (the rule's own remedy) or overridden to `private`/`no-store`, and covers express, koa (`ctx.state.user`, `ctx.body`), and fastify. Hardened against an adversarial FP hunt (Vary-keying, override, auth-gate, CSRF-only, `s-maxage=0` all confirmed silent). The `Vary`/`ETag`/`s-maxage`-on-personalized sub-cases remain Planned.
 
 Flags: authenticated routes with public/absent cache directives, `Vary` omitting `Authorization` or `Cookie`, `ETag` computed over user-specific data on a shared-cacheable response, and `s-maxage` on personalized content.
 
 ## 148. Unicode Normalization & Homoglyph Safety ★
-**Status: Planned** · ⚙️ Now
+**Status: Detected** (`no-unnormalized-identity-comparison`, opt-in) · ⚙️ Now
 
 Identity comparisons on un-normalized strings: two different byte sequences render identically, so `admin` and `аdmin` (Cyrillic а) are distinct keys but visually identical — account spoofing. Flags missing `.normalize()` before comparing or storing identity strings (usernames, emails, tenant slugs), case-folding with `toLowerCase()` where locale-aware folding is required (the Turkish dotless-ı bug), and length checks in code units on user-supplied text.
+
+**Shipped, narrow-by-design (opt-in):** `no-unnormalized-identity-comparison` (Security/warn/high) fires on an equality comparison where one operand is identity-named (username/email/login/handle/slug/tenant/…), one shows canonicalization intent (`.toLowerCase()`/`.toLocaleLowerCase()`/`.trim()`), and neither calls `.normalize()`. The demonstrated-intent-plus-omission shape is what makes the omission a real bug rather than an incidental compare. Both operands must be DYNAMIC — a comparison to a constant (`slug.toLowerCase() === "admin"`, `=== Roles.ADMIN`, `=== ""`) is a reserved-name/emptiness check a homoglyph can't collide with, so it stays silent. The `toLocaleLowerCase` Turkish-ı and code-unit-length sub-cases are deliberately not attempted (too noisy).
 
 ## 149. Content-Type & Encoding Confusion ★
 **Status: Planned** · ⚙️ Now
@@ -1401,9 +1405,11 @@ Whether a build is reproducible from the repo alone: `package.json` ranges that 
 §29 checks a consumer in isolation; this maps the **graph**: who publishes to each topic/queue, who consumes it, and what falls out of that — orphan topics with a publisher and no consumer (messages into the void), consumers subscribed to topics nothing publishes (dead code that looks alive), payload-shape mismatches between publisher and consumer, and cycles where a consumer publishes back to its own upstream. The event-driven equivalent of the import graph, and just as revealing.
 
 ## 158. Agent Context Hygiene ★★ Flagship
-**Status: Planned** · ⚙️ Now
+**Status: Core** (`node-doctor context`) · ⚙️ Now
 
 **A new privacy surface that exists only because agents read your repo.** When an agent loads files into context, secrets, customer data fixtures, key material, and internal credentials go with them — to a model, and often to a log.
+
+**Shipped as a command:** `node-doctor context` scans the on-disk working tree (including gitignored files — an agent reads the filesystem, not git) for files that must never enter an LLM context: `.env` files, private keys / key material, credential files (`.netrc`/`.pgpass`/GCP service accounts/an `.npmrc` with an auth token), database dumps, and config/data files carrying an embedded provider key (reusing the §68 detectors). It reports which are exposed (not yet covered by an artifact the agent honors) and, with `--write`, generates them idempotently — `.aiignore`, `.cursorignore`, and Claude Code `Read()` deny rules. Precision-first: **source code is never flagged** (an agent is supposed to read it; a secret in source is the AST scanner's job), benign fixtures and `.env.example` templates are excluded, and the generated fences are verified to actually cover what they flag (scan → write → re-scan reports zero exposed). Deterministic and byte-stable across runs. Hardened against an adversarial FP hunt (overloaded `.key` files, bare `.npmrc`, uppercase extensions, `dump.js`-style code all handled).
 
 Scan for files that should never enter an LLM context (reusing the §68 secret detectors plus data-shaped fixtures and dumps), report which are currently exposed, and **generate the ignore files** — `.aiignore`, `.cursorignore`, Claude Code permission rules — that keep them out. Directly on-thesis, uncovered by anyone, and it fits the engine that already ships.
 

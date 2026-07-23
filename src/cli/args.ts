@@ -23,6 +23,7 @@ export type Command =
   | "modernize"
   | "impact"
   | "paths"
+  | "context"
   | "version";
 
 // "rules" is accepted as a legacy alias for "diagnostics".
@@ -47,6 +48,7 @@ const COMMANDS = new Set<string>([
   "modernize",
   "impact",
   "paths",
+  "context",
   "version",
   "rules",
 ]);
@@ -135,6 +137,7 @@ export interface ParsedArgs {
   skill?: string; // `install --skill improve-node`
   fixDiff: boolean; // emit safe autofixes as a unified diff instead of writing
   overwrite: boolean; // (conventions) overwrite an existing file
+  write: boolean; // (context) generate the ignore artifacts on disk
   history: boolean; // (scan) also scan git history for secrets
   owners: boolean; // (scan) group findings by CODEOWNERS team
   risk: boolean; // (delta) print a PR risk score
@@ -237,6 +240,7 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
     packageScript: false,
     fixDiff: false,
     overwrite: false,
+    write: false,
     history: false,
     owners: false,
     risk: false,
@@ -363,6 +367,10 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
     }
     if (token === "--overwrite") {
       result.overwrite = true;
+      continue;
+    }
+    if (token === "--write") {
+      result.write = true;
       continue;
     }
     if (token === "--history") {

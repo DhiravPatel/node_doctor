@@ -321,3 +321,69 @@ export const renderAttackPaths = (
   lines.push("");
   return lines.join("\n");
 };
+
+// A human label for each sensitive-file category, largest-blast-radius first.
+const CONTEXT_CATEGORY_LABEL: Record<string, string> = {
+  env: "Environment files",
+  "key-material": "Private keys / key material",
+  credentials: "Credential files",
+  "secret-content": "Files containing a secret",
+  "data-dump": "Database dumps / data exports",
+};
+const CONTEXT_CATEGORY_ORDER = ["env", "key-material", "credentials", "secret-content", "data-dump"];
+
+/**
+ * §158 — the agent context-hygiene report: which on-disk files hold secrets/key
+ * material and are NOT yet fenced off from an AI agent's reads. Groups the
+ * exposed files by category; a clean tree gets a one-line all-clear.
+ */
+export const renderContextHygiene = (
+  report: import("../core/agent-context.ts").ContextHygieneReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  if (report.exposed.length === 0) {
+    lines.push(`  ${p.green("✓")} No sensitive files exposed to agent context.`);
+    if (report.summary.total > 0) {
+      lines.push(
+        p.dim(
+          `    (${report.summary.total} sensitive file(s) found, all already covered by an ignore rule.)`,
+        ),
+      );
+    }
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  lines.push(
+    `  ${p.bold(String(report.exposed.length))} sensitive file(s) readable by an AI agent and not yet fenced off:`,
+  );
+  lines.push("");
+
+  const byCategory = new Map<string, typeof report.exposed>();
+  for (const f of report.exposed) {
+    const list = byCategory.get(f.category) ?? [];
+    list.push(f);
+    byCategory.set(f.category, list);
+  }
+  for (const category of CONTEXT_CATEGORY_ORDER) {
+    const group = byCategory.get(category);
+    if (!group || group.length === 0) continue;
+    lines.push(`  ${p.bold(CONTEXT_CATEGORY_LABEL[category] ?? category)}`);
+    for (const f of group) {
+      const tracked = f.gitTracked ? p.dim(" (git-tracked)") : "";
+      lines.push(`    ${p.red("✖")} ${f.normalizedPath}${tracked}  ${p.dim(`— ${f.reason}`)}`);
+    }
+    lines.push("");
+  }
+
+  lines.push(
+    p.dim(
+      "  run `node-doctor context --write` to generate .aiignore / .cursorignore / Claude Code deny rules.",
+    ),
+  );
+  lines.push("");
+  return lines.join("\n");
+};

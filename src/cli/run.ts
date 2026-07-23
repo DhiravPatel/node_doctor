@@ -24,7 +24,8 @@ import { installGitHook } from "../install/git-hook.ts";
 import { scanProject } from "../core/scan.ts";
 import type { ScanReport } from "../core/scan.ts";
 import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
-import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths } from "../report/terminal.ts";
+import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene } from "../report/terminal.ts";
+import { scanAgentContext, applyContextHygiene } from "../core/agent-context.ts";
 import { isWorkspaceRoot, scanWorkspaces, workspaceFindings, discoverWorkspaces } from "../core/workspaces.ts";
 import { toJson, toJsonError } from "../report/json.ts";
 import { toSarif } from "../report/sarif.ts";
@@ -290,6 +291,7 @@ Usage:
   node-doctor surface --baseline <f>     Diff the API surface; fail on breaking changes
   node-doctor sbom [--framework spdx]    Emit a CycloneDX (or SPDX) SBOM
   node-doctor modernize [dir]            Score how far the code is from current practice
+  node-doctor context [dir] [--write]    Find files an AI agent must not read; --write fences them off
   node-doctor deslop [directory]         Dead-code scan (unused files/exports/deps)
   node-doctor explain <diagnostic-id>          Explain a diagnostic and its fix
   node-doctor explain <file>:<line>      Why a diagnostic fired at a location
@@ -309,6 +311,7 @@ Options:
   --score                Print only the health score (quiet, for badges/CI)
   --fix                  Apply safe autofixes (e.g. node: protocol imports)
   --fix-diff             Print those autofixes as a unified diff instead of writing
+  --write                (context) generate .aiignore / .cursorignore / Claude deny rules
   --dead-code            Also run the dead-code scan and fold it into the report
   --cache                Reuse unchanged files between runs (content-hash cache)
   --watch                Re-scan on file changes (implies --cache)
@@ -1169,6 +1172,35 @@ const runImpact = async (args: ParsedArgs): Promise<number> => {
   return 0;
 };
 
+/**
+ * §158 — agent context hygiene. Reports on-disk files an AI agent must never read
+ * (secrets, keys, credentials, dumps) and which are not yet fenced off; `--write`
+ * generates the ignore artifacts that keep them out. Exits 1 when files are
+ * exposed and CI is gating — a live secret an agent can read is a real risk.
+ */
+const runContext = async (args: ParsedArgs): Promise<number> => {
+  const { dir, config } = await resolveScanTarget(args);
+  const report = await scanAgentContext(dir, { config });
+
+  if (args.write) {
+    const { written, unchanged } = await applyContextHygiene(dir, report);
+    for (const w of written) process.stdout.write(`  ✓ wrote ${w}\n`);
+    for (const u of unchanged) process.stdout.write(`  · unchanged ${u}\n`);
+    if (written.length === 0 && unchanged.length === 0) {
+      process.stdout.write("  ✓ No sensitive files found — nothing to fence off.\n");
+    }
+    return 0;
+  }
+
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(report) : JSON.stringify(report, null, 2)) + "\n");
+    return 0;
+  }
+
+  process.stdout.write(renderContextHygiene(report, { color: useColor(args) }));
+  return report.exposed.length > 0 && args.blocking !== "none" ? 1 : 0;
+};
+
 const runSurface = async (args: ParsedArgs): Promise<number> => {
   const { dir, config } = await resolveScanTarget(args);
   const fg = (await import("fast-glob")).default;
@@ -1412,6 +1444,8 @@ export const main = async (argv: string[]): Promise<number> => {
         return await runImpact(args);
       case "paths":
         return await runPaths(args);
+      case "context":
+        return await runContext(args);
       case "ratchet":
         return await runRatchet(args, version);
       case "ci":

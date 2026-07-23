@@ -11,7 +11,43 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
-### Diagnostics (62 → 118)
+### Agent context hygiene — `node-doctor context` (§158)
+
+A new subcommand and a new privacy surface: the files an AI agent must never load
+into context. It scans the on-disk working tree (including gitignored files — an
+agent reads the filesystem, not git) and classifies the sensitive ones: `.env`
+files, private keys / key material, credential files (`.netrc`, `.pgpass`, GCP
+service accounts, an `.npmrc` with an auth token), database dumps, and config/data
+files carrying an embedded provider key. It reports which are not yet fenced off by
+an ignore artifact the agent honors, and with `--write` generates them —
+`.aiignore`, `.cursorignore`, and Claude Code `Read()` deny rules — idempotently
+(re-running reproduces byte-identical artifacts and preserves user content).
+
+Precision-first: source code is never flagged (an agent is supposed to read your
+code; a secret *in* source is the AST scanner's job), benign fixtures and
+`.env.example` templates are excluded, and content detection uses only the anchored
+provider-key / PEM patterns — never an entropy heuristic. The generated fences are
+verified to actually cover what they flag (scan → write → re-scan reports zero
+exposed).
+
+### Diagnostics (62 → 120)
+
+Frontier wave B (FEATURE.md §147/§148) — two opt-in, precision-first rules
+(`defaultEnabled: false`, so they never affect the default health score), each
+hardened against an adversarial false-positive hunt:
+
+- **`no-shared-cache-authenticated-response`** (Security, §147) — a personalized
+  response served with a shared-cacheable `Cache-Control` (`public` / positive
+  `s-maxage`) that a CDN can hand to the next user. Fires only when user-identity
+  data actually reaches the response *body* (not merely an auth-gate or CSRF read),
+  and stays silent when the response is correctly keyed with `Vary: Authorization`
+  or overridden to `private`/`no-store`. Covers express, koa (`ctx.state.user`), and
+  fastify.
+- **`no-unnormalized-identity-comparison`** (Security, §148) — an identity string
+  (username/email/tenant/…) compared after case/whitespace folding but without
+  Unicode normalization, so homoglyphs (`admin` vs Cyrillic `аdmin`) slip through.
+  Narrow by design: requires demonstrated canonicalization intent and two dynamic
+  operands (a comparison to a constant is a reserved-name check, not a collision).
 
 Frontier wave A (FEATURE.md §145/§146/§150/§153) — five precision-first rules,
 each corpus-verified false-positive-free against ~30k files of real third-party

@@ -1,11 +1,11 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 118,
+  "total": 120,
   "defaultOn": 95,
-  "optIn": 23,
+  "optIn": 25,
   "byCategory": {
     "Performance": 11,
-    "Security": 55,
+    "Security": 57,
     "Maintainability": 10,
     "Reliability": 28,
     "Bugs": 14
@@ -1293,6 +1293,21 @@
       "recommendation": "Register the specific route BEFORE the parameter route on the same router — matching is top-to-bottom and stops at the first hit, so `/users/:id` before `/users/me` swallows `/users/me`. Move the static route up, or add a constraint (`:id(\\d+)`) so the param cannot match it."
     },
     {
+      "id": "no-shared-cache-authenticated-response",
+      "title": "Authenticated response served with a shared-cacheable Cache-Control",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "http",
+        "privacy"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "For an authenticated or personalized response, set `Cache-Control: private, no-store` (or drop `public`/`s-maxage`) so a CDN/shared proxy cannot store and re-serve it. If it must be shared-cacheable, key it per user with `Vary: Authorization`."
+    },
+    {
       "id": "no-sql-template-interpolation",
       "title": "SQL built by string interpolation",
       "category": "Security",
@@ -1583,6 +1598,21 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Store the handle and `clearInterval(handle)` on shutdown, or call `handle.unref()` so the interval does not by itself keep the process alive."
+    },
+    {
+      "id": "no-unnormalized-identity-comparison",
+      "title": "Identity compared after case/whitespace folding but without Unicode normalization",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "identity",
+        "unicode"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Normalize both sides before comparing: `a.normalize(\"NFKC\").toLowerCase() === b.normalize(\"NFKC\").toLowerCase()` (normalize first, case-fold after), or compare a stored canonical form. Case-folding and trimming do not collapse homoglyphs or compatibility characters, so `admin` and `аdmin` (Cyrillic `а`) stay distinct."
     },
     {
       "id": "no-unreachable-code",
