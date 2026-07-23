@@ -1211,9 +1211,11 @@ Estimate the **cloud cost of a code path**, not of infrastructure. Infracost pri
 Output is a per-route cost profile — *"`GET /orders` costs ~$0.004/req; 87% of that is the N+1 at `repository.ts:88`"* — which converts a Performance finding into a budget line. Distinct from §103 (fix-impact simulation): §103 estimates the payoff of *fixing*; this prices the code as it stands.
 
 ## 132. Static Latency Budget & Critical-Path Analysis ★★ Flagship
-**Status: Planned** · ⚙️ Now
+**Status: Detected** (`no-sequential-independent-awaits`, opt-in) · ⚙️ Now
 
 Compute each route's **serial critical path** from the call graph: count sequential `await`s that cross a network or disk boundary, identify awaits that are independent and could be parallel, and produce an estimated floor latency. Then check it against a declared SLO.
+
+**Shipped, precision-first (opt-in):** `no-sequential-independent-awaits` (Performance/warn/high) is the highest-value, false-positive-free slice — "identify awaits that are independent and could run in parallel". It flags ≥2 consecutive independent network **GET** reads (`fetch`/`axios.get`/`got`/…) awaited serially in one block, where no later await reads an earlier-bound name, and recommends `Promise.all` (serial cost = sum of latencies → parallel cost = max). It is **network-reads-only** by deliberate design: writes (POST/PUT/…) and **DB queries** are never flagged, because parallelizing them is unsafe on a single connection or inside an interactive transaction, and pooled-vs-single cannot be told apart from a receiver name — unsafe advice is a false positive. The full cross-file critical-path arithmetic and SLO check remain Planned (needs the call-graph latency model).
 
 *"This handler has 7 serial round trips; at a 20ms p50 per hop it cannot meet a 100ms SLO. Hops 3–5 are independent and parallelizable."* Genuinely novel, needs nothing the engine lacks, and it turns "slow API" from a vibe into arithmetic.
 
@@ -1234,9 +1236,11 @@ The sustainability sibling of §131: translate the same operation counts into es
 *How the system behaves when something downstream is slow or broken. §10 catches a single retry with no backoff; this part reasons about failure **across** the graph.*
 
 ## 135. Retry Amplification & Thundering-Herd Analysis ★★ Flagship
-**Status: Planned** · ⚙️ Now
+**Status: Detected** (`no-retry-amplification`, opt-in) · ⚙️ Now
 
 **Multiplicative retries are a famous outage cause and no linter models them.** Service A retries 3×, calling B which retries 3×, calling C which retries 3× — one user request becomes 27 hits on a struggling database, and the retry storm *is* the outage.
+
+**Shipped, precision-first (opt-in):** `no-retry-amplification` (Reliability/warn/high) catches the file-local, unambiguous slice: a retry wrapper (`pRetry`/`retry`/`asyncRetry`/`backOff`/…) whose operation ITSELF retries — either a **nested retry wrapper**, or an **auto-retrying SDK client**. Client detection is gated on the SDK actually being **imported** (`@aws-sdk` `.send()`, `got`, `stripe`, `axios`+`axios-retry`), so a receiver merely named like a client (`emailClient.send`, a local `got`/`stripe` binding) never fires — hardened against an adversarial FP hunt that found the naïve `endsWith("Client")` heuristic fired on nodemailer/gRPC/Redis/Kafka clients. The cross-file multiplication (walking retry factors along the call graph) remains Planned.
 
 Walk the call graph, multiply the retry factors along each path, and flag paths whose amplification exceeds a threshold. Also flags retries without jitter (synchronized herds) and retries wrapped around already-retrying clients (SDKs that retry internally). Pure graph arithmetic on data the engine already has.
 
@@ -1367,9 +1371,11 @@ Parser confusion at the request boundary: trusting a client-declared `Content-Ty
 §21 asks "are there logs?"; this asks **"could you actually debug this route at 3am?"** Score each route on whether its failure paths emit anything, whether errors carry a correlation ID, whether external calls are timed, and whether the catch blocks that swallow errors do so silently. Report per-route coverage and a codebase-level score — the observability equivalent of test coverage, which does not currently exist.
 
 ## 152. Async Context Propagation Integrity ★★ Flagship
-**Status: Planned** · ⚙️ Now
+**Status: Detected** (`no-lost-async-context`, opt-in) · ⚙️ Now
 
-`AsyncLocalStorage` — the mechanism behind request IDs, tenant context, and distributed tracing in modern Node — **breaks silently**. Context is lost across `EventEmitter` callbacks, some pooled-connection boundaries, `setTimeout` chains established outside the run scope, and worker threads. The symptom is a request ID that vanishes halfway through a trace, or worse, a *tenant* context that vanishes.
+`AsyncLocalStorage` — the mechanism behind request IDs, tenant context, and distributed tracing in modern Node — **breaks silently**.
+
+**Shipped, narrow-by-design (opt-in, medium confidence):** `no-lost-async-context` (Reliability/warn) flags the clearest loss: `AsyncLocalStorage.getStore()` called lexically inside an **EventEmitter** listener (`.on`/`.once`/`.addListener`/…), where the callback runs in the emit-time context, not the registration-time context, so the request/tenant/trace context is silently lost. The receiver must resolve to an `AsyncLocalStorage` instance (a `new AsyncLocalStorage()` binding, or an unmistakably-ALS name in an ALS-importing file — `context`/`storage` are excluded as too generic), and the read must be the listener's own body (nested timers/callbacks are pruned; `setTimeout`/promises propagate correctly in modern Node and are never flagged). Deliberately does NOT try to prove emit timing, so it is medium-confidence and opt-in. Cross-file/pool-boundary context loss remains Planned. Context is lost across `EventEmitter` callbacks, some pooled-connection boundaries, `setTimeout` chains established outside the run scope, and worker threads. The symptom is a request ID that vanishes halfway through a trace, or worse, a *tenant* context that vanishes.
 
 Track the context boundary through the call graph and flag the exact hop where it is dropped. Nothing detects this today, and it is painful enough that people give up on tracing over it.
 

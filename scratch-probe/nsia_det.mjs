@@ -1,0 +1,13 @@
+import { lintSource } from "../src/core/scan.ts";
+import { noSequentialIndependentAwaits as D } from "../src/diagnostics/performance/no-sequential-independent-awaits.ts";
+const caps = new Set(["node", "esm", "typescript", "express"]);
+const n = (src) => lintSource({ filePath: "a.ts", sourceText: src, diagnostics: [D], capabilities: caps }).findings.length;
+const fn = (body) => `async function h(){\n${body}\n}`;
+const src = fn(`const a = await db.user.create({data:1}); const b = await db.log.create({data:2});`);
+const out = [];
+for (let i = 0; i < 10; i++) out.push(n(src));
+console.log("write-case 10x same process:", out.join(","));
+const src2 = fn(`const a = await fetch(x); const b = await fetch(y);`);
+const out2 = [];
+for (let i = 0; i < 10; i++) out2.push(n(src2));
+console.log("fetch-case 10x same process:", out2.join(","));

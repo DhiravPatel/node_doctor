@@ -1,13 +1,13 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 120,
+  "total": 123,
   "defaultOn": 95,
-  "optIn": 25,
+  "optIn": 28,
   "byCategory": {
-    "Performance": 11,
+    "Performance": 12,
     "Security": 57,
     "Maintainability": 10,
-    "Reliability": 28,
+    "Reliability": 30,
     "Bugs": 14
   },
   "categoryWeights": {
@@ -925,6 +925,21 @@
       "recommendation": "Treat model output as untrusted. Never eval/exec it or splice it into SQL, HTML, or a URL. Parse structured output and dispatch through an explicit allowlist, parameterize SQL, escape before rendering, and validate a URL's host against an allowlist."
     },
     {
+      "id": "no-lost-async-context",
+      "title": "AsyncLocalStorage context lost inside an EventEmitter listener",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "observability",
+        "reliability"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Capture the store into a local BEFORE registering the listener (`const ctx = als.getStore(); emitter.on(evt, () => use(ctx))`), or bind the callback to the current context with `als.bind(fn)` / `new AsyncResource(name).runInAsyncScope(fn)` so it runs in the registration-time context instead of the emit-time context."
+    },
+    {
       "id": "no-math-random-for-token",
       "title": "Math.random() used for a security token",
       "category": "Security",
@@ -1228,6 +1243,20 @@
       "recommendation": "Remove the redundant try/catch and let the error propagate, or add real handling (log, wrap with `{ cause }`, or recover)."
     },
     {
+      "id": "no-retry-amplification",
+      "title": "Nested retries amplify into a thundering herd",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "reliability"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Retry at exactly ONE layer. Disable the inner client's built-in retries (AWS SDK `maxAttempts: 1`, got `retry: 0`, Stripe `maxNetworkRetries: 0`) or remove the outer retry wrapper, and add jitter to the single remaining retry so failures do not synchronize into a herd on the failing dependency."
+    },
+    {
       "id": "no-secret-in-config-file",
       "title": "Hardcoded secret in a config or CI file",
       "category": "Security",
@@ -1272,6 +1301,21 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Never log the credential itself. Log a presence check or a fingerprint instead (`{ hasToken: Boolean(token) }`, `token.slice(-4)`), or run the payload through a redaction step — pino's `redact` option, or an explicit `redact()`/`mask()` helper."
+    },
+    {
+      "id": "no-sequential-independent-awaits",
+      "title": "Sequential independent network reads (parallelizable)",
+      "category": "Performance",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "async",
+        "performance"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Fire the independent round trips together and await them once: `const [a, b] = await Promise.all([fetchA(), fetchB()])`. The serial cost is the sum of the latencies; the parallel cost is the max."
     },
     {
       "id": "no-shadowed-route",

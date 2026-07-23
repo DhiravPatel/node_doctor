@@ -77,12 +77,16 @@ import { preferNodeProtocolImports } from "../diagnostics/maintainability/prefer
 // modernization
 import { noDeprecatedNodeApi } from "../diagnostics/modernization/no-deprecated-node-api.ts";
 import { noNodeBuiltinOnEdge } from "../diagnostics/modernization/no-node-builtin-on-edge.ts";
+// performance
+import { noSequentialIndependentAwaits } from "../diagnostics/performance/no-sequential-independent-awaits.ts";
 // reliability
 import { noCacheWithoutTtl } from "../diagnostics/reliability/no-cache-without-ttl.ts";
 import { noCrossRequestStateMutation } from "../diagnostics/reliability/no-cross-request-state-mutation.ts";
 import { noInfiniteRetryWithoutBackoff } from "../diagnostics/reliability/no-infinite-retry-without-backoff.ts";
 import { noListenerAddedPerRequest } from "../diagnostics/reliability/no-listener-added-per-request.ts";
+import { noLostAsyncContext } from "../diagnostics/reliability/no-lost-async-context.ts";
 import { noMissingStreamErrorHandler } from "../diagnostics/reliability/no-missing-stream-error-handler.ts";
+import { noRetryAmplification } from "../diagnostics/reliability/no-retry-amplification.ts";
 import { noThrowInFinally } from "../diagnostics/reliability/no-throw-in-finally.ts";
 import { noUnboundedModuleCache } from "../diagnostics/reliability/no-unbounded-module-cache.ts";
 import { noUnclearedModuleInterval } from "../diagnostics/reliability/no-uncleared-module-interval.ts";
@@ -196,12 +200,16 @@ export const DIAGNOSTICS: Diagnostic[] = [
   // modernization
   noDeprecatedNodeApi,
   noNodeBuiltinOnEdge,
+  // performance
+  noSequentialIndependentAwaits,
   // reliability
   noCacheWithoutTtl,
   noCrossRequestStateMutation,
   noInfiniteRetryWithoutBackoff,
   noListenerAddedPerRequest,
+  noLostAsyncContext,
   noMissingStreamErrorHandler,
+  noRetryAmplification,
   noThrowInFinally,
   noUnboundedModuleCache,
   noUnclearedModuleInterval,

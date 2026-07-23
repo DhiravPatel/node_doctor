@@ -11,6 +11,31 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Diagnostics — frontier wave C (§132/§135/§152)
+
+Three opt-in, precision-first rules for outage-class defects nothing else catches
+(`defaultEnabled: false`, so they never affect the default health score). Each was
+hardened against an adversarial false-positive hunt and produces zero findings on
+this repo's own source.
+
+- **`no-retry-amplification`** (Reliability, §135) — stacked retries that multiply
+  into a thundering herd: a retry wrapper (`pRetry`/`retry`/`backOff`/…) whose
+  operation itself retries, either via a nested retry wrapper or an auto-retrying
+  SDK client. Client detection is gated on the SDK actually being **imported**
+  (`@aws-sdk` `.send()`, `got`, `stripe`, `axios`+`axios-retry`), so a receiver
+  merely named like a client (`emailClient.send`, a local `got`) never fires.
+- **`no-sequential-independent-awaits`** (Performance, §132) — independent network
+  **GET** reads awaited one after another that could run in parallel
+  (`Promise.all`) to collapse latency from the sum of the round trips to the max.
+  Network-reads-only by design: writes (POST/PUT/…) and **DB queries** are never
+  flagged, because parallelizing them is unsafe on a single connection / inside a
+  transaction (ordering, connection, partial-failure semantics).
+- **`no-lost-async-context`** (Reliability, §152) — `AsyncLocalStorage.getStore()`
+  inside an EventEmitter listener, where the callback runs in the emit-time context
+  and the request/tenant/trace context is silently lost. Fires only when the
+  receiver resolves to an `AsyncLocalStorage` instance and the read is lexically the
+  listener body.
+
 ### Agent context hygiene — `node-doctor context` (§158)
 
 A new subcommand and a new privacy surface: the files an AI agent must never load
@@ -30,7 +55,7 @@ provider-key / PEM patterns — never an entropy heuristic. The generated fences
 verified to actually cover what they flag (scan → write → re-scan reports zero
 exposed).
 
-### Diagnostics (62 → 120)
+### Diagnostics (62 → 123)
 
 Frontier wave B (FEATURE.md §147/§148) — two opt-in, precision-first rules
 (`defaultEnabled: false`, so they never affect the default health score), each

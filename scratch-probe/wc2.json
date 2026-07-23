@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 2,
+  "provenance": {
+    "toolVersion": "0.1.0",
+    "rulesetHash": "a8455e62ce849a9f",
+    "configHash": "44136fa355b3678a",
+    "capabilities": [
+      "cjs",
+      "node"
+    ]
+  },
+  "project": {
+    "name": "src",
+    "rootDirectory": "/Users/dhiravpatel/Documents/Project2/node_doctor/src",
+    "capabilities": [
+      "cjs",
+      "node"
+    ],
+    "analyzedFileCount": 209,
+    "totalLines": 28994,
+    "complete": true,
+    "parseFailures": []
+  },
+  "diagnosticsRun": 74,
+  "diagnosticsAvailable": 123,
+  "findings": [
+    {
+      "id": "diagnostics/cicd/context.ts::34:24::node-doctor/no-redos-prone-regex::3f261078",
+      "filePath": "/Users/dhiravpatel/Documents/Project2/node_doctor/src/diagnostics/cicd/context.ts",
+      "normalizedFilePath": "diagnostics/cicd/context.ts",
+      "line": 34,
+      "column": 24,
+      "plugin": "node-doctor",
+      "diagnostic": "no-redos-prone-regex",
+      "title": "Regex with catastrophic-backtracking shape",
+      "category": "Security",
+      "severity": "warn",
+      "message": "This regex nests a quantified group inside another quantifier — a crafted input triggers catastrophic backtracking that blocks the event loop.",
+      "recommendation": "Rewrite to remove the nested quantifier (`(\\w+)*` → `\\w*`), anchor the pattern, or bound the tested input length. For untrusted input use a linear-time matcher (RE2) instead of the backtracking engine.",
+      "tags": [
+        "event-loop",
+        "security"
+      ],
+      "confidence": "medium",
+      "evidenceKey": "7a8784f4b349c60f"
+    },
+    {
+      "id": "diagnostics/cicd/context.ts::58:21::node-doctor/no-redos-prone-regex::1ca5efcd",
+      "filePath": "/Users/dhiravpatel/Documents/Project2/node_doctor/src/diagnostics/cicd/context.ts",
+      "normalizedFilePath": "diagnostics/cicd/context.ts",
+      "line": 58,
+      "column": 21,
+      "plugin": "node-doctor",
+      "diagnostic": "no-redos-prone-regex",
+      "title": "Regex with catastrophic-backtracking shape",
+      "category": "Security",
+      "severity": "warn",
+      "message": "This regex nests a quantified group inside another quantifier — a crafted input triggers catastrophic backtracking that blocks the event loop.",
+      "recommendation": "Rewrite to remove the nested quantifier (`(\\w+)*` → `\\w*`), anchor the pattern, or bound the tested input length. For untrusted input use a linear-time matcher (RE2) instead of the backtracking engine.",
+      "tags": [
+        "event-loop",
+        "security"
+      ],
+      "confidence": "medium",
+      "evidenceKey": "eaa90aa00806b024"
+    }
+  ],
+  "score": {
+    "score": 100,
+    "label": "healthy",
+    "weighted": 4,
+    "perThousandLines": 0.14,
+    "byCategory": {
+      "Security": 2,
+      "Reliability": 0,
+      "Bugs": 0,
+      "Performance": 0,
+      "Maintainability": 0
+    }
+  }
+}
