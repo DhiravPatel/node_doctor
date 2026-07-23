@@ -20,6 +20,7 @@ import { resolve } from "node:path";
 import { scanProject, lintSource } from "../core/scan.ts";
 import { toJson } from "../report/json.ts";
 import { DIAGNOSTICS, DIAGNOSTICS_BY_ID } from "../core/registry.ts";
+import { ALL_TEXT_DIAGNOSTICS } from "../diagnostics/text-diagnostics.ts";
 import { runDeslop } from "../deslop/index.ts";
 import { discoverProject, shouldEnableDiagnostic } from "../core/project.ts";
 import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
@@ -145,15 +146,17 @@ const callTool = async (name: string, args: Record<string, unknown>): Promise<To
       return text(summary + toJson(report));
     }
     case "node_doctor_diagnostics": {
-      const body = DIAGNOSTICS.map(
+      const catalog = [...DIAGNOSTICS, ...ALL_TEXT_DIAGNOSTICS];
+      const body = catalog.map(
         (r) =>
           `node-doctor/${r.id}  [${r.category}/${r.severity}${r.defaultEnabled === false ? "/opt-in" : ""}]  ${r.title}`,
       ).join("\n");
-      return text(`${DIAGNOSTICS.length} diagnostics:\n\n${body}`);
+      return text(`${catalog.length} diagnostics:\n\n${body}`);
     }
     case "node_doctor_explain": {
       const id = String(args.diagnostic ?? "").replace(/^node-doctor\//, "");
-      const diagnostic = DIAGNOSTICS_BY_ID.get(id);
+      const diagnostic =
+        DIAGNOSTICS_BY_ID.get(id) ?? ALL_TEXT_DIAGNOSTICS.find((d) => d.id === id);
       if (!diagnostic) return text(`Unknown diagnostic: ${args.diagnostic}. Call node_doctor_diagnostics for the catalog.`, true);
       const gating = [
         diagnostic.requires?.length ? `requires ${diagnostic.requires.join(", ")}` : "",

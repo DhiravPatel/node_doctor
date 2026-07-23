@@ -29,11 +29,11 @@ import { discoverProject, shouldEnableDiagnostic, capabilitiesSatisfied } from "
 import { loadConfig, BUILTIN_IGNORES, effectiveSetting, settingsForFile, type NodeDoctorConfig } from "./config.ts";
 import { classifyFileContext, isRelaxedInContext } from "./file-context.ts";
 import { runTextScan, selectTextDiagnostics } from "./text-scan.ts";
-import { TEXT_DIAGNOSTICS } from "../diagnostics/secrets/index.ts";
-import { IAC_DIAGNOSTICS } from "../diagnostics/iac/index.ts";
+import { ALL_TEXT_DIAGNOSTICS } from "../diagnostics/text-diagnostics.ts";
 import { parseDirectives, applySuppressions, suppressionNearMiss } from "./suppress.ts";
 import { calculateScore, type ScoreResult } from "./score.ts";
 import { collectModuleFacts, buildProjectGraph, type ModuleFacts, type WorkspacePackages } from "./graph.ts";
+import type { TypeSource } from "./type-source.ts";
 import { summarizeEffects } from "./effects.ts";
 import {
   loadCache,
@@ -47,7 +47,7 @@ import { DIAGNOSTICS } from "./registry.ts";
 import { toolVersion } from "./version.ts";
 
 /** Every text-scan diagnostic: committed secrets + infrastructure config. */
-const ALL_TEXT_DIAGNOSTICS = [...TEXT_DIAGNOSTICS, ...IAC_DIAGNOSTICS];
+
 
 export const SCHEMA_VERSION = 2;
 
@@ -201,6 +201,7 @@ export const sortFindings = (findings: Finding[]): Finding[] =>
   });
 
 interface AnalyzeOptions {
+  typeSource?: TypeSource;
   filePath: string;
   normalizedFilePath: string;
   sourceText: string;
@@ -263,6 +264,7 @@ const analyzeFile = (opts: AnalyzeOptions): AnalyzeResult => {
     scope,
     requestHandlers: handlers,
     runScope: opts.runScope,
+    typeSource: opts.typeSource,
     graph: opts.graph,
     effectsOf: opts.graph ? (fn) => opts.graph!.effectsOf(fn) : (fn) => summarizeEffects(fn),
     report: (node, message, overrides) => {
@@ -397,6 +399,8 @@ export interface LintSourceOptions {
   sourceText: string;
   diagnostics?: Diagnostic[];
   capabilities?: Set<string>;
+  /** Type answers for `requiresTypes` diagnostics (the LSP and tests pass a stub). */
+  typeSource?: TypeSource;
 }
 
 export interface LintSourceResult {
@@ -420,6 +424,7 @@ export const lintSource = (options: LintSourceOptions): LintSourceResult => {
     capabilities,
     effectiveSeverity,
     runScope: "file",
+    typeSource: options.typeSource,
   });
 
   const findings = sortFindings(result.pending.map(finalize));
@@ -459,6 +464,11 @@ export interface ScanProjectOptions {
   /** Run the whole-tree secret/config-file text scan (default true). */
   secrets?: boolean;
   /**
+   * Type answers for `requiresTypes` diagnostics. Absent means those
+   * diagnostics are not selected at all — never that they ran and found nothing.
+   */
+  typeSource?: TypeSource;
+  /**
    * Workspace member name → source root (§96). With this set, a bare import of a
    * sibling package resolves into the graph instead of dead-ending.
    */
@@ -486,6 +496,7 @@ const selectDiagnostics = (
   capabilities: Set<string>,
   config: NodeDoctorConfig,
   ignoredTags: Set<string>,
+  hasTypes = false,
 ): { diagnostics: Diagnostic[]; effectiveSeverity: Map<string, Severity> } => {
   const diagnostics: Diagnostic[] = [];
   const effectiveSeverity = new Map<string, Severity>();
@@ -505,6 +516,9 @@ const selectDiagnostics = (
     const explicitlyConfigured = !!config.diagnostics?.[diagnostic.id] || overrideEnables;
     // Opt-in diagnostics run only when config (or an override) explicitly enables them.
     if (diagnostic.defaultEnabled === false && !explicitlyConfigured) continue;
+    // A type-aware diagnostic without a type source is not selected at all.
+    // Running it and reporting nothing would look identical to a clean result.
+    if (diagnostic.requiresTypes && !hasTypes) continue;
     if (diagnostic.defaultEnabled !== false && !shouldEnableDiagnostic(diagnostic, capabilities) && !explicitlyConfigured) {
       continue;
     }
@@ -525,7 +539,12 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
   const config = options.config ?? (await loadConfig(rootDirectory, options.configPath));
   const ignoredTags = options.ignoredTags ?? new Set<string>();
 
-  const { diagnostics, effectiveSeverity } = selectDiagnostics(project.capabilities, config, ignoredTags);
+  const { diagnostics, effectiveSeverity } = selectDiagnostics(
+    project.capabilities,
+    config,
+    ignoredTags,
+    options.typeSource !== undefined,
+  );
   const fileDiagnostics = diagnostics.filter((r) => (r.scope ?? "file") === "file");
   const projectDiagnostics = diagnostics.filter((r) => r.scope === "project");
 
@@ -619,6 +638,7 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
       capabilities: project.capabilities,
       effectiveSeverity,
       runScope: "file",
+      typeSource: options.typeSource,
       onRuleError: options.onRuleError,
       respectInlineDisables: options.respectInlineDisables,
       // Cache hit but the project pass needs the AST: reuse diagnostic results, still parse.
@@ -702,6 +722,7 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
         effectiveSeverity,
         runScope: "project",
         graph,
+        typeSource: options.typeSource,
         onRuleError: options.onRuleError,
         respectInlineDisables: options.respectInlineDisables,
       });

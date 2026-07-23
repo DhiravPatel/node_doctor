@@ -91,6 +91,14 @@ export type { DeslopResult } from "./deslop/index.ts";
 export { runTextScan, selectTextDiagnostics, defineTextDiagnostic } from "./core/text-scan.ts";
 export type { TextDiagnostic, TextScanContext, RunTextScanOptions } from "./core/text-scan.ts";
 export { TEXT_DIAGNOSTICS } from "./diagnostics/secrets/index.ts";
+// The full text-diagnostic catalog (secrets + IaC + container + k8s + CI +
+// migrations). A consumer enumerating the whole ruleset needs
+// `DIAGNOSTICS.concat(ALL_TEXT_DIAGNOSTICS)`; `TEXT_DIAGNOSTICS` alone is only the
+// secrets subset and left the count 15 short.
+export { ALL_TEXT_DIAGNOSTICS } from "./diagnostics/text-diagnostics.ts";
+// §120 — blast-radius / change-impact over the import graph.
+export { buildImpactGraph, computeImpact } from "./core/impact.ts";
+export type { ImpactReport, Dependent } from "./core/impact.ts";
 
 // Config
 export { loadConfig, BUILTIN_IGNORES } from "./core/config.ts";

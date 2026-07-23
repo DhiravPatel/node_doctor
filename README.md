@@ -29,7 +29,7 @@ Express handler with no error path, a `readFileSync` on the request path, an N+1
 across a loop, a `Promise.all` that opens a socket per row, injection and
 secret-handling sinks.
 
-It runs **82 diagnostics** — including a whole-tree scan for **committed secrets**
+It runs **112 diagnostics** — including a whole-tree scan for **committed secrets**
 in `.env`, config, CI, and key files — produces a transparent **0–100 health
 score** entirely on your machine (no network, no telemetry), and can push the
 same knowledge **upstream into your coding agent** as an installable skill and an
@@ -72,10 +72,18 @@ Typical output on a codebase that needs help:
 
 ## Features
 
-- **82 diagnostics** across Security, Reliability, Bugs, Performance, and
+- **112 diagnostics** across Security, Reliability, Bugs, Performance, and
   Maintainability — each with a valid + invalid test; FP-prone ones are opt-in.
 - **Whole-tree secret scan** — committed credentials in `.env`, YAML/CI configs,
   and `*.pem`/`*.key` files, gated to git-tracked files so a local `.env` is safe.
+- **Deploy-config analysis** — the same engine reads the files that ship your code:
+  **Dockerfiles** (final stage running as root, mutable base tags, secrets baked
+  into a layer), **Kubernetes manifests** (privileged containers, host namespaces,
+  missing resource limits), **GitHub Actions** (script injection via
+  `\${{ github.event.* }}`, `pull_request_target` checking out untrusted code,
+  unpinned actions), and **Terraform/CloudFormation** (open security groups,
+  over-broad IAM, public buckets). Each demands positive evidence of the file type
+  first — a docker-compose file with `privileged: true` is not a Kubernetes finding.
 - **Cross-file call graph + interprocedural taint** — flags a blocking sink, or an
   injection sink fed by request data, in a helper reached from a handler *through other
   files*, and names the whole path. In a monorepo the graph **crosses package
@@ -87,8 +95,31 @@ Typical output on a codebase that needs help:
 - **Modernization score** (`node-doctor modernize`) — a second number, separate
   from health, that goes *up* as you retire deprecated APIs and unsupported Node
   majors.
+- **AI-feature security** — Node is where LLM apps are built, and their code has its
+  own vulnerability class. On a project that imports an AI SDK, node.doctor flags
+  **prompt injection** (request data welded into a `system` prompt — the same taint
+  engine as SQL injection, silent on the isolated `{ role: "user", content }`
+  shape), **LLM output reaching a dangerous sink** (`eval`/shell/SQL/HTML), an **MCP
+  tool that runs shell/SQL/`fs` on model-controlled arguments**, **system-prompt
+  leakage**, and **LLM calls in a loop**. The whole pack is silent on a project that
+  never calls a model.
+- **Type-aware diagnostics** (`--typed`) — an optional pass that reads the project's
+  own TypeScript types. It catches a **discarded promise** even when the callee is
+  typed `(): Promise<T>` rather than written `async` — the case a syntactic check
+  cannot see, and the majority in a real TypeScript codebase. The compiler is an
+  optional peer (`typescript@^5`); without it a normal scan is unchanged, and
+  `--typed` fails loudly rather than silently finding nothing.
+- **Framework, API and migration depth** — GraphQL/gRPC server-setup checks
+  (introspection on in production, insecure gRPC credentials), Hapi/Restify
+  diagnostics gated to those stacks, and SQL-migration checks (a destructive
+  statement outside a down section, `ADD COLUMN NOT NULL` with no default, an
+  unindexed foreign key).
 - **CODEOWNERS routing** (`--owners`) and a **PR risk score** (`--risk`) — findings
   grouped by the team that owns them, plus one explainable number for triage.
+- **Change-impact / blast radius** (`node-doctor impact`) — from the import graph,
+  which routes and files a change reaches downstream. `impact --diff main` answers
+  "what does my PR touch?" before review: *your two-line change to `db/pool.ts` is
+  reachable from 14 routes.* Deterministic graph reachability, not a heuristic.
 - **CI baseline delta** — reports only the findings your PR introduced.
 - **`deslop`** dead-code scan — unused files, exports, and dependencies.
 - **MCP server** — call node.doctor as a native tool from any MCP client.
@@ -105,10 +136,10 @@ Typical output on a codebase that needs help:
 
 | Category | Focus | Score weight | Count |
 | --- | --- | --- | --- |
-| **Security** | Injection, secrets, auth, deserialization, committed-secret + IaC scan | 2.0 | 35 |
-| **Reliability** | Crashes, hangs, lifecycle, runtime portability | 1.5 | 19 |
+| **Security** | Injection, secrets, auth, deserialization, GraphQL/gRPC + AI-feature security, committed-secret + IaC/container/CI scan | 2.0 | 54 |
+| **Reliability** | Crashes, hangs, lifecycle, runtime portability, deploy config, migrations, env drift | 1.5 | 28 |
 | **Bugs** | Logic errors, wrong results | 1.5 | 9 |
-| **Performance** | Event-loop stalls, N+1 | 1.0 | 9 |
+| **Performance** | Event-loop stalls, N+1, AI cost | 1.0 | 11 |
 | **Maintainability** | Structure, hygiene, dead code, complexity, deprecated APIs | 0.5 | 10 |
 
 Run `node-doctor diagnostics` for the full catalog with gating.
@@ -168,6 +199,7 @@ node-doctor ci                                  scaffold a GitHub Actions workfl
 node-doctor conventions [dir]                   write CLAUDE.md/AGENTS.md from your stack
 node-doctor ratchet init|check                  lock current debt; fail only on new findings
 node-doctor surface [--baseline <f>]            map routes + auth posture; diff for breaking changes
+node-doctor impact <files…> | --diff [base]     blast radius: what routes/files a change reaches
 node-doctor sbom [--framework spdx]             CycloneDX / SPDX bill of materials
 node-doctor modernize [directory]               modernization score: deprecated APIs + Node major
 node-doctor mcp                                 run as an MCP server
@@ -178,6 +210,7 @@ node-doctor version                             version + platform + Node runtim
 Output   --json · --json-compact · --score · --json-out · --sarif-out · --html-out
          --md-out · --annotations · --color / --no-color
 Scan     --fix · --fix-diff (emit autofixes as a patch) · --history (git-history secrets) · --dead-code · --cache · --watch · --audit · --max-duration <sec>
+         --typed (type-aware diagnostics; needs typescript@^5 in the project)
          --no-parallel (analyze files serially; default is a concurrency pool)
 Scope    --only <glob> · --diff [base] · --staged · --scope <lines|files>
          --changed-files-from <f> · --include-untracked

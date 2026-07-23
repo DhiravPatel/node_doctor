@@ -35,6 +35,19 @@ const DEP_TOKENS: Record<string, string> = {
   koa: "koa",
   "@nestjs/core": "nest",
   "@adonisjs/core": "adonis",
+  // §2 — the remaining server frameworks. Detection alone is useful before any
+  // framework-specific diagnostic exists: it drives `detected:` in the report,
+  // route extraction, and the capability gates that keep rules off the wrong stack.
+  "@hapi/hapi": "hapi",
+  hapi: "hapi",
+  restify: "restify",
+  sails: "sails",
+  "@feathersjs/feathers": "feathers",
+  "@loopback/core": "loopback",
+  next: "next",
+  "@remix-run/server-runtime": "remix",
+  "@remix-run/node": "remix",
+  "serverless-http": "serverless",
   "@prisma/client": "prisma",
   prisma: "prisma",
   "drizzle-orm": "drizzle",
@@ -45,6 +58,24 @@ const DEP_TOKENS: Record<string, string> = {
   jsonwebtoken: "jsonwebtoken",
   jose: "jose",
   typescript: "typescript",
+  // AI-feature security (§105–§109). The `ai` token gates the whole pack, so the
+  // rules are completely silent on a project that never calls a model. `mcp` is a
+  // narrower token for servers that expose tools to a model — a strictly higher
+  // blast radius, since the model, not a person, drives the tool call.
+  openai: "ai",
+  "@anthropic-ai/sdk": "ai",
+  "@google/generative-ai": "ai",
+  "@google/genai": "ai",
+  "cohere-ai": "ai",
+  "@mistralai/mistralai": "ai",
+  "groq-sdk": "ai",
+  replicate: "ai",
+  ollama: "ai",
+  ai: "ai", // Vercel AI SDK
+  langchain: "ai",
+  "@langchain/core": "ai",
+  llamaindex: "ai",
+  "@modelcontextprotocol/sdk": "mcp",
 };
 
 /** Extract the leading major version from a semver range (`^5.0.0` → 5). */
@@ -94,6 +125,10 @@ export const detectCapabilities = (
   }
 
   if ("typescript" in deps || opts.hasTsconfig) caps.add("typescript");
+
+  // An MCP server is an AI surface — the model drives its tools — so it gets the
+  // general AI-security rules too, on top of the MCP-specific one.
+  if (caps.has("mcp")) caps.add("ai");
 
   const nodeMajor = majorVersion(manifest.engines?.node);
   if (nodeMajor !== null) caps.add(`node:${nodeMajor}`);

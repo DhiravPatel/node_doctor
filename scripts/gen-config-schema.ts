@@ -10,14 +10,13 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { DIAGNOSTICS } from "../src/core/registry.ts";
-import { TEXT_DIAGNOSTICS } from "../src/diagnostics/secrets/index.ts";
-import { IAC_DIAGNOSTICS } from "../src/diagnostics/iac/index.ts";
+import { ALL_TEXT_DIAGNOSTICS } from "../src/diagnostics/text-diagnostics.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const schemaDir = resolve(here, "..", "schema");
 const schemaPath = resolve(schemaDir, "node-doctor.config.schema.json");
 
-const allDiagnostics = [...DIAGNOSTICS, ...TEXT_DIAGNOSTICS, ...IAC_DIAGNOSTICS];
+const allDiagnostics = [...DIAGNOSTICS, ...ALL_TEXT_DIAGNOSTICS];
 const ids = allDiagnostics.map((d) => d.id).sort();
 const tags = [...new Set(allDiagnostics.flatMap((d) => d.tags ?? []))].sort();
 const severity = { enum: ["off", "warn", "error"] };

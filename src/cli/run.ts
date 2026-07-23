@@ -24,7 +24,7 @@ import { installGitHook } from "../install/git-hook.ts";
 import { scanProject } from "../core/scan.ts";
 import type { ScanReport } from "../core/scan.ts";
 import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
-import { renderReport, renderDelta, renderWorkspaceReport } from "../report/terminal.ts";
+import { renderReport, renderDelta, renderWorkspaceReport, renderImpact } from "../report/terminal.ts";
 import { isWorkspaceRoot, scanWorkspaces, workspaceFindings, discoverWorkspaces } from "../core/workspaces.ts";
 import { toJson, toJsonError } from "../report/json.ts";
 import { toSarif } from "../report/sarif.ts";
@@ -34,8 +34,7 @@ import { renderReportMarkdown, renderDeltaMarkdown } from "../report/markdown.ts
 import { renderCodeFrame } from "../report/code-frame.ts";
 import { buildIssueUrl } from "../report/issue-url.ts";
 import { DIAGNOSTICS, DIAGNOSTICS_BY_ID } from "../core/registry.ts";
-import { TEXT_DIAGNOSTICS } from "../diagnostics/secrets/index.ts";
-import { IAC_DIAGNOSTICS } from "../diagnostics/iac/index.ts";
+import { ALL_TEXT_DIAGNOSTICS } from "../diagnostics/text-diagnostics.ts";
 import { installSkill, CLIENTS, type SkillName } from "../skill/install.ts";
 import { detectInstalledClients } from "../install/detect-agents.ts";
 import { installAgentHooks } from "../install/agent-hooks.ts";
@@ -50,6 +49,7 @@ import { RATCHET_FILENAME, buildRatchet, compareToRatchet, readRatchet, writeRat
 import { extractRoutes, buildApiSurface, diffApiSurface, type RouteEntry } from "../core/api-surface.ts";
 import { buildSbom } from "../core/sbom.ts";
 import { buildModernizationReport } from "../core/modernization.ts";
+import { buildImpactGraph, computeImpact } from "../core/impact.ts";
 import { loadCodeowners, groupByOwner, scorePrRisk } from "../core/ownership.ts";
 import { scanGitHistoryForSecrets } from "../core/git-history-secrets.ts";
 import { parseSource } from "../core/parse.ts";
@@ -59,6 +59,7 @@ import { relative, sep } from "node:path";
 import { runAgentFix } from "../agent/fix.ts";
 import { lintSource } from "../core/scan.ts";
 import { shouldEnableDiagnostic, discoverProject } from "../core/project.ts";
+import { createTypeSource } from "../core/type-source.ts";
 import { BUILTIN_IGNORES, loadConfig, loadConfigWithSource, effectiveSetting } from "../core/config.ts";
 import type { NodeDoctorConfig } from "../core/config.ts";
 import { startMcpServer } from "../mcp/server.ts";
@@ -376,7 +377,7 @@ const runDiagnostics = async (args: ParsedArgs): Promise<number> => {
 
   const catalog = [
     ...DIAGNOSTICS.map((d) => ({ d, scope: (d.scope ?? "file") as DiagnosticRow["scope"] })),
-    ...[...TEXT_DIAGNOSTICS, ...IAC_DIAGNOSTICS].map((d) => ({ d, scope: "text" as DiagnosticRow["scope"] })),
+    ...ALL_TEXT_DIAGNOSTICS.map((d) => ({ d, scope: "text" as DiagnosticRow["scope"] })),
   ];
   let rows: DiagnosticRow[] = catalog
     .sort((a, b) => (a.d.id < b.d.id ? -1 : 1))
@@ -563,6 +564,19 @@ const runScan = async (args: ParsedArgs, version: string): Promise<number> => {
     process.stderr.write(`node-doctor --fix: applied ${edits} safe edit(s) across ${files} file(s).\n`);
   }
 
+  // §46 — type-aware diagnostics. Built before the scan so a missing or
+  // unusable compiler fails the run with an actionable message, rather than
+  // producing a report that is quietly missing every typed finding.
+  let typeSource;
+  if (args.typed) {
+    const result = await createTypeSource(dir);
+    if (!result.ok) {
+      process.stderr.write(`node-doctor --typed: ${result.failure.reason}\n  ${result.failure.remedy}\n`);
+      return 2;
+    }
+    typeSource = result.source;
+  }
+
   const ruleErrors: string[] = [];
   const spinner = !args.json && !args.scoreOnly ? startSpinner("scanning…") : { stop: () => {} };
   let report: ScanReport;
@@ -570,6 +584,7 @@ const runScan = async (args: ParsedArgs, version: string): Promise<number> => {
     report = await scanProject({
       rootDirectory: dir,
       config,
+      typeSource,
       ignoredTags: new Set(args.ignoreTags),
       only,
       cache: args.cache,
@@ -956,8 +971,12 @@ const runExplain = async (args: ParsedArgs): Promise<number> => {
     return 0;
   }
 
-  // diagnostic-id mode.
-  const diagnostic = DIAGNOSTICS_BY_ID.get(bareId);
+  // diagnostic-id mode. Text (Phase C) diagnostics are not in the codegen
+  // registry, but a report tells the reader to run `explain <id>` on whatever it
+  // printed — answering "unknown diagnostic" for a finding we just emitted is a
+  // dead end at exactly the moment someone is trying to understand a result.
+  const diagnostic =
+    DIAGNOSTICS_BY_ID.get(bareId) ?? ALL_TEXT_DIAGNOSTICS.find((d) => d.id === bareId);
   if (!diagnostic) {
     process.stderr.write(`node-doctor explain: unknown diagnostic "${target}". Run \`node-doctor diagnostics\` for the catalog.\n`);
     return 2;
@@ -965,7 +984,8 @@ const runExplain = async (args: ParsedArgs): Promise<number> => {
   const gate = [
     diagnostic.requires?.length ? `requires ${diagnostic.requires.join(", ")}` : "",
     diagnostic.disabledWhen?.length ? `off on ${diagnostic.disabledWhen.join(", ")}` : "",
-    diagnostic.scope === "project" ? "project-scope (cross-file)" : "",
+    "scope" in diagnostic && diagnostic.scope === "project" ? "project-scope (cross-file)" : "",
+    "files" in diagnostic ? "text-scan (whole file, not source)" : "",
     diagnostic.defaultEnabled === false ? "opt-in" : "",
   ]
     .filter(Boolean)
@@ -1086,6 +1106,51 @@ const runRatchet = async (args: ParsedArgs, version: string): Promise<number> =>
  * §70/§78 — the attack-surface map and API breaking-change diff. Enumerates every
  * route with its guard chain; with --baseline it diffs against a saved surface.
  */
+/**
+ * §120 — blast radius of a change. Reuses `resolveOnly` so the same
+ * `--diff`/`--staged`/`--only`/`--changed-files-from` plumbing every other scoped
+ * command uses names the changed files; explicit positional paths also work.
+ */
+const runImpact = async (args: ParsedArgs): Promise<number> => {
+  // Unlike `scan`, every positional here is a CHANGED FILE, not the scan root —
+  // so the project is always analyzed from the working directory (honoring a
+  // config `rootDir` redirect), and positionals feed the changed set.
+  const loaded = await loadConfigWithSource(resolve("."), args.config ? resolve(args.config) : undefined);
+  const dir =
+    loaded.config.rootDir && loaded.sourcePath
+      ? resolve(dirname(loaded.sourcePath), loaded.config.rootDir)
+      : resolve(".");
+  const config = loaded.config;
+
+  // Changed files: a diff scope, or explicit positional paths/globs.
+  let changed = (await resolveOnly(args, dir)) ?? [];
+  if (args.positionals.length > 0) {
+    const fg = (await import("fast-glob")).default;
+    for (const p of args.positionals) {
+      const matched = await fg([p], { cwd: dir, absolute: true, dot: false, suppressErrors: true });
+      changed.push(...matched.filter((f) => SOURCE_EXT.test(f)));
+    }
+    changed = [...new Set(changed)];
+  }
+  if (changed.length === 0) {
+    process.stderr.write(
+      "node-doctor impact: name the changed files — a path, a glob, or a diff scope\n" +
+        "  e.g. `node-doctor impact src/db/pool.ts`, `node-doctor impact --diff main`, or `--staged`.\n",
+    );
+    return 2;
+  }
+
+  const graph = await buildImpactGraph(dir, { config, parallel: args.parallel });
+  const report = computeImpact(graph, changed);
+
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(report) : JSON.stringify(report, null, 2)) + "\n");
+    return 0;
+  }
+  process.stdout.write(renderImpact(report, { color: useColor(args) }));
+  return 0;
+};
+
 const runSurface = async (args: ParsedArgs): Promise<number> => {
   const { dir, config } = await resolveScanTarget(args);
   const fg = (await import("fast-glob")).default;
@@ -1325,6 +1390,8 @@ export const main = async (argv: string[]): Promise<number> => {
         return await runSbom(args);
       case "surface":
         return await runSurface(args);
+      case "impact":
+        return await runImpact(args);
       case "ratchet":
         return await runRatchet(args, version);
       case "ci":

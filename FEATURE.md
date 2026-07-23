@@ -15,6 +15,7 @@ The catalog spans **104 domains** across two halves: **Parts I–XV** (§1–§4
 | Tier | Meaning |
 | --- | --- |
 | **Core** | Implemented in the current engine. Where a domain is only partly built, the specific implemented checks are called out. |
+| **Detected** | The engine recognizes the technology and sets its capability token — which gates rule selection, route extraction and the `detected:` line — but no diagnostics specific to it exist yet. Shared diagnostics still apply. |
 | **Planned** | Committed roadmap. Deterministic static analysis that fits the existing engine and the build plan; realistic to ship incrementally. |
 | **Vision** | Longer-term platform scope. Requires additional infrastructure (runtime instrumentation, hosted services, an AI layer, or enterprise back-end) beyond the static-analysis core. |
 | **★ Differentiator** | Not a tier — a marker on the domains where node.doctor is *unlike* the incumbents, rather than merely at parity. |
@@ -92,10 +93,10 @@ Understands what a codebase *is* before analyzing it, so rules activate correctl
 - **Workspace detection** — enumerates member packages for per-project scoring.
 - **Microservice detection** *(Planned)* — recognizes multi-service repos and service boundaries.
 - **Environment detection** *(Planned)* — dev/test/prod config surfaces and `.env` layering.
-- **Runtime detection** *(Planned)* — Node vs Bun vs Deno vs edge runtimes.
+- **Runtime detection** — Node vs Bun vs Deno vs edge runtimes (`bun.lockb`/`bunfig.toml`, `deno.json(c)`, `wrangler.toml`, `@vercel/edge`), surfaced as capability tokens that gate runtime-specific diagnostics.
 
 ## 2. Framework Detection
-**Status: Core** for Express, Fastify, NestJS, AdonisJS, Koa; **Planned** for the rest.
+**Status: Core** for Express, Fastify, NestJS, AdonisJS, Koa (detection + dedicated diagnostics). The rest are **Detected** — the capability token is set and gates rule selection and route extraction, but no framework-specific diagnostics exist for them yet.
 
 Capability tokens are derived per framework and gate framework-specific rules.
 
@@ -106,15 +107,15 @@ Capability tokens are derived per framework and gate framework-specific rules.
 | NestJS | Core |
 | AdonisJS | Core |
 | Koa | Core |
-| Hapi | Planned |
-| Restify | Planned |
-| Sails.js | Planned |
-| Feathers | Planned |
-| LoopBack | Planned |
+| Hapi | Detected |
+| Restify | Detected |
+| Sails.js | Detected |
+| Feathers | Detected |
+| LoopBack | Detected |
 | Meteor | Planned |
-| Next.js API routes / Route Handlers | Planned |
-| Remix API / actions & loaders | Planned |
-| Serverless Framework | Planned |
+| Next.js API routes / Route Handlers | Detected |
+| Remix API / actions & loaders | Detected |
+| Serverless Framework | Detected |
 
 ## 46. Language Support
 **Status: Core** (JS/TS/ESM/CJS/hybrid); type-aware analysis Planned.
@@ -208,13 +209,13 @@ Deterministic detection of injection and unsafe-primitive sinks, taint-aware whe
 
 - **OWASP Top 10** coverage (progressive).
 - **SQL Injection** — interpolated/concatenated queries; allows parameterized and tagged-template forms.
-- **NoSQL Injection** *(Planned)* — operator/`$where` object injection.
+- **NoSQL Injection** — operator/`$where` object injection (`no-nosql-object-injection`).
 - **Command Injection** — caller input into shell commands.
 - **XSS** *(Planned)* — reflected/stored sinks in templating/HTML responses.
 - **CSRF** *(Planned)* — state-changing GET, missing CSRF protection.
-- **SSRF** *(Planned)* — unvalidated outbound URL from request input; redirect-following.
+- **SSRF** — unvalidated outbound URL from request input (`no-ssrf-unvalidated-url`).
 - **Path Traversal** — filesystem path built from caller input without containment.
-- **Prototype Pollution** *(Planned)* — unsafe recursive merge / `__proto__` writes.
+- **Prototype Pollution** — caller-controlled computed key writes and literal `__proto__`/`constructor` writes (`no-prototype-pollution`).
 - **Directory Traversal** — see path traversal; static-asset and upload paths.
 - **Remote Code Execution** — dynamic code execution from untrusted data.
 - **Unsafe `eval()`** — dynamic evaluation of input.
@@ -300,7 +301,7 @@ The load-bearing differentiator: the same call is fine at module scope and catas
 **Status: Core** for module-scope cache leaks, event-listener leaks, timer leaks; **Planned** for heap/circular/stream analysis.
 
 - Heap leaks *(Planned; strengthened with runtime profiling)*.
-- Circular references *(Planned)*.
+- Circular imports — runtime import cycles, anchored at the import that closes the cycle (`no-circular-imports`); type-only imports are excluded because they are erased.
 - Global/module-scope unbounded state.
 - Cache leaks (module-scope map with no eviction).
 - Event-listener leaks (listeners added per request, never removed).
@@ -368,7 +369,7 @@ Prisma, Sequelize, TypeORM, Mongoose, Knex, MikroORM, Objection.js, Drizzle ORM.
 # Part VI — Dependencies & Supply Chain
 
 ## 19. Dependency Analysis
-**Status:** unused/duplicate/circular detection is **Planned (near-term, via the import graph)**; vulnerability/license/supply-chain scoring is **Planned** (optional network integration, off by default to preserve offline-first).
+**Status:** unused/duplicate/circular detection is **Core** (via the import graph and `deslop`); vulnerability/license/supply-chain scoring is **Planned** (optional network integration, off by default to preserve offline-first).
 
 - Unused packages (declared, never imported).
 - Duplicate packages / duplicate versions.
@@ -384,7 +385,7 @@ Prisma, Sequelize, TypeORM, Mongoose, Knex, MikroORM, Objection.js, Drizzle ORM.
 # Part VII — Code Quality & Architecture
 
 ## 20. Code Quality
-**Status:** dead code, duplicate code, long functions, large files, deep nesting, complexity are **Planned (near-term)**; some overlap with the dead-code scanner (`node-deslop`).
+**Status:** dead code, long functions, deep nesting and complexity are **Core** (the size/complexity checks are opt-in by default); duplicate-code detection is **Planned (near-term)**; some overlap with the dead-code scanner (`node-deslop`).
 
 - Dead code (unreachable / unused files, exports, members).
 - Duplicate code (copy-paste blocks, duplicate constants/types).
@@ -454,7 +455,7 @@ Singleton, Factory, Repository, Strategy, Observer, Decorator, Builder, Adapter 
 
 # Part IX — Infrastructure & Deployment
 
-> Config-file linting (Dockerfiles, K8s manifests, CI YAML, serverless configs) is statically analyzable and **Planned**. Runtime/cloud-account analysis (live AWS resources) is **Vision**.
+> Config-file linting (Dockerfiles, K8s manifests, CI YAML, serverless configs) is statically analyzable and in progress — Terraform/CloudFormation security checks ship today (`no-open-security-group`, `no-overbroad-iam-policy`, `no-public-cloud-storage`) via the whole-tree text scan. **Planned**. Runtime/cloud-account analysis (live AWS resources) is **Vision**.
 
 ## 24. Docker Analysis
 **Status: Planned** (Dockerfile static analysis)
@@ -1056,3 +1057,126 @@ That is the destination. The path there is deliberately staged:
 **Consistency across the catalog.** Nothing in the extended domains weakens the invariants — the deterministic offline core, the locally computed score, precision-first, and AI-as-optional-layer hold across all 104.
 
 Everything in this catalog is real intent. The maturity tiers keep it honest about sequence, so the product is credible at every step rather than impressive only on paper.
+---
+
+# node.doctor — Features (Next / Out-of-the-Box)
+
+A third extension, covering **net-new, differentiated** capabilities beyond the existing 104 domains — feature classes that essentially **no linter or SAST tool ships today**. Same maturity legend (**Core** / **Detected** / **Planned** / **Vision**) and the same invariants (deterministic + offline core, local score, precision-first, AI-as-optional-layer).
+
+> **Why these are here.** The base catalog reaches parity-plus-moat with the incumbents. This set is about *category creation*: bug classes specific to Node backends and to the agent era that the market has not addressed. Almost everything below is **Planned** or **Vision** by definition — it is new ground. The strongest, most on-thesis bets are tagged **★ Differentiator**; the four flagged **★★ Flagship** are where node.doctor could define a category rather than compete in one.
+
+**New parts:** XXVI Building-AI-Features Security (§105–§109) · XXVII AI-Native Code Governance (§110–§113) · XXVIII Domain Correctness Packs (§114–§119) · XXIX Impact, Proof & Reasoning (§120–§123) · XXX Consistency, Drift & Fleet (§124–§128) · XXXI Knowledge & Targeting (§129–§130).
+
+---
+
+# Part XXVI — Building-AI-Features Security
+
+*Node/TypeScript is where most LLM apps, RAG pipelines, and MCP servers are actually built. The code that builds AI features has its own, largely unaddressed, vulnerability class.* An `ai` capability token is set from an LLM SDK dependency (openai, `@anthropic-ai/sdk`, the Vercel `ai` SDK, LangChain, …) and an `mcp` token from `@modelcontextprotocol/sdk`; the whole pack is silent on projects that never call a model.
+
+## 105. Prompt-Injection Sink Detection ★★ Flagship
+**Status: Core** — `no-prompt-injection`. Caller-controlled input mixed into a `system` prompt or concatenated into prompt text is flagged, built on the same interprocedural-taint engine as SQL injection (§56). The isolated `messages: [{ role: "user", content: req.body.q }]` pattern — the correct shape — is deliberately silent.
+
+## 106. Agent Tool & Capability Exposure ★ Differentiator
+**Status: Core** — `mcp-tool-unrestricted-capability` (`requires: mcp`). An MCP tool handler that runs a high-blast-radius operation (shell, filesystem write, raw SQL, `eval`) on model-controlled arguments.
+
+## 107. LLM Output-Trust Violations ★ Differentiator
+**Status: Core** — `no-llm-output-in-sink`. Model output reaching an executor, a SQL string, an HTML response, or an outbound fetch without validation — the mirror of §105, where the model is the untrusted source.
+
+## 108. System-Prompt & Secret Leakage
+**Status: Core** — `no-system-prompt-leak`. A system-prompt binding echoed back to the caller, logged, or reflected in an error.
+
+## 109. AI Cost & Runaway-Loop Guards
+**Status: Core** — `ai-call-in-loop`. An LLM call inside a loop: a latency, cost, and rate-limit blowup. (Unbounded-agent-loop and missing-token-limit checks remain **Planned**.)
+
+---
+
+# Part XXVII — AI-Native Code Governance
+
+*If agents write the code, the codebase needs governance built for that fact.* Deliberately **not shipped** in the current engine: every item here needs infrastructure the deterministic-offline core does not have — git-metadata attribution, the original ticket/PRD, an AI rule-generation layer, or a signing/audit chain. Flagged honestly rather than faked.
+
+## 110. AI-Authored-Code Trust Boundary ★★ Flagship
+**Status: Vision** (git metadata + agent-hook attribution).
+
+## 111. Spec / Intent Conformance ★★ Flagship
+**Status: Vision** (needs the task spec + an optional AI layer).
+
+## 112. Incident-to-Rule Guardrails ★★ Flagship
+**Status: Vision** (AI-assisted custom-rule generation from a postmortem).
+
+## 113. Agent-Change Attestation
+**Status: Vision** (extends provenance, §104, into a signed audit trail).
+
+---
+
+# Part XXVIII — Domain Correctness Packs
+
+*Opt-in bundles for correctness classes invisible to generic linters.*
+
+## 114. Multi-Tenancy Isolation ★ Differentiator
+**Status: Planned** — precise only with per-model tenant-scope knowledge; a same-file heuristic is too noisy to ship default-on.
+
+## 115. Money & Numeric Safety ★ Differentiator
+**Status: Planned** — **held back on precision:** statically proving a value is monetary is unreliable, and the doc's own rule applies (a false positive here is worse than not shipping).
+
+## 116. Time & Timezone Correctness ★ Differentiator
+**Status: Planned** — same precision problem: naive `Date` is not distinguishable from timezone-sensitive `Date` without dataflow this engine lacks.
+
+## 117. Idempotency & Retry Safety ★ Differentiator
+**Status: Planned** — needs cross-handler reasoning about dedup keys.
+
+## 118. Deploy & Migration Safety ★ Differentiator
+**Status: Core (partial)** — `migration-add-not-null-without-default`, `migration-destructive-without-guard`, and `migration-missing-index-on-foreign-key` (§14/§15) cover the SQL-migration cases. The rolling-deploy column-still-read case remains **Planned** (needs the previous version's reads).
+
+## 119. Distributed-Systems Correctness
+**Status: Vision** (cross-service reachability).
+
+---
+
+# Part XXIX — Impact, Proof & Reasoning
+
+## 120. Blast-Radius & Change-Impact Graph ★ Differentiator
+**Status: Core** — `node-doctor impact <files> | --diff`. Walks the import graph backward from the changed files to every transitive dependent, marks the route-bearing ones, and reports the blast radius (human + `--json`). Deterministic reachability, cross-package in a workspace.
+
+## 121. Exploitability Proof & Attack-Path Visualization ★ Differentiator
+**Status: Core (partial)** — cross-file taint findings already name the full source→sink hop trail (§56); a dedicated visualization command is **Planned**.
+
+## 122. Semantic Duplicate & Divergence Detection ★ Differentiator
+**Status: Vision** (AST + dataflow fingerprinting).
+
+## 123. Contract Inference From Usage
+**Status: Vision** (whole-codebase usage inference).
+
+---
+
+# Part XXX — Consistency, Drift & Fleet
+
+## 124. Config ↔ Code Consistency & Env Drift ★ Differentiator
+**Status: Core (partial)** — `no-unchecked-required-env` flags a `process.env.FOO` used as if defined (non-null assertion or immediate member access) with no default or guard — the "works locally, `undefined` in prod" crash. Full `.env.example` cross-checking remains **Planned** (project-scope).
+
+## 125. Dependency Behavior-Diff on Upgrade ★ Differentiator
+**Status: Vision** (needs two dependency versions).
+
+## 126. Fleet Pattern Propagation ★ Differentiator
+**Status: Vision** (multi-repo).
+
+## 127. Feature-Flag Hygiene
+**Status: Planned** (needs the flag service's state).
+
+## 128. Backpressure & Streaming Correctness
+**Status: Planned** (extends the stream-leak rule, §13, into flow-control reasoning).
+
+---
+
+# Part XXXI — Knowledge & Targeting
+
+## 129. Codebase Onboarding Tour ★ Differentiator
+**Status: Vision** (generation layer over the analysis graph).
+
+## 130. Test-Gap Risk Targeting ★ Differentiator
+**Status: Vision** (needs coverage data).
+
+---
+
+## How this set was approached
+
+The discipline the catalog asks for is the one applied: **place bets one at a time, on precision.** Of §105–§130, the coherent, on-thesis, *precisely-implementable* subset shipped — the AI-feature security pack (§105–§109) plus `no-unchecked-required-env` (§124) — while the governance, correctness-pack, and fleet items that need attribution, an AI layer, cross-service reachability, or coverage data are marked **Planned/Vision** and left unbuilt rather than shipped noisy. A false positive in a "money safety" or "timezone" rule is worse than its absence; those stay **Planned** until they can be made precise. The invariants — deterministic offline core, local score, precision-first, AI-as-optional-layer — hold across §105–§130.

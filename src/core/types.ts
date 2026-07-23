@@ -7,6 +7,7 @@
  */
 
 import type { ScopeResolver } from "./scope.ts";
+import type { TypeSource } from "./type-source.ts";
 import type { ProjectGraph } from "./graph.ts";
 import type { EffectSummary } from "./effects.ts";
 
@@ -136,6 +137,12 @@ export interface DiagnosticContext {
   graph?: ProjectGraph;
   /** Effect summary lookup — present only for project-scope diagnostics in Phase B. */
   effectsOf?: (fn: AstNode) => EffectSummary;
+  /**
+   * Type answers — present only under `--typed`, and only for diagnostics that
+   * declare `requiresTypes`. Absent means "no type information", never "no
+   * promise": a typed diagnostic must stay silent rather than guess.
+   */
+  typeSource?: TypeSource;
 }
 
 /** A diagnostic visitor map: ESTree node type (optionally `:exit`) → handler. */
@@ -158,6 +165,12 @@ export interface Diagnostic {
   tags?: string[];
   /** false → opt-in only. Default true. */
   defaultEnabled?: boolean;
+  /**
+   * Needs type information to be correct. These run only under `--typed`; with
+   * no type source they are not merely quiet, they are not selected at all, so a
+   * normal scan never pays for them and never half-answers them.
+   */
+  requiresTypes?: boolean;
   /**
    * How certain this diagnostic is when it fires. Omit to take the derived
    * default (see `confidenceOf`): opt-in/threshold → low, warn → medium,

@@ -59,6 +59,8 @@
     "check:registry": "node scripts/gen-registry.ts --check",
     "gen:schema": "node scripts/gen-config-schema.ts",
     "check:schema": "node scripts/gen-config-schema.ts --check",
+    "gen:web": "node scripts/gen-web-rules.ts",
+    "check:web": "node scripts/gen-web-rules.ts --check",
     "scan": "node src/cli/run.ts",
     "bench": "node bench/corpus.ts",
     "prepack": "npm run build",

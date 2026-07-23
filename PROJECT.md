@@ -104,7 +104,7 @@ Typical output on a codebase that needs help:
 
 ```
   node.doctor v0.1.0  checkout-service
-  148 files · 21,904 lines · 17/17 rules active
+  148 files · 21,904 lines · 50/95 diagnostics active
   detected: typescript esm express prisma jsonwebtoken
 
   ██████░░░░░░░░░░░░░░░░░░░░░░░░░░  21/100  critical
@@ -313,32 +313,40 @@ this before you depend on it.
 
 - A sound analysis engine: parser, AST walker with parent links, shared AST
   helpers, request-path detection, intra-file taint, capability detection.
-- **17 rules** across Security, Bugs, Performance, and Reliability, each with a
-  valid/invalid test pair.
-- **56 passing tests**, including regression tests for real false positives found
-  during development.
-- Local, transparent scoring.
-- A complete CLI: full scan, `rules` catalog, `delta` for CI baselines, JSON
-  output, tag filtering, configurable blocking level.
-- CI baseline-delta workflow.
-- An installable agent skill.
-- A stable, documented programmatic API.
+- A **three-phase engine** — per-file AST visitors on a bounded concurrency pool,
+  a whole-project import graph with reachability from request handlers, and a
+  whole-tree text scan over non-source files.
+- A **whole-program call graph** with **interprocedural taint**: a blocking call —
+  or an injection sink fed by request data — in a helper several modules from the
+  handler that reaches it is detected and the whole path is named. In a monorepo
+  the graph crosses package boundaries.
+- **Diagnostics across Security, Reliability, Bugs, Performance, and
+  Maintainability**, each with a valid/invalid test pair; FP-prone ones are opt-in.
+  Run `node-doctor diagnostics` for the live catalog and count.
+- A large regression suite, including a test for every real false positive found
+  during development and against real-world corpora.
+- Local, transparent scoring, plus a separate **modernization score**.
+- A complete CLI: full scan, diagnostics catalog and in-place config editing,
+  `delta` for CI baselines, ratchet, API-surface diff, SBOM, dead-code scan,
+  autofix, agent handoff, JSON/SARIF/HTML/Markdown output.
+- **Config file** with per-path overrides, and **inline suppression** with
+  mandatory reasons.
+- **Parallel file scanning** and a **content-hash cache**.
+- Monorepo/workspace support, git & CI integration, an MCP server, a language
+  server plus a VS Code extension, an installable agent skill, and a stable,
+  documented programmatic API.
 
-**What is deliberately not here yet** (and is on the [roadmap](#roadmap) with
-honest estimates):
+**What is deliberately not here yet** (and is on the [roadmap](#roadmap)):
 
-- A whole-program **call graph**. Every rule today is intra-file. A blocking call
-  in a helper three modules away from the handler that calls it is not yet
-  detected. This is the single biggest gap between v0 and a production-grade tool.
 - **Type-aware rules** (e.g. floating-promise detection that relies on
-  `Promise<T>` types rather than the `async` keyword).
-- A **config file** and **inline suppression comments** (tag-level filtering via
-  `--ignore-tag` works today; finer-grained control lands in 0.2).
-- A **worker pool** and **content-hash cache** for large monorepos.
+  `Promise<T>` types rather than the `async` keyword). This needs a TypeScript
+  type source and would be opt-in behind a flag.
+- **Runtime-informed analysis** — coverage, heap profiles, cold-start timings.
+  These require executing the code, which is out of scope for a static,
+  offline-first tool.
+- **GraphQL and gRPC** API analysis.
 
-Seventeen rules is a proof that the engine works, not full coverage. For scale,
-a mature comparable tool ships several hundred. The engine below is the reusable
-asset; the ruleset grows from here.
+The engine is the reusable asset; the ruleset grows from here.
 
 ---
 
@@ -556,7 +564,7 @@ Anatomy:
 
 ```
   node.doctor v0.1.0  checkout-service            ← tool version + project name
-  148 files · 21,904 lines · 17/17 rules active   ← scan scope + active rules
+  148 files · 21,904 lines · 50/95 diagnostics active   ← scan scope + active diagnostics
   detected: typescript esm express prisma         ← capability tokens
 
   ██████░░░░░░░░░░░░░░░░░░░░░░░░░░  21/100  critical   ← score bar + label
@@ -733,29 +741,24 @@ with **families** (which drive `--ignore-tag`). Every rule has one of two
 | **Reliability** | Crashes, hangs, resource exhaustion, lifecycle | 1.5 |
 | **Bugs** | Logic errors that produce wrong results | 1.5 |
 | **Performance** | Event-loop stalls, N+1, avoidable slow paths | 1.0 |
-| **Maintainability** | Structure and clarity (reserved; no rules in v0) | 0.5 |
+| **Maintainability** | Structure, hygiene, dead code, complexity, deprecated APIs | 0.5 |
 
-### The 17 rules at a glance
+### The catalog at a glance
 
-| Rule | Category | Severity | Gating |
-| --- | --- | --- | --- |
-| [`express-async-handler-unprotected`](#express-async-handler-unprotected) | Reliability | error | requires `express`, off on `express:5` |
-| [`express-missing-return-after-response`](#express-missing-return-after-response) | Bugs | error | requires `express` |
-| [`cors-credentials-reflect`](#cors-credentials-reflect) | Security | error | — |
-| [`no-sync-io-in-request-path`](#no-sync-io-in-request-path) | Performance | error | — |
-| [`no-process-exit-in-request-path`](#no-process-exit-in-request-path) | Reliability | error | — |
-| [`no-async-array-callback`](#no-async-array-callback) | Bugs | error | — |
-| [`no-unbounded-promise-all`](#no-unbounded-promise-all) | Reliability | warn | — |
-| [`require-fetch-timeout`](#require-fetch-timeout) | Reliability | warn | — |
-| [`no-exec-with-interpolation`](#no-exec-with-interpolation) | Security | error | — |
-| [`no-sql-template-interpolation`](#no-sql-template-interpolation) | Security | error | — |
-| [`secret-in-env-fallback`](#secret-in-env-fallback) | Security | error | — |
-| [`no-timing-unsafe-secret-compare`](#no-timing-unsafe-secret-compare) | Security | warn | — |
-| [`no-jwt-decode-as-verify`](#no-jwt-decode-as-verify) | Security | error | requires `jsonwebtoken` |
-| [`no-weak-hash-for-password`](#no-weak-hash-for-password) | Security | error | — |
-| [`no-path-traversal`](#no-path-traversal) | Security | error | — |
-| [`no-query-in-loop`](#no-query-in-loop) | Performance | error | — |
-| [`no-unbounded-module-cache`](#no-unbounded-module-cache) | Reliability | warn | — |
+The catalog is **generated from the source tree**, so a table here would drift the
+moment a diagnostic is added. Ask the tool instead:
+
+```bash
+node-doctor diagnostics                      # every diagnostic, with gating and effective severity
+node-doctor diagnostics --json               # machine-readable
+node-doctor diagnostics --category Security  # filter by category, tag, or framework
+node-doctor explain <id>                     # what one diagnostic catches, and why
+```
+
+Each entry reports its category, default severity, capability gating
+(`requires` / `disabledWhen`), whether it is on by default, and where its
+effective severity came from (default vs your config).
+
 
 ---
 
@@ -1534,18 +1537,17 @@ Each rule may declare:
 For example, `express-async-handler-unprotected` is
 `requires: ["express"], disabledWhen: ["express:5"]`: it runs on an Express 4
 project and is silent on both non-Express projects and Express 5 projects. The
-scan header reports the active count (`17/17 rules active`), and the `rules`
+scan header reports the active count (`50/95 diagnostics active`), and the `diagnostics`
 subcommand shows each rule's gating so nothing is a surprise.
 
 ---
 
 ## Configuration
 
-> **Status:** tag-level filtering via `--ignore-tag` is live today. The config
-> file and inline suppression comments described below land in **v0.2**; they are
-> documented here so the intended surface is clear.
+Everything in this section is live: tag filtering, the config file with per-path
+overrides, and inline suppression with mandatory reasons.
 
-### Tag filtering (available now)
+### Tag filtering
 
 Every rule carries one or more family tags. Disable an entire family for a run:
 
@@ -1557,25 +1559,32 @@ Available tags include: `async`, `concurrency`, `network`, `event-loop`,
 `lifecycle`, `injection`, `db`, `n+1`, `crypto`, `secrets`, `auth`, `cors`,
 `fs`, `memory`, `express`.
 
-### Config file (planned, v0.2)
+### Config file
 
-A `node-doctor.config.js` (or a `nodeDoctor` key in `package.json`) will let you
-set defaults so they do not have to be passed on every invocation:
+A `node-doctor.config.json` / `.jsonc` / `.js` (or a `nodeDoctor` key in
+`package.json`) sets defaults so they do not have to be passed on every
+invocation. Resolution walks up from the scan root to the repo boundary, so a
+nested package inherits the repo-root config:
 
 ```js
 // node-doctor.config.js
 export default {
-  // Override severity or disable individual rules
-  rules: {
+  // Override severity, or enable an opt-in diagnostic
+  diagnostics: {
     "no-query-in-loop": "off",
     "require-fetch-timeout": "error", // upgrade a warning to an error
+    "max-function-length": "warn",    // opt-in: off unless named here
   },
 
-  // Disable rule families
+  // Disable whole families
   ignoreTags: ["async"],
 
   // Skip paths entirely (in addition to the built-in ignores)
   ignore: ["**/legacy/**", "**/*.generated.ts"],
+
+  // Re-severity or silence per path — can even re-enable a globally-off
+  // diagnostic for specific files
+  overrides: [{ files: ["tests/**"], diagnostics: { "no-console-log-in-committed-code": "off" } }],
 
   // Default exit policy
   blocking: "error",
@@ -1589,10 +1598,10 @@ Built-in ignores (always applied): `node_modules`, `dist`, `build`, `.next`,
 
 ## Suppressing findings
 
-> **Status:** planned for v0.2. Documented here for completeness.
-
 When a finding is a genuine false positive, or an accepted risk with a documented
-reason, you will be able to suppress it inline:
+reason, suppress it inline. A **reason is mandatory** — an unexplained suppression
+raises `suppression-without-reason`, because a silent disable is how a real bug
+lives forever:
 
 ```js
 // node-doctor-disable-next-line no-sync-io-in-request-path -- one-time warmup, gated behind a flag
@@ -1964,7 +1973,7 @@ node-doctor/
 ├── .github/workflows/
 │   └── node-doctor.yml         CI with baseline delta
 ├── tests/
-│   └── rules.test.js           56 tests; valid/invalid pairs + regressions
+│   └── …                       900+ tests; valid/invalid pairs + regressions
 └── fixtures/
     ├── agent-app/              Deliberately bad Express + Prisma app
     └── good-app/               Correct equivalent (false-positive canary)
@@ -2119,42 +2128,35 @@ unit test anticipated.
 
 ## Performance and scaling
 
-**Today (v0):** node.doctor parses with a Rust-backed parser and walks each file
-once, which is fast per file. It is single-threaded and does not cache between
-runs, so it is comfortable on projects up to a few thousand files and gets slow
-on very large monorepos.
+node.doctor parses with a Rust-backed parser and walks each file once, which is
+fast per file. On top of that:
 
-**Planned:**
+- **Bounded-concurrency file scanning** (`--no-parallel` to disable), with a
+  deterministic fan-in so output does not depend on completion order.
+- A **content-hash cache** (`--cache`), so an unchanged file is not re-analyzed
+  between runs — the biggest win for local iteration and for CI with a warm cache.
+- A **time budget** (`--max-duration`), which truncates deterministically in
+  sorted file order and marks the report `complete: false` rather than reporting
+  a partial scan as clean.
+- The project pass computes its whole-project collections **once per graph**, not
+  once per file. That distinction is worth 17× on a 427-file package; getting it
+  wrong made a 4,000-file monorepo effectively unscannable.
+- Cross-package reachability is scoped to the **transitive importers** of each
+  member, so workspace cost stays linear in tree size rather than growing with
+  member count.
 
-- A **worker pool** sized to `min(cores, memory / 1GiB)` so parsing and rule
-  execution parallelize across files.
-- A **content-hash cache**, so an unchanged file is never re-analyzed between
-  runs — the biggest win for local iterative use and for CI with a warm cache.
-- **Batch recovery** (binary-split on a failing batch) so one pathological file
-  cannot stall a whole run.
-
-These are engineering, not research, and are scoped in the [Roadmap](#roadmap).
+Reference point: a 4,101-file, 11-project monorepo scans in roughly 22 seconds.
 
 ---
 
 ## Roadmap
 
-Ordered by leverage. This is the honest plan, with honest estimates.
+Ordered by leverage. Items 1, 4, 5 and 6 of the original v0 roadmap — the
+whole-program call graph, config and suppression, the parallel scanner and
+content-hash cache, and the fuzz/corpus harness — have shipped; what follows is
+what is genuinely left.
 
-### 1. A whole-program call graph — the big one
-
-Everything interesting is cross-file, and v0 is intra-file. Today
-`no-sync-io-in-request-path` only sees a blocking call written *directly inside* a
-handler. Real code goes handler → `userService.load()` → `cache.warm()` →
-`readFileSync`, and node.doctor currently sees none of it.
-
-This is *the* gap between a demo and a production tool. It needs module
-resolution, an import graph, and reachability analysis from every route handler —
-plus a cache, because recomputing reachability per file is quadratic.
-
-**Estimate: 3–4 weeks. It is the whole ballgame.**
-
-### 2. Type-aware rules
+### 1. Type-aware rules
 
 The most valuable Node rule — "this promise is floating" — needs the return type.
 Without types, node.doctor catches `async function` and misses everything typed
@@ -2166,44 +2168,37 @@ positive; see `no-query-in-loop`). This needs a TypeScript type source
 
 **Estimate: 2–3 weeks.**
 
-### 3. Ruleset depth
+### 2. Ruleset depth
 
-17 → ~120 rules for credible coverage, roughly a day per rule with tests. The
-buckets that need it most: Fastify/Nest/Hono/Koa framework-specific parity,
-Drizzle/TypeORM/Mongoose, streams and backpressure, graceful shutdown and
-lifecycle (SIGTERM handling, `setInterval` never cleared, per-request listeners),
-and observability gaps.
+Framework parity is the thinnest area: Hapi, Restify, Sails, Feathers, LoopBack,
+Next.js route handlers and Remix loaders/actions are detected but have no
+dedicated diagnostics, and the ORM checks are receiver-aware rather than
+schema-aware. Streams and backpressure are also underserved.
 
-**Estimate: ~6 weeks full-time, or several months of evenings.**
+**Estimate: roughly a day per diagnostic, with tests and an FP sweep.**
 
-### 4. Config and suppression (v0.2)
+### 3. GraphQL and gRPC
 
-The config file and inline suppression comments documented above, with mandatory
-suppression reasons.
+Query-depth and cost limits, introspection exposed in production, resolver-level
+N+1, and unauthenticated reflection. Both need a schema/IDL reader before the
+checks are worth writing.
 
-**Estimate: 1 week.**
+**Estimate: 2–3 weeks.**
 
-### 5. Performance
+### 4. Deeper data-layer analysis
 
-The worker pool and content-hash cache described in
-[Performance and scaling](#performance-and-scaling).
+Migration and schema awareness: a missing index behind a hot query, a destructive
+migration with no down path, a column added NOT NULL without a default. This
+needs to read migration files and schema definitions rather than call sites.
 
-**Estimate: 1–2 weeks.**
+**Estimate: 3–4 weeks.**
 
-### 6. Correctness infrastructure
+### Explicitly out of scope
 
-A fuzz harness with crash and invariant oracles, plus a corpus run against the
-top ~200 real Node repositories to measure the *actual* false-positive rate.
-"Zero false positives" currently means "zero on the fixtures we wrote," which is
-weak evidence. This should probably come earlier than its position here suggests.
-
-**Estimate: 2 weeks.**
-
----
-
-**Total to a credible v1: roughly 3–4 months full-time, or 8–10 months of
-evenings.** The engine is the easy part and it is already done. The ruleset and
-the call graph are the work.
+Anything that requires **executing** the code: test coverage, heap profiles, CPU
+hotspots, cold-start timings, real N+1 counts from query logs. node.doctor is
+static, offline, and deterministic; those belong to a profiler or an APM, and
+pretending to infer them statically would mean shipping guesses as findings.
 
 ### A strategic note on scope
 
@@ -2255,14 +2250,19 @@ that is what `--blocking` and exit codes are for.
 Yes, via the API's `only` option, and in CI via the `delta` subcommand, which
 reports only PR-introduced findings.
 
-**How do I turn off a rule I disagree with?**
-Today, disable its whole family with `--ignore-tag`. Per-rule config and inline
-suppression land in v0.2.
+**How do I turn off a diagnostic I disagree with?**
+`node-doctor diagnostics disable <id>` edits your config in place; or set it in
+`node-doctor.config.json`, scope it to paths with `overrides`, disable a whole
+family with `--ignore-tag`, or suppress one site inline with
+`// node-doctor-disable-next-line <id> -- reason`. The reason is required.
 
-**Is 17 rules enough to be useful?**
-It is enough to catch a real class of high-severity bugs on a real Express +
-Prisma codebase (the fixtures demonstrate this), and it is honest about being
-early. Coverage grows; the engine that makes each new rule cheap is already built.
+**Is the catalog big enough to be useful?**
+It covers a real class of high-severity bugs across Security, Reliability, Bugs,
+Performance and Maintainability, including cross-file and cross-package paths that
+single-file linters cannot see. Breadth still grows — framework parity and
+type-aware rules are the thinnest areas, and both are on the roadmap. Run
+`node-doctor diagnostics` for the current catalog rather than trusting a number
+written in a document.
 
 ---
 

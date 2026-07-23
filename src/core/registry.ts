@@ -7,6 +7,17 @@
 
 import type { Diagnostic } from "./types.ts";
 
+// ai
+import { aiCallInLoop } from "../diagnostics/ai/ai-call-in-loop.ts";
+import { mcpToolUnrestrictedCapability } from "../diagnostics/ai/mcp-tool-unrestricted-capability.ts";
+import { noLlmOutputInSink } from "../diagnostics/ai/no-llm-output-in-sink.ts";
+import { noPromptInjection } from "../diagnostics/ai/no-prompt-injection.ts";
+import { noSystemPromptLeak } from "../diagnostics/ai/no-system-prompt-leak.ts";
+// api
+import { graphqlIntrospectionInProduction } from "../diagnostics/api/graphql-introspection-in-production.ts";
+import { graphqlMissingDepthLimit } from "../diagnostics/api/graphql-missing-depth-limit.ts";
+import { graphqlResolverReturnsRawError } from "../diagnostics/api/graphql-resolver-returns-raw-error.ts";
+import { grpcInsecureCredentials } from "../diagnostics/api/grpc-insecure-credentials.ts";
 // async
 import { noAsyncArrayCallback } from "../diagnostics/async/no-async-array-callback.ts";
 import { noAsyncExecutor } from "../diagnostics/async/no-async-executor.ts";
@@ -19,6 +30,8 @@ import { requireFetchTimeout } from "../diagnostics/async/require-fetch-timeout.
 // bugs
 import { noConstantCondition } from "../diagnostics/bugs/no-constant-condition.ts";
 import { noUnreachableCode } from "../diagnostics/bugs/no-unreachable-code.ts";
+// config
+import { noNonNullEnvAccess } from "../diagnostics/config/no-nonnull-env-access.ts";
 // db
 import { noDbConnectionPerRequest } from "../diagnostics/db/no-db-connection-per-request.ts";
 import { noExternalCallInsideOpenTransaction } from "../diagnostics/db/no-external-call-inside-open-transaction.ts";
@@ -33,6 +46,10 @@ import { noSyncBcryptInRequestPath } from "../diagnostics/event-loop/no-sync-bcr
 import { noSyncIoInRequestPath } from "../diagnostics/event-loop/no-sync-io-in-request-path.ts";
 import { noSyncIoReachableFromHandler } from "../diagnostics/event-loop/no-sync-io-reachable-from-handler.ts";
 import { requirePaginationLimit } from "../diagnostics/event-loop/require-pagination-limit.ts";
+// frameworks
+import { hapiRouteAuthDisabled } from "../diagnostics/frameworks/hapi-route-auth-disabled.ts";
+import { hapiRouteMissingValidation } from "../diagnostics/frameworks/hapi-route-missing-validation.ts";
+import { restifyMissingErrorHandler } from "../diagnostics/frameworks/restify-missing-error-handler.ts";
 // http
 import { corsCredentialsReflect } from "../diagnostics/http/cors-credentials-reflect.ts";
 import { expressAsyncHandlerUnprotected } from "../diagnostics/http/express-async-handler-unprotected.ts";
@@ -57,6 +74,7 @@ import { preferNodeProtocolImports } from "../diagnostics/maintainability/prefer
 import { noDeprecatedNodeApi } from "../diagnostics/modernization/no-deprecated-node-api.ts";
 import { noNodeBuiltinOnEdge } from "../diagnostics/modernization/no-node-builtin-on-edge.ts";
 // reliability
+import { noCacheWithoutTtl } from "../diagnostics/reliability/no-cache-without-ttl.ts";
 import { noCrossRequestStateMutation } from "../diagnostics/reliability/no-cross-request-state-mutation.ts";
 import { noInfiniteRetryWithoutBackoff } from "../diagnostics/reliability/no-infinite-retry-without-backoff.ts";
 import { noListenerAddedPerRequest } from "../diagnostics/reliability/no-listener-added-per-request.ts";
@@ -80,8 +98,10 @@ import { noNosqlObjectInjection } from "../diagnostics/security/no-nosql-object-
 import { noOpenRedirect } from "../diagnostics/security/no-open-redirect.ts";
 import { noPathTraversal } from "../diagnostics/security/no-path-traversal.ts";
 import { noPrototypePollution } from "../diagnostics/security/no-prototype-pollution.ts";
+import { noSensitiveDataInLogs } from "../diagnostics/security/no-sensitive-data-in-logs.ts";
 import { noSqlTemplateInterpolation } from "../diagnostics/security/no-sql-template-interpolation.ts";
 import { noSsrfUnvalidatedUrl } from "../diagnostics/security/no-ssrf-unvalidated-url.ts";
+import { noStateChangeOnGet } from "../diagnostics/security/no-state-change-on-get.ts";
 import { noTaintedSinkViaHelper } from "../diagnostics/security/no-tainted-sink-via-helper.ts";
 import { noTimingUnsafeSecretCompare } from "../diagnostics/security/no-timing-unsafe-secret-compare.ts";
 import { noUnsafeDeserialization } from "../diagnostics/security/no-unsafe-deserialization.ts";
@@ -89,12 +109,26 @@ import { noUnsafeRegexpFromInput } from "../diagnostics/security/no-unsafe-regex
 import { noVmRunUntrusted } from "../diagnostics/security/no-vm-run-untrusted.ts";
 import { noWeakCipher } from "../diagnostics/security/no-weak-cipher.ts";
 import { noWeakHashForPassword } from "../diagnostics/security/no-weak-hash-for-password.ts";
+import { noXssInHtmlResponse } from "../diagnostics/security/no-xss-in-html-response.ts";
 import { requireJwtAlgorithmsAllowlist } from "../diagnostics/security/require-jwt-algorithms-allowlist.ts";
 import { requireSecureCookieFlags } from "../diagnostics/security/require-secure-cookie-flags.ts";
 import { secretInEnvFallback } from "../diagnostics/security/secret-in-env-fallback.ts";
+// typed
+import { noFloatingPromise } from "../diagnostics/typed/no-floating-promise.ts";
 
 /** Every diagnostic known to node.doctor, in a stable declaration order. */
 export const DIAGNOSTICS: Diagnostic[] = [
+  // ai
+  aiCallInLoop,
+  mcpToolUnrestrictedCapability,
+  noLlmOutputInSink,
+  noPromptInjection,
+  noSystemPromptLeak,
+  // api
+  graphqlIntrospectionInProduction,
+  graphqlMissingDepthLimit,
+  graphqlResolverReturnsRawError,
+  grpcInsecureCredentials,
   // async
   noAsyncArrayCallback,
   noAsyncExecutor,
@@ -107,6 +141,8 @@ export const DIAGNOSTICS: Diagnostic[] = [
   // bugs
   noConstantCondition,
   noUnreachableCode,
+  // config
+  noNonNullEnvAccess,
   // db
   noDbConnectionPerRequest,
   noExternalCallInsideOpenTransaction,
@@ -121,6 +157,10 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noSyncIoInRequestPath,
   noSyncIoReachableFromHandler,
   requirePaginationLimit,
+  // frameworks
+  hapiRouteAuthDisabled,
+  hapiRouteMissingValidation,
+  restifyMissingErrorHandler,
   // http
   corsCredentialsReflect,
   expressAsyncHandlerUnprotected,
@@ -145,6 +185,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noDeprecatedNodeApi,
   noNodeBuiltinOnEdge,
   // reliability
+  noCacheWithoutTtl,
   noCrossRequestStateMutation,
   noInfiniteRetryWithoutBackoff,
   noListenerAddedPerRequest,
@@ -168,8 +209,10 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noOpenRedirect,
   noPathTraversal,
   noPrototypePollution,
+  noSensitiveDataInLogs,
   noSqlTemplateInterpolation,
   noSsrfUnvalidatedUrl,
+  noStateChangeOnGet,
   noTaintedSinkViaHelper,
   noTimingUnsafeSecretCompare,
   noUnsafeDeserialization,
@@ -177,9 +220,12 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noVmRunUntrusted,
   noWeakCipher,
   noWeakHashForPassword,
+  noXssInHtmlResponse,
   requireJwtAlgorithmsAllowlist,
   requireSecureCookieFlags,
   secretInEnvFallback,
+  // typed
+  noFloatingPromise,
 ];
 
 /** Diagnostic id → diagnostic, for catalogs, config UIs, and lookups. */

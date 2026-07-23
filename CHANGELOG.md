@@ -11,7 +11,7 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
-### Diagnostics (62 → 82)
+### Diagnostics (62 → 112)
 
 - **`no-prototype-pollution`** (Security) — a write with a caller-controlled object
   key, or a literal `__proto__`/`constructor` write.
@@ -70,6 +70,173 @@ Verified at zero false positives across 213 files of real TypeScript; the
   (can even re-enable a globally-off diagnostic for specific files).
 - **`rootDir`** config redirect, resolved against the config file's own location.
 - **Generated JSON Schema** (`npm run gen:schema`) for editor autocomplete/validation.
+
+### Change-impact / blast radius (§120)
+
+- **`node-doctor impact <files> | --diff [base]`.** "If I touch this, what breaks?"
+  answered from the import graph rather than guessed. It walks the graph *backward*
+  from the changed files to every transitive dependent, records the shortest hop
+  depth to each, and marks the ones that register request handlers — the routes
+  whose behaviour a change can actually alter. In a workspace the walk crosses
+  package boundaries, so a change in `packages/db` surfaces the apps that ship it.
+  Reuses the same `--diff`/`--staged`/`--only`/`--changed-files-from` plumbing as the
+  scan path, so `impact --diff main` is the blast radius of a PR.
+  - This is deterministic graph reachability, not a heuristic — a file is a
+    transitive dependent or it is not, so there is no false-positive surface; an
+    unresolved dynamic import simply does not extend reach. Also exposed
+    programmatically: `buildImpactGraph` / `computeImpact`.
+
+### AI-feature security, and config drift (§105–§109, §124)
+
+The catalog grows 106 → 112. Node/TypeScript is where most LLM apps, RAG pipelines
+and MCP servers are actually built, and that code has its own, largely un-linted,
+vulnerability class. An `ai` capability token (set from an LLM SDK dependency —
+`openai`, `@anthropic-ai/sdk`, the Vercel `ai` SDK, LangChain, …) and an `mcp` token
+(`@modelcontextprotocol/sdk`) gate the whole pack, and each rule *also* requires an
+AI-SDK import in the file, so a name collision on a non-AI project stays silent.
+
+- **`no-prompt-injection` (§105).** Caller-controlled input welded into an LLM
+  `system` prompt, or concatenated/interpolated into prompt text — built on the same
+  interprocedural-taint engine as SQL injection. The isolated, correct shape —
+  `messages: [{ role: "user", content: req.body.q }]` — is deliberately silent, and
+  so is the Vercel AI SDK's `prompt: req.body.x` (the SDK sends it as a distinct user
+  message). Only user text *mixed into* the instructions fires. That distinction is
+  the whole precision story, and a first-cut false positive on the Vercel shape was
+  caught and fixed in review.
+- **`no-llm-output-in-sink` (§107).** Model output reaching `eval`/`new Function`,
+  `child_process`, a raw SQL string, an HTML response, or an outbound `fetch` without
+  validation — the mirror of §105, where the model is the untrusted source. A binding
+  is treated as model-tainted only when its initializer is a recognized LLM call (or a
+  `.content`/`.text`/`.output_text` access on one); returning model output as JSON,
+  logging it, or `JSON.parse`-ing it is silent.
+- **`mcp-tool-unrestricted-capability` (§106, `requires: mcp`).** An MCP tool handler
+  that runs shell, an `fs` write, a raw SQL string, or `eval` on a model-controlled
+  argument — the model, not a person, drives the call, so an over-broad tool is a
+  direct RCE surface. A **parameterized** query (`db.query("… WHERE id = $1",
+  [args.id])`) is the safe form and stays silent; only an argument woven into the SQL
+  *string* fires. (This false positive was found by an independent adversarial pass
+  after the workflow's own hunt reported the rule clean — the reason every diagnostic
+  is re-verified by hand.)
+- **`no-system-prompt-leak` (§108)** and **`ai-call-in-loop` (§109)** — a system-prompt
+  binding echoed back to the caller, and an LLM call inside a loop (a latency, cost and
+  rate-limit blowup).
+- **`no-unchecked-required-env` (§124, opt-in).** A `process.env.FOO` used as if
+  defined — `process.env.FOO!` or an immediate member access — with no default or
+  guard: the "works locally, `undefined` in prod" crash at first use. Silent on the
+  defaulting/guarding forms, including an early-exit startup guard
+  (`if (!process.env.FOO) throw …` then a later access), which a review pass flagged.
+
+Verified at **zero false positives** across 4,155 corpus files and the 8 real
+AI-SDK-importing files in it; the pack's positive controls fire end-to-end through the
+CLI. The AI-native *governance* ideas from the same catalog (§110–§113 — agent-authored
+trust boundaries, spec conformance, incident-to-rule) are deliberately **not shipped**:
+they need git-attribution, the task spec, or an AI rule-generation layer that the
+deterministic-offline core does not have, and are marked Vision rather than faked.
+Money/time/idempotency correctness packs (§115–§117) are likewise held at Planned —
+statically proving a value is monetary or timezone-sensitive is not reliable enough,
+and the catalog's own rule applies: a false positive there is worse than its absence.
+
+### Type-aware analysis, and API / migration / framework depth (§3, §14, §15, §46)
+
+The catalog grows 95 → 106.
+
+- **Type-aware diagnostics (`--typed`, §46).** An optional pass that reads the
+  project's own TypeScript types, for the checks that syntax cannot express. The
+  compiler is loaded dynamically and only under `--typed`, so **zero runtime
+  dependencies stays zero** — it is an optional peer (`typescript@^5`). Three
+  design lines held: a type-requiring diagnostic is *not selected at all* without
+  a type source (running it and reporting nothing would look identical to a clean
+  result); `--typed` with no usable compiler **fails loudly with an actionable
+  message and exits 2**, never a silent empty report; and the type source may not
+  time out or race, so byte-identical output survives. The compiler adapter is
+  declared structurally and tested against a faithful stub, so the API contract is
+  pinned without requiring a particular compiler installed.
+  - **`no-floating-promise`** (Reliability, error, `requiresTypes`) — a discarded
+    promise, caught even when the callee is typed `(): Promise<T>` rather than
+    written `async`, which a syntactic rule misses and which is the majority in a
+    real TypeScript codebase. Silent on the documented fire-and-forget forms
+    (`void f()`, `f().catch(...)`), and — because the checker answers `"unknown"`
+    for `any` and unresolved nodes — never fires on a guess.
+  - Note: TypeScript 7's native (Go) build ships **no JavaScript compiler API**, so
+    `--typed` against it reports exactly that and points at `typescript@^5`. This
+    was found by probing the installed compiler, not assumed.
+- **GraphQL / gRPC server setup (§3)** — `graphql-introspection-in-production`
+  (a hardcoded `introspection: true`, silent on the `NODE_ENV`-guarded form that
+  is the correct pattern), `grpc-insecure-credentials` (a server bound or channel
+  dialed with `createInsecure()` to a non-loopback address, gated on a real gRPC
+  import so a name collision stays quiet), plus `graphql-missing-depth-limit`
+  (opt-in) and `graphql-resolver-returns-raw-error`. Deliberately about setup, not
+  schema analysis — a schema reader is a separate project.
+- **SQL migrations (§14, §15)** — `migration-destructive-without-guard` (a
+  `DROP`/`TRUNCATE` outside a down/rollback section), `migration-add-not-null-without-default`
+  (`ADD COLUMN … NOT NULL` with no default, which locks or fails on a non-empty
+  table), and `migration-missing-index-on-foreign-key` (opt-in). Multi-line
+  statements are reconstructed to the `;` before judging, and a `CREATE TABLE`
+  with NOT NULL columns is correctly silent.
+- **Framework depth (§2)** — `hapi-route-missing-validation`,
+  `hapi-route-auth-disabled`, `restify-missing-error-handler`, each hard-gated on
+  its framework capability so it is inert on every other stack.
+
+Verified at **zero false positives** across 4,155 real files; the one migration
+finding on the corpus is a true positive (an unindexed `user_id` foreign key in a
+real Supabase migration). Sails/Feathers/LoopBack diagnostics were deliberately
+**not shipped** — their access-control configuration lives in a separate file, so
+any same-file check is guessing; those need the project graph.
+
+### Deploy-config analysis (§24, §25, §26) and web-security depth (§7, §16, §21)
+
+The catalog grows 82 → 95. The new checks read the files that *ship* your code, on
+the same whole-tree text scan as the secret scanner — no new dependency, no YAML
+or Dockerfile parser pulled in.
+
+- **Dockerfile** — `dockerfile-runs-as-root` (the deployed stage runs as uid 0),
+  `dockerfile-mutable-base-tag` (`FROM node` / `:latest`, so the image that passed
+  CI is not the image that ships), `dockerfile-secret-in-build-stage` (a credential
+  baked into a layer, which `docker history` shows to anyone who can pull it).
+  Multi-stage is handled properly: a builder stage running as root is normal, and a
+  file with a hardened `--target production` stage is not judged by its dev stage.
+- **Kubernetes** — `k8s-privileged-container`, `k8s-host-namespace`,
+  `k8s-missing-resource-limits`. Every rule first demands positive evidence that the
+  document *is* a workload manifest (`apiVersion` plus a workload `kind`), because a
+  repo's YAML is mostly CI config, compose files and Helm values — and
+  docker-compose uses the very words these rules look for.
+- **GitHub Actions** — `ci-script-injection` (attacker-controlled
+  `${{ github.event.* }}` interpolated into a `run:` block, which executes on the
+  runner with the workflow's token), `ci-pull-request-target-checkout`
+  (`pull_request_target` checking out untrusted PR code with a write token), and
+  `ci-unpinned-action` (opt-in). The injection rule is deliberately silent when the
+  value is bound through `env:` — that is the documented fix, and flagging it would
+  punish people for fixing the bug.
+- **Web security and observability** — `no-sensitive-data-in-logs` (a credential
+  written to a log sink, where it is retained for years and invisible in review),
+  plus `no-xss-in-html-response`, `no-state-change-on-get` and `no-cache-without-ttl`
+  as **opt-in**: each needs dataflow this engine cannot do without types, and each
+  had verified false positives on ordinary code during review.
+- **Framework detection (§2)** — Hapi, Restify, Sails, Feathers, LoopBack, Next.js,
+  Remix and Serverless are now recognized. `react-router` deliberately does *not*
+  imply Remix: it ships in essentially every React SPA.
+- **Convention-registered request handlers.** Next.js App Router and SvelteKit
+  register routes by *file convention* — `export async function GET(request)` —
+  and Remix by exported `loader`/`action`. There is no registration call, so the
+  registration-based detector saw none of them: node.doctor reported
+  `detected: next` and then missed the blocking call in every route, leaving the
+  tool's central analysis silently inapplicable to a very common stack. Both
+  conventions are now recognized, which turns on the whole request-path ruleset —
+  sync IO, N+1, unbounded concurrency, missing timeouts, injection via taint.
+  Matching is deliberately narrow: `loader`/`action` qualify only with a
+  destructured `{ request }`/`{ params }` argument, so a Redux action creator
+  does not. Sweeping a real Next.js codebase, this immediately found a
+  `gunzipSync` on a client-supplied request body that no earlier version could see.
+
+Verified at **zero false positives** across 4,155 real files (including eight real
+GitHub Actions workflows), clean on this repo's own CI config and Dockerfile, with
+the `good-app` canary and the `src` self-scan still 100/100.
+
+An adversarial review pass found 25 false positives in the first cut of these rules
+— an Istio init container's `NET_ADMIN`, a node-exporter DaemonSet's `hostNetwork`,
+a `kubectl apply` heredoc whose *embedded* manifest was parsed as the outer file, a
+CSS lexer's `token` variable, `DOMPurify.sanitize` two assignments upstream — and
+every one is fixed with a regression test.
 
 ### Fixed
 

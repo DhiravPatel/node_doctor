@@ -24,6 +24,10 @@ jobs:
         run: npm run typecheck
       - name: Registry is up to date
         run: npm run check:registry
+      - name: Config schema is up to date
+        run: npm run check:schema
+      - name: Web diagnostics data is up to date
+        run: npm run check:web
       - name: Tests
         run: npm test
       - name: good-app canary stays clean

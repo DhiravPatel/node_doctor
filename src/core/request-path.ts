@@ -5,6 +5,9 @@
  *   - method-call registrations: `app.get("/x", handler)`, `router.use(mw)`;
  *   - object-route form: `fastify.route({ handler, preHandler })`;
  *   - decorator handlers: a class method carrying `@Get()`, `@Post()`, …;
+ *   - **exported** handlers, which register by file convention rather than by a
+ *     call: Next.js App Router / SvelteKit `export async function GET(request)`,
+ *     and Remix `export async function loader({ request })`;
  *   - a `(req, res)` / `(request, reply)` signature fallback for split-file
  *     controllers whose registration lives in another module.
  *
@@ -49,6 +52,37 @@ const HTTP_DECORATORS = new Set([
 
 /** Object-route properties whose function values are handlers. */
 const ROUTE_HANDLER_KEYS = new Set(["handler", "preHandler", "onRequest", "preValidation"]);
+
+/**
+ * Frameworks that register by *convention* export a function whose name is the
+ * HTTP method — Next.js App Router (an `app/` route.ts) and SvelteKit
+ * (`+server.ts`) both do this. There is no registration call to find, so without
+ * this the whole request-path analysis silently does nothing on those stacks:
+ * we would detect Next.js and then miss the `readFileSync` in every route.
+ *
+ * Matching on an exported uppercase HTTP-method name is deliberately narrow —
+ * JavaScript reserves that casing for constructors and components, so a function
+ * actually named `GET` is a route handler essentially every time.
+ */
+const EXPORTED_METHOD_HANDLERS = new Set([
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "HEAD",
+  "OPTIONS",
+]);
+
+/**
+ * Remix / React Router data functions. `loader` and `action` are ordinary words
+ * — a Redux action creator is also called `action` — so the name alone is not
+ * enough. The signature is: Remix passes a single `DataFunctionArgs` object, so
+ * we additionally require the first parameter to destructure `request`,
+ * `params` or `context`. That shape is specific to the convention.
+ */
+const DATA_FUNCTION_NAMES = new Set(["loader", "action", "clientLoader", "clientAction"]);
+const DATA_FUNCTION_ARG_KEYS = new Set(["request", "params", "context"]);
 
 const FIRST_PARAM_NAMES = new Set(["req", "request"]);
 const SECOND_PARAM_NAMES = new Set(["res", "response", "reply"]);
@@ -100,8 +134,51 @@ const handlersFromArg = (arg: AstNode | null | undefined, scope: ScopeResolver, 
 /**
  * Collect every function node that runs in request context in this file.
  */
+/** Does this function take a single `{ request }`-shaped argument? */
+const takesDataFunctionArgs = (fn: AstNode): boolean => {
+  const first = ((fn.params as AstNode[]) ?? [])[0];
+  if (!first) return false;
+  if (first.type !== "ObjectPattern") return false;
+  for (const prop of (first.properties as AstNode[]) ?? []) {
+    const key = prop?.key as AstNode | undefined;
+    const name = key?.type === "Identifier" ? (key.name as string) : undefined;
+    if (name && DATA_FUNCTION_ARG_KEYS.has(name)) return true;
+  }
+  return false;
+};
+
+/**
+ * Handlers a framework picks up from the module's exports rather than from a
+ * registration call.
+ */
+const collectExportedHandlers = (program: AstNode, handlers: Set<AstNode>): void => {
+  const consider = (name: string | undefined, fn: AstNode | null | undefined): void => {
+    if (!name || !fn || !isFunctionLike(fn)) return;
+    if (EXPORTED_METHOD_HANDLERS.has(name)) {
+      handlers.add(fn);
+      return;
+    }
+    if (DATA_FUNCTION_NAMES.has(name) && takesDataFunctionArgs(fn)) handlers.add(fn);
+  };
+
+  for (const stmt of (program.body as AstNode[]) ?? []) {
+    if (stmt.type !== "ExportNamedDeclaration" || !stmt.declaration) continue;
+    const decl = stmt.declaration as AstNode;
+    if (decl.type === "FunctionDeclaration" && decl.id?.type === "Identifier") {
+      consider(decl.id.name as string, decl);
+      continue;
+    }
+    if (decl.type !== "VariableDeclaration") continue;
+    for (const d of (decl.declarations as AstNode[]) ?? []) {
+      if (d.id?.type === "Identifier") consider(d.id.name as string, d.init as AstNode | null);
+    }
+  }
+};
+
 export const collectRequestHandlers = (program: AstNode, scope: ScopeResolver): Set<AstNode> => {
   const handlers = new Set<AstNode>();
+
+  collectExportedHandlers(program, handlers);
 
   walk(program, {
     enter: (node) => {

@@ -250,3 +250,44 @@ export const renderDelta = (
   lines.push("");
   return lines.join("\n");
 };
+
+/**
+ * §120 — the blast radius of a change: the routes and files a change can reach,
+ * nearest first. Deliberately leads with the route count, because that is the
+ * number a reviewer needs before reading the diff.
+ */
+export const renderImpact = (
+  report: import("../core/impact.ts").ImpactReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  lines.push(`  ${p.bold("Change impact")} — ${report.changed.length} changed file(s)`);
+  for (const c of report.changed) lines.push(p.dim(`    · ${c}`));
+  for (const u of report.unresolved) lines.push(p.dim(`    ? ${u} (not in the analyzed graph)`));
+  lines.push("");
+
+  if (report.reachedCount === 0) {
+    lines.push(p.dim("  Nothing in the project imports the changed file(s) — blast radius is self-contained."));
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  const routes = report.routeBearingFiles.length;
+  lines.push(
+    `  ${p.bold(String(report.reachedCount))} file(s) transitively depend on this change` +
+      (routes > 0 ? `, including ${p.bold(String(routes))} that register routes:` : ":"),
+  );
+  lines.push("");
+  for (const d of report.dependents) {
+    const marker = d.hasHandlers ? p.yellow("[route]") : "       ";
+    lines.push(`  ${marker} ${p.dim(`d${d.depth}`)} ${d.normalizedFilePath}`);
+  }
+  lines.push("");
+  if (routes > 0) {
+    lines.push(p.dim(`  Review the ${routes} route-bearing file(s) first — their responses can change.`));
+    lines.push("");
+  }
+  return lines.join("\n");
+};

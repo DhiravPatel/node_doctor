@@ -21,6 +21,7 @@ export type Command =
   | "sbom"
   | "lsp"
   | "modernize"
+  | "impact"
   | "version";
 
 // "rules" is accepted as a legacy alias for "diagnostics".
@@ -43,6 +44,7 @@ const COMMANDS = new Set<string>([
   "sbom",
   "lsp",
   "modernize",
+  "impact",
   "version",
   "rules",
 ]);
@@ -90,6 +92,8 @@ export interface ParsedArgs {
   only?: string;
   diff?: string; // "" means "--diff with no base"
   staged: boolean;
+  /** Run type-aware diagnostics (needs a TypeScript compiler in the project). */
+  typed: boolean;
   config?: string;
   offline: boolean;
   help: boolean;
@@ -210,6 +214,7 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
     blocking: "error",
     ignoreTags: [],
     staged: false,
+    typed: false,
     offline: true,
     help: false,
     version: false,
@@ -287,6 +292,10 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
     }
     if (token === "--verbose" || token === "-v") {
       result.verbose = true;
+      continue;
+    }
+    if (token === "--typed") {
+      result.typed = true;
       continue;
     }
     if (token === "--staged") {

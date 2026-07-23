@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 76,
-  "defaultOn": 61,
-  "optIn": 15,
+  "total": 112,
+  "defaultOn": 89,
+  "optIn": 23,
   "byCategory": {
-    "Security": 29,
+    "Performance": 11,
+    "Security": 54,
     "Maintainability": 10,
-    "Reliability": 19,
-    "Bugs": 9,
-    "Performance": 9
+    "Reliability": 28,
+    "Bugs": 9
   },
   "categoryWeights": {
     "Security": 2,
@@ -18,6 +18,69 @@
     "Maintainability": 0.5
   },
   "diagnostics": [
+    {
+      "id": "ai-call-in-loop",
+      "title": "LLM call inside a loop",
+      "category": "Performance",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "ai",
+        "cost",
+        "performance"
+      ],
+      "requires": [
+        "ai"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Batch the work into one call (fold the items into a single prompt) or bound a parallel fan-out with `Promise.all(items.map(...))` plus a concurrency limit. A model call per iteration is N round trips, N× the cost, and a rate-limit risk."
+    },
+    {
+      "id": "ci-pull-request-target-checkout",
+      "title": "pull_request_target workflow checks out untrusted pull-request code",
+      "category": "Security",
+      "severity": "error",
+      "scope": "text",
+      "tags": [
+        "ci",
+        "supply-chain"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Either switch the trigger to `pull_request`, which runs the fork's code with a read-only token and no secrets, or keep `pull_request_target` and do not check out the head — restrict the job to the metadata work (labelling, commenting) that needs the write token. If you genuinely need both, split them: an untrusted `pull_request` job that builds and uploads an artifact, and a separate `workflow_run` job that consumes it without executing it."
+    },
+    {
+      "id": "ci-script-injection",
+      "title": "Attacker-controlled GitHub context interpolated into a run: block",
+      "category": "Security",
+      "severity": "error",
+      "scope": "text",
+      "tags": [
+        "ci",
+        "injection"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Bind the value to a step-level `env:` entry (TITLE: ${{ github.event.issue.title }}) and reference it in the script as a quoted shell variable (\"$TITLE\"). The runner then hands the text to the process as an environment value, so the shell never parses it as syntax."
+    },
+    {
+      "id": "ci-unpinned-action",
+      "title": "GitHub Action pinned to a mutable tag or branch",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "text",
+      "tags": [
+        "ci",
+        "supply-chain"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Pin the action to a full 40-character commit SHA and keep the human-readable version in a trailing comment (`uses: owner/repo@<sha>  # v4.1.1`). Dependabot understands that form and will raise a PR when the tag moves, so you get updates without giving the upstream repository the ability to change what runs today."
+    },
     {
       "id": "cors-credentials-reflect",
       "title": "CORS reflects any origin with credentials enabled",
@@ -46,6 +109,53 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Flatten the nesting: return early / use guard clauses, extract inner blocks into helper functions, or invert conditions. Deeply nested branches are hard to follow and test."
+    },
+    {
+      "id": "dockerfile-mutable-base-tag",
+      "title": "Base image is not pinned to an immutable reference",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "text",
+      "tags": [
+        "container",
+        "docker",
+        "reproducibility"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Pin the base to a specific version (`FROM node:20.11-alpine3.19`) and, for release images, to a digest (`FROM node:20-alpine@sha256:…`) so the build is byte-reproducible. Let a bot (Renovate/Dependabot) raise the pin as a reviewable pull request instead of letting the tag drift silently."
+    },
+    {
+      "id": "dockerfile-runs-as-root",
+      "title": "Container image runs as root",
+      "category": "Security",
+      "severity": "error",
+      "scope": "text",
+      "tags": [
+        "container",
+        "docker"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Create an unprivileged user in the final stage and switch to it before the entrypoint — `RUN adduser -D app` then `USER app` (official Node images already ship a `node` user). Give the user ownership of only the paths it must write, and keep the build steps that genuinely need root above the `USER` line."
+    },
+    {
+      "id": "dockerfile-secret-in-build-stage",
+      "title": "Secret baked into an image layer",
+      "category": "Security",
+      "severity": "error",
+      "scope": "text",
+      "tags": [
+        "container",
+        "docker",
+        "secrets"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Remove the value from the Dockerfile and rotate the credential — it is already in the image history and in git. Feed build-time credentials through BuildKit secrets (`RUN --mount=type=secret,id=…`), which never land in a layer, and inject runtime credentials from the orchestrator's secret store rather than `ENV`."
     },
     {
       "id": "express-async-handler-unprotected",
@@ -100,6 +210,104 @@
       "recommendation": "Attach a JSON `schema` to the route (`{ schema: { body, querystring, params } }`). Fastify validates and serializes against it before the handler runs; without one the route accepts arbitrary input."
     },
     {
+      "id": "graphql-introspection-in-production",
+      "title": "GraphQL introspection hardcoded on",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "graphql",
+        "info-leak"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Tie introspection to the environment instead of hardcoding it: `introspection: process.env.NODE_ENV !== \"production\"`. On Yoga, add the `useDisableIntrospection` plugin (and `blockFieldSuggestions`) for production builds."
+    },
+    {
+      "id": "graphql-missing-depth-limit",
+      "title": "GraphQL server without a query depth or complexity limit",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "dos",
+        "graphql"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Bound the query shape before it reaches your resolvers: add `validationRules: [depthLimit(7)]` (graphql-depth-limit), a cost rule (`createComplexityLimitRule`, graphql-query-complexity), or `@escape.tech/graphql-armor` — and reject anything over the limit at validation time."
+    },
+    {
+      "id": "graphql-resolver-returns-raw-error",
+      "title": "GraphQL resolver puts an error stack in the response",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "error-handling",
+        "graphql",
+        "info-leak"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Log the error server-side and surface a stable, generic message instead — `throw new GraphQLError(\"Could not load user\", { extensions: { code: \"INTERNAL_SERVER_ERROR\" } })`. Never place `err.stack` in a returned payload or an error extension: GraphQL serializes it straight to the caller."
+    },
+    {
+      "id": "grpc-insecure-credentials",
+      "title": "gRPC server or channel uses insecure (plaintext) credentials",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "grpc",
+        "network",
+        "transport"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Terminate TLS on the gRPC connection itself: `grpc.ServerCredentials.createSsl(rootCerts, keyCertPairs, checkClientCertificate)` on the server and `grpc.credentials.createSsl(...)` on the channel. If a plaintext hop is genuinely required, restrict it to loopback or a dev-only branch."
+    },
+    {
+      "id": "hapi-route-auth-disabled",
+      "title": "hapi route disables auth on a state-changing endpoint",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "access-control",
+        "auth",
+        "hapi"
+      ],
+      "requires": [
+        "hapi"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Remove `auth: false` so the route inherits the server's default strategy, or name the strategy explicitly (`auth: \"jwt\"`). If the endpoint really is public, scope it to a dedicated public path prefix."
+    },
+    {
+      "id": "hapi-route-missing-validation",
+      "title": "hapi route accepts a payload without validation",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "hapi",
+        "input",
+        "validation"
+      ],
+      "requires": [
+        "hapi"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Add `options: { validate: { payload: Joi.object({ ... }) } }` to the route. Hapi rejects a non-conforming body with a 400 before the handler runs; without it the handler receives arbitrary input."
+    },
+    {
       "id": "high-cyclomatic-complexity",
       "title": "Function is too complex",
       "category": "Maintainability",
@@ -131,6 +339,51 @@
       "recommendation": "Give every token a lifetime: `jwt.sign(payload, key, { expiresIn: '15m' })`, or set an `exp` claim in the payload. A token with no expiry stays valid forever if leaked."
     },
     {
+      "id": "k8s-host-namespace",
+      "title": "Pod shares a host namespace",
+      "category": "Security",
+      "severity": "error",
+      "scope": "text",
+      "tags": [
+        "iac",
+        "k8s"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Remove the host-namespace flag and reach the workload through a Service (NodePort or LoadBalancer if you need a fixed port on the node). Where host visibility is genuinely the job — a metrics agent, a CNI plugin — keep it in a dedicated DaemonSet with its own service account rather than in an application pod."
+    },
+    {
+      "id": "k8s-missing-resource-limits",
+      "title": "Container declares no resource limits",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "text",
+      "tags": [
+        "iac",
+        "k8s"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Give the container `resources.limits.memory` (and `limits.cpu` where it is CPU-bound) alongside `resources.requests`, so the scheduler can place it and the kubelet evicts the workload that actually misbehaved. If limits are set centrally, enforce them with a namespace `LimitRange` rather than leaving them implicit."
+    },
+    {
+      "id": "k8s-privileged-container",
+      "title": "Container runs privileged or with node-equivalent capabilities",
+      "category": "Security",
+      "severity": "error",
+      "scope": "text",
+      "tags": [
+        "iac",
+        "k8s"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Drop `privileged` and set `allowPrivilegeEscalation: false`, then `capabilities.drop: [ALL]` and add back only what the process actually needs (typically NET_BIND_SERVICE, or nothing at all). If the workload genuinely needs node access — a CNI agent, a node exporter — run it as its own tightly scoped DaemonSet with its own service account instead of privileging an application pod."
+    },
+    {
       "id": "max-function-length",
       "title": "Function is too long",
       "category": "Maintainability",
@@ -143,6 +396,73 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Extract cohesive blocks into named helper functions so each function does one thing. Aim for functions that fit on a screen."
+    },
+    {
+      "id": "mcp-tool-unrestricted-capability",
+      "title": "MCP tool runs a high-blast-radius operation on model-controlled input",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "ai",
+        "injection",
+        "mcp",
+        "rce"
+      ],
+      "requires": [
+        "mcp"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Never pass a tool argument straight into `exec`/`spawn`, an `fs` write/delete, a raw SQL string, or `eval`. Constrain the value with a `z.enum(...)` schema or an explicit allowlist, and prefer array-argument, shell-free APIs (`execFile`) with a fixed command."
+    },
+    {
+      "id": "migration-add-not-null-without-default",
+      "title": "Migration adds a NOT NULL column with no DEFAULT",
+      "category": "Reliability",
+      "severity": "error",
+      "scope": "text",
+      "tags": [
+        "database",
+        "deploy",
+        "migration"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Split it into three deploys: add the column nullable (or with a cheap constant DEFAULT), backfill in bounded batches, then add the NOT NULL constraint — on Postgres 12+ as a NOT VALID CHECK followed by VALIDATE CONSTRAINT so no long ACCESS EXCLUSIVE lock is taken."
+    },
+    {
+      "id": "migration-destructive-without-guard",
+      "title": "Destructive migration outside a rollback path",
+      "category": "Reliability",
+      "severity": "error",
+      "scope": "text",
+      "tags": [
+        "data-loss",
+        "database",
+        "migration"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Split the destructive step into its own reviewed migration and stage it: stop writing the column in application code, deploy, verify nothing reads it, then drop it. Keep a restorable copy (a dated backup or a renamed table) until the drop is confirmed safe, and make sure the down migration can actually recreate what it removed."
+    },
+    {
+      "id": "migration-missing-index-on-foreign-key",
+      "title": "Foreign key column has no index in this migration",
+      "category": "Performance",
+      "severity": "warn",
+      "scope": "text",
+      "tags": [
+        "database",
+        "index",
+        "migration"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Create an index on the referencing column in the same migration (`CREATE INDEX CONCURRENTLY … ON child (parent_id)` on Postgres, so no long write lock is taken). If the index already exists in another migration or is declared on the ORM model, no change is needed."
     },
     {
       "id": "nest-missing-validation-pipe",
@@ -205,6 +525,21 @@
       "recommendation": "Collect the promises and `await Promise.all(items.map((x) => work(x)))` instead of awaiting inside the loop. If the collection is caller-sized, bound the fan-out with `p-limit`."
     },
     {
+      "id": "no-cache-without-ttl",
+      "title": "Cache write with no TTL",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "cache",
+        "memory"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Give every cache entry an expiry: `redis.set(key, value, 'EX', 60)` / `redis.setex(key, 60, value)`, or the client's TTL option (`cache.set(key, value, { ttl: 300 })`). Without one the entry never expires — memory grows without bound and stale data is served indefinitely."
+    },
+    {
       "id": "no-circular-imports",
       "title": "Circular import between modules",
       "category": "Maintainability",
@@ -218,6 +553,34 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Break the cycle: extract the shared symbols into a third module both import, use a type-only import (`import type`) if it's only for types, or defer the import to call time. Cyclic value imports evaluate to `undefined` at load and cause TDZ errors under ESM."
+    },
+    {
+      "id": "no-committed-env-secret",
+      "title": "Committed secret in an env file",
+      "category": "Security",
+      "severity": "error",
+      "scope": "text",
+      "tags": [
+        "secrets"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Remove the secret from the committed .env and rotate it (it's in git history). Keep only a `.env.example` with placeholder values, gitignore the real `.env`, and load secrets from the environment or a secret manager."
+    },
+    {
+      "id": "no-committed-private-key",
+      "title": "Committed private key",
+      "category": "Security",
+      "severity": "error",
+      "scope": "text",
+      "tags": [
+        "secrets"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Remove the key from the repo and rotate it now — a committed key is compromised. Store keys outside the repo (a secret manager, or an untracked gitignored path) and load them at runtime."
     },
     {
       "id": "no-console-log-in-committed-code",
@@ -411,6 +774,21 @@
       "recommendation": "Move the predicate into the query's `where` (e.g. `db.user.findMany({ where: { active: true } })`) so the database returns only the rows you keep instead of streaming the whole table into JS."
     },
     {
+      "id": "no-floating-promise",
+      "title": "Promise result discarded",
+      "category": "Reliability",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "async",
+        "typed"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Await the call, or make the fire-and-forget explicit. `await save(user)` when the caller depends on it; `void save(user)` plus a `.catch()` when it genuinely runs in the background. An unhandled rejection terminates the process on modern Node."
+    },
+    {
       "id": "no-function-constructor-with-input",
       "title": "Function constructor built from input",
       "category": "Security",
@@ -514,6 +892,23 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Register listeners once at startup, or use `emitter.once(...)` inside the handler and remove it with `removeListener` when the request completes."
+    },
+    {
+      "id": "no-llm-output-in-sink",
+      "title": "LLM output used unvalidated in a dangerous sink",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "ai",
+        "injection"
+      ],
+      "requires": [
+        "ai"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Treat model output as untrusted. Never eval/exec it or splice it into SQL, HTML, or a URL. Parse structured output and dispatch through an explicit allowlist, parameterize SQL, escape before rendering, and validate a URL's host against an allowlist."
     },
     {
       "id": "no-math-random-for-token",
@@ -638,6 +1033,36 @@
       "recommendation": "Redirect only to a fixed allowlist of paths or origins: compare the target against a known-good set, or resolve it and assert `new URL(target).origin` is one you trust before calling redirect."
     },
     {
+      "id": "no-open-security-group",
+      "title": "Security group allows ingress from the entire internet",
+      "category": "Security",
+      "severity": "error",
+      "scope": "text",
+      "tags": [
+        "iac",
+        "network"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Restrict the CIDR to the networks that actually need access (a VPC range, a bastion, an office block). If the service is genuinely public, terminate it behind a load balancer or WAF rather than opening the instance's security group."
+    },
+    {
+      "id": "no-overbroad-iam-policy",
+      "title": "IAM policy allows every action on every resource",
+      "category": "Security",
+      "severity": "error",
+      "scope": "text",
+      "tags": [
+        "iac",
+        "iam"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Scope the statement: list the specific actions the principal needs and the specific resource ARNs they apply to. `Action: \"*\"` with `Resource: \"*\"` is administrator access — grant it deliberately and never to a service role."
+    },
+    {
       "id": "no-path-traversal",
       "title": "Filesystem path built from caller input without containment",
       "category": "Security",
@@ -668,6 +1093,23 @@
       "recommendation": "Never call `process.exit`/`process.abort` from a handler. Respond, then drain and shut down outside the request (`scheduleGracefulShutdown()` → `server.close()` on SIGTERM). Reserve `process.exit` for top-level fatal handlers."
     },
     {
+      "id": "no-prompt-injection",
+      "title": "Untrusted input flows into an LLM prompt without isolation",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "ai",
+        "injection"
+      ],
+      "requires": [
+        "ai"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Keep untrusted input out of the instructions. Put user text only in a distinct `user`-role message (`messages: [{ role: 'user', content: input }]`), never interpolated into the `system` prompt or a `prompt` string, and keep your instructions in a static `system` prompt the caller cannot reach."
+    },
+    {
       "id": "no-prototype-pollution",
       "title": "Prototype pollution via caller-controlled object key",
       "category": "Security",
@@ -681,6 +1123,21 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Reject the dangerous keys before writing (`if (key === '__proto__' || key === 'constructor' || key === 'prototype') return;`), use a `Map`, or store data on a `Object.create(null)` bag. Never write to an object with an unvalidated caller-supplied key."
+    },
+    {
+      "id": "no-public-cloud-storage",
+      "title": "Object storage is publicly readable",
+      "category": "Security",
+      "severity": "error",
+      "scope": "text",
+      "tags": [
+        "iac",
+        "storage"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Set the ACL to `private` and leave every public-access block enabled. Serve public objects through a CDN with a signed origin instead of exposing the bucket itself."
     },
     {
       "id": "no-query-in-loop",
@@ -742,6 +1199,20 @@
       "recommendation": "Remove the redundant try/catch and let the error propagate, or add real handling (log, wrap with `{ cause }`, or recover)."
     },
     {
+      "id": "no-secret-in-config-file",
+      "title": "Hardcoded secret in a config or CI file",
+      "category": "Security",
+      "severity": "error",
+      "scope": "text",
+      "tags": [
+        "secrets"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Move the secret out of the committed config into an injected secret (CI secret store, environment variable, or secret manager) and reference it. Never commit a provider key or private key."
+    },
+    {
       "id": "no-send-after-next",
       "title": "Response sent after calling next()",
       "category": "Bugs",
@@ -756,6 +1227,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Return when you delegate: `return next(err)` (or return after responding). A bare `next()` does not stop the handler, so the later `res.*` writes to an already-finished response and throws ERR_HTTP_HEADERS_SENT."
+    },
+    {
+      "id": "no-sensitive-data-in-logs",
+      "title": "Secret or credential written to a log",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "info-leak",
+        "logging",
+        "secrets"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Never log the credential itself. Log a presence check or a fingerprint instead (`{ hasToken: Boolean(token) }`, `token.slice(-4)`), or run the payload through a redaction step — pino's `redact` option, or an explicit `redact()`/`mask()` helper."
     },
     {
       "id": "no-sql-template-interpolation",
@@ -786,6 +1273,21 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Validate the destination before the request: parse it with `new URL(target)` and assert its host is in an explicit allowlist, rejecting internal/link-local ranges and non-http(s) schemes."
+    },
+    {
+      "id": "no-state-change-on-get",
+      "title": "GET route performs a write",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "csrf",
+        "http"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Move the write to POST/PUT/PATCH/DELETE (and protect it with a CSRF token). GET must stay safe and idempotent: prefetchers, crawlers and a cross-site `<img src>` all trigger it with the victim's cookies, and CSRF defenses do not cover GET."
     },
     {
       "id": "no-swallowed-error-empty-catch",
@@ -847,6 +1349,24 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Make the helper async and have the handler await it (`await fs.promises.readFile(...)`, `await execFile(...)`). A synchronous call in a helper on the request path blocks the event loop exactly as one written inline does."
+    },
+    {
+      "id": "no-system-prompt-leak",
+      "title": "System prompt echoed back to the caller",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "ai",
+        "leak",
+        "prompt"
+      ],
+      "requires": [
+        "ai"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Never return, log, or embed the `system` prompt in a caller-visible value. Send only the model's answer back, and keep any secret interpolated into the prompt out of responses and logs."
     },
     {
       "id": "no-tainted-sink-via-helper",
@@ -940,6 +1460,23 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Bound the fan-out instead of removing the parallelism: wrap each task with a concurrency limiter (`p-limit`), e.g. `collection.map((x) => limit(() => work(x)))`, so at most N run at once."
+    },
+    {
+      "id": "no-unchecked-required-env",
+      "title": "Required env var used as if always defined",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "config",
+        "env"
+      ],
+      "requires": [
+        "node"
+      ],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Default it (`process.env.FOO ?? fallback`), guard it (`if (process.env.FOO) …`), or validate all required vars once at startup. A non-null `!` or a direct member access crashes with `Cannot read properties of undefined` the first time the var is unset in an environment."
     },
     {
       "id": "no-uncleared-module-interval",
@@ -1042,6 +1579,21 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use a slow, salted, memory-hard KDF for passwords: `argon2.hash(pw)`, `scrypt`, or `bcrypt`. MD5/SHA-1 are GPU-crackable at billions of guesses per second."
+    },
+    {
+      "id": "no-xss-in-html-response",
+      "title": "Caller-controlled data interpolated into an HTML response",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "http",
+        "injection"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Escape the value before it reaches the markup (`escapeHtml(value)`, `DOMPurify.sanitize(value)`), or render through an auto-escaping template engine with `res.render`. Concatenating request data into HTML hands the caller script execution in your origin."
     },
     {
       "id": "prefer-node-protocol-imports",
@@ -1149,6 +1701,23 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "On `process.on('SIGTERM', ...)`, stop accepting connections and call `server.close(() => process.exit(0))` so in-flight requests drain before the process exits."
+    },
+    {
+      "id": "restify-missing-error-handler",
+      "title": "restify server with no error handler",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "error-handling",
+        "restify"
+      ],
+      "requires": [
+        "restify"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Wire the server's error events: `server.on(\"restifyError\", (req, res, err, next) => { … })` for shaped error responses, and `server.on(\"uncaughtException\", (req, res, route, err) => { … })` so a throwing handler answers the request instead of killing the process."
     },
     {
       "id": "secret-in-env-fallback",
