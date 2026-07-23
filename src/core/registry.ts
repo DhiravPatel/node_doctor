@@ -33,6 +33,7 @@ import { noConstantCondition } from "../diagnostics/bugs/no-constant-condition.t
 import { noShadowedRoute } from "../diagnostics/bugs/no-shadowed-route.ts";
 import { noThrowLiteral } from "../diagnostics/bugs/no-throw-literal.ts";
 import { noUnreachableCode } from "../diagnostics/bugs/no-unreachable-code.ts";
+import { noUnstableOffsetPagination } from "../diagnostics/bugs/no-unstable-offset-pagination.ts";
 // config
 import { noNonNullEnvAccess } from "../diagnostics/config/no-nonnull-env-access.ts";
 // db
@@ -159,6 +160,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noShadowedRoute,
   noThrowLiteral,
   noUnreachableCode,
+  noUnstableOffsetPagination,
   // config
   noNonNullEnvAccess,
   // db

@@ -11,6 +11,29 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Diagnostics — frontier wave E (§141/§156/§154)
+
+A correctness + supply-chain wave. The two new opt-in diagnostics were hardened
+against an adversarial false-positive hunt.
+
+- **`no-unstable-offset-pagination`** (Bugs, §141) — offset/`skip` pagination with no
+  stable `ORDER BY`, so pages silently drop and duplicate rows as data changes
+  between fetches. Covers Prisma (`.findMany({ skip })` on a DB-shaped receiver, no
+  `orderBy`), query-builder `.offset().limit()` chains, and raw SQL (`OFFSET` or
+  MySQL's `LIMIT offset, count`) — all only when the SQL is a readable literal and no
+  order clause is present.
+- **`no-unpinned-dependency`** (Security, §156, text-scan on `package.json`) — a
+  dependency pinned by a git ref / tarball URL / floating tag (`*`, `latest`, …),
+  which makes the build non-reproducible and is a supply-chain risk. Normal semver
+  ranges and intentional protocols (`workspace:`, `file:`, `npm:`, `jsr:`, …) are
+  silent.
+- **`node-doctor deslop` now detects undeclared / phantom dependencies (§154)** — a
+  package **imported but not declared** in `package.json` (working only via a hoisted
+  transitive dep; breaks on `--production` / a tree change). Node builtins, the
+  package's own name, and same-scope workspace siblings are excluded, and imports are
+  checked against the **nearest-ancestor** `package.json`, so a sample app under
+  `tests/fixtures/` is never attributed to the root manifest.
+
 ### Diagnostics — frontier wave D (§140/§137/§138)
 
 Three opt-in, precision-first rules anchored on the highest-severity item in the
@@ -78,7 +101,7 @@ provider-key / PEM patterns — never an entropy heuristic. The generated fences
 verified to actually cover what they flag (scan → write → re-scan reports zero
 exposed).
 
-### Diagnostics (62 → 126)
+### Diagnostics (62 → 128)
 
 Frontier wave B (FEATURE.md §147/§148) — two opt-in, precision-first rules
 (`defaultEnabled: false`, so they never affect the default health score), each

@@ -897,7 +897,10 @@ const runDeslopCommand = async (args: ParsedArgs): Promise<number> => {
     process.stdout.write(renderDeslop(result, { color: useColor(args) }) + "\n");
   }
   const total =
-    result.unusedFiles.length + result.unusedExports.length + result.unusedDependencies.length;
+    result.unusedFiles.length +
+    result.unusedExports.length +
+    result.unusedDependencies.length +
+    result.undeclaredDependencies.length;
   // deslop is informational by default; only `--blocking warning` makes it fail.
   return args.blocking === "warning" && total > 0 ? 1 : 0;
 };

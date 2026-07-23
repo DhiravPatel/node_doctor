@@ -29,7 +29,7 @@ Express handler with no error path, a `readFileSync` on the request path, an N+1
 across a loop, a `Promise.all` that opens a socket per row, injection and
 secret-handling sinks.
 
-It runs **126 diagnostics** — including a whole-tree scan for **committed secrets**
+It runs **128 diagnostics** — including a whole-tree scan for **committed secrets**
 in `.env`, config, CI, and key files — produces a transparent **0–100 health
 score** entirely on your machine (no network, no telemetry), and can push the
 same knowledge **upstream into your coding agent** as an installable skill and an
@@ -72,7 +72,7 @@ Typical output on a codebase that needs help:
 
 ## Features
 
-- **126 diagnostics** across Security, Reliability, Bugs, Performance, and
+- **128 diagnostics** across Security, Reliability, Bugs, Performance, and
   Maintainability — each with a valid + invalid test; FP-prone ones are opt-in.
 - **Whole-tree secret scan** — committed credentials in `.env`, YAML/CI configs,
   and `*.pem`/`*.key` files, gated to git-tracked files so a local `.env` is safe.

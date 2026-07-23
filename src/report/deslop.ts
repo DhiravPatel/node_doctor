@@ -12,12 +12,16 @@ export const renderDeslop = (result: DeslopResult, opts: { color?: boolean } = {
   const green = color ? pc.green : identity;
   const cyan = color ? pc.cyan : identity;
 
+  const red = color ? pc.red : identity;
   const total =
-    result.unusedFiles.length + result.unusedExports.length + result.unusedDependencies.length;
+    result.unusedFiles.length +
+    result.unusedExports.length +
+    result.unusedDependencies.length +
+    result.undeclaredDependencies.length;
   const lines: string[] = ["", `  ${bold("node-deslop")}  ${dim(`${result.scannedFiles} files scanned`)}`, ""];
 
   if (total === 0) {
-    lines.push(green("  ✓ No unused files, exports, or dependencies detected."));
+    lines.push(green("  ✓ No unused files/exports/deps, and no undeclared imports."));
     lines.push("");
     return lines.join("\n");
   }
@@ -35,6 +39,13 @@ export const renderDeslop = (result: DeslopResult, opts: { color?: boolean } = {
   if (result.unusedDependencies.length > 0) {
     lines.push(`  ${yellow("Unused dependencies")} ${dim(`(${result.unusedDependencies.length})`)}`);
     for (const d of result.unusedDependencies) lines.push(`     ${d}`);
+    lines.push("");
+  }
+  if (result.undeclaredDependencies.length > 0) {
+    lines.push(`  ${red("Undeclared dependencies")} ${dim(`(${result.undeclaredDependencies.length}) — imported but not in package.json`)}`);
+    for (const d of result.undeclaredDependencies) lines.push(`     ${d}`);
+    lines.push(dim("     These resolve today only via a hoisted transitive dep; a clean/--production"));
+    lines.push(dim("     install or a tree change will break them. Add them to dependencies."));
     lines.push("");
   }
 

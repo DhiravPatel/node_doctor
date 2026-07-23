@@ -15,6 +15,7 @@
 
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve, basename, relative, sep } from "node:path";
+import { builtinModules } from "node:module";
 import fg from "fast-glob";
 import type { AstNode } from "../core/types.ts";
 import { parseSource } from "../core/parse.ts";
@@ -42,6 +43,14 @@ export interface DeslopResult {
   unusedFiles: string[];
   unusedExports: Array<{ file: string; name: string }>;
   unusedDependencies: string[];
+  /**
+   * §154 — packages IMPORTED but not declared in package.json (any dep list).
+   * These work locally only because a hoisted transitive dependency happens to
+   * provide them; they break the moment the tree changes, the package manager
+   * switches, or a `--production` / clean install runs. Node builtins, the package's
+   * own name, and same-scope workspace siblings are excluded.
+   */
+  undeclaredDependencies: string[];
   scannedFiles: number;
 }
 
@@ -58,6 +67,12 @@ interface FileFacts {
 
 const bareName = (spec: string): string =>
   spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0]!;
+
+// Node builtins are always available and never declared — never "undeclared". Built
+// from the running Node's own list plus the `node:` prefix (always a builtin).
+const BUILTIN_MODULES = new Set(builtinModules);
+const isBuiltinModule = (name: string): boolean =>
+  name.startsWith("node:") || BUILTIN_MODULES.has(name) || BUILTIN_MODULES.has(name.replace(/^node:/, ""));
 
 const collectFacts = (path: string, normalized: string, source: string): FileFacts => {
   const { program } = parseSource(path, source);
@@ -178,17 +193,33 @@ export const runDeslop = async (
   // Entry points from package.json.
   const entryPaths = new Set<string>();
   let deps = new Set<string>();
+  // Every DECLARED dependency (any list) — used to find both unused (declared,
+  // never imported) and undeclared (imported, never declared) packages.
+  const declared = new Set<string>();
+  let selfName: string | null = null;
+  let selfScope: string | null = null;
+  let hasManifest = false;
   try {
     const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as {
+      name?: string;
       main?: string;
       module?: string;
       bin?: string | Record<string, string>;
       dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
     };
+    hasManifest = true;
     for (const e of [pkg.main, pkg.module]) if (e) entryPaths.add(resolve(root, e));
     if (typeof pkg.bin === "string") entryPaths.add(resolve(root, pkg.bin));
     else if (pkg.bin) for (const v of Object.values(pkg.bin)) entryPaths.add(resolve(root, v));
     deps = new Set(Object.keys(pkg.dependencies ?? {}));
+    for (const map of [pkg.dependencies, pkg.devDependencies, pkg.peerDependencies, pkg.optionalDependencies]) {
+      for (const name of Object.keys(map ?? {})) declared.add(name);
+    }
+    selfName = pkg.name ?? null;
+    selfScope = selfName && selfName.startsWith("@") ? selfName.split("/")[0]! : null;
   } catch {
     /* no manifest */
   }
@@ -251,6 +282,43 @@ export const runDeslop = async (
 
   const unusedDependencies = [...deps].filter((d) => !usedDeps.has(d)).sort();
 
+  // Respect package.json BOUNDARIES for the undeclared check: an import is governed
+  // by the NEAREST-ancestor package.json, so a sample app under tests/fixtures/<app>/
+  // (with its own manifest) is checked against ITS manifest, never the root's. Only
+  // imports from root-governed files count toward the root manifest's undeclared set.
+  const pkgDirs = (
+    await fg(["**/package.json"], { cwd: root, ignore: [...BUILTIN_IGNORES], absolute: true, suppressErrors: true })
+  )
+    .map((p) => dirname(p))
+    .sort((a, b) => b.length - a.length);
+  const governedByRoot = (filePath: string): boolean => {
+    const d = dirname(filePath);
+    for (const pd of pkgDirs) {
+      if (d === pd || d.startsWith(pd + sep)) return pd === root;
+    }
+    return true;
+  };
+  const rootUsedDeps = new Set<string>();
+  for (const f of factsList) {
+    if (governedByRoot(f.path)) for (const dep of f.bareImports) rootUsedDeps.add(dep);
+  }
+
+  // §154 — imported but not declared. Only meaningful with a manifest to check
+  // against. Exclude Node builtins, the package's own name, and same-scope workspace
+  // siblings (`@myorg/api` importing `@myorg/shared` — a workspace member, not a
+  // missing registry dep).
+  const undeclaredDependencies = hasManifest
+    ? [...rootUsedDeps]
+        .filter(
+          (d) =>
+            !declared.has(d) &&
+            !isBuiltinModule(d) &&
+            d !== selfName &&
+            !(selfScope !== null && d.startsWith(selfScope + "/")),
+        )
+        .sort()
+    : [];
+
   unusedExports.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.name < b.name ? -1 : 1));
   unusedFiles.sort();
 
@@ -258,6 +326,7 @@ export const runDeslop = async (
     unusedFiles,
     unusedExports,
     unusedDependencies,
+    undeclaredDependencies,
     scannedFiles: factsList.length,
   };
 };

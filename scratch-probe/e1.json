@@ -16,13 +16,13 @@
       "cjs",
       "node"
     ],
-    "analyzedFileCount": 203,
-    "totalLines": 26975,
+    "analyzedFileCount": 215,
+    "totalLines": 30278,
     "complete": true,
     "parseFailures": []
   },
   "diagnosticsRun": 74,
-  "diagnosticsAvailable": 118,
+  "diagnosticsAvailable": 128,
   "findings": [
     {
       "id": "diagnostics/cicd/context.ts::34:24::node-doctor/no-redos-prone-regex::3f261078",
@@ -69,7 +69,7 @@
     "score": 100,
     "label": "healthy",
     "weighted": 4,
-    "perThousandLines": 0.15,
+    "perThousandLines": 0.13,
     "byCategory": {
       "Security": 2,
       "Reliability": 0,

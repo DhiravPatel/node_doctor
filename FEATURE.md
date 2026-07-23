@@ -1289,7 +1289,9 @@ Derive a fault-injection plan from the code: enumerate every external call site 
 Compare the variables that flow into the cached *value* against those that flow into the *key*; flag the difference. The same analysis catches keys built from object iteration order or `JSON.stringify` of an unordered object (non-deterministic keys → silent cache misses). This is the highest-severity item in this document and it is reachable with today's taint engine.
 
 ## 141. Pagination Correctness ★
-**Status: Planned** · ⚙️ Now
+**Status: Detected** (`no-unstable-offset-pagination`, opt-in) · ⚙️ Now
+
+**Shipped (opt-in):** `no-unstable-offset-pagination` (Bugs/warn/high) flags offset/`skip` pagination with no stable sort — the "the report is missing three orders" bug, where inserts/deletes between page fetches shift the window and pages silently drop and duplicate rows. Three shapes: Prisma `.findMany({ skip })` (with a genuine numeric/dynamic offset, on a DB-shaped receiver, no `orderBy`), a query-builder `.offset().limit()` chain with no order method on either side, and a raw SQL literal that offsets (`OFFSET`, or MySQL's `LIMIT offset, count`) without `ORDER BY`. A DB-receiver gate keeps a look-alike `.findMany`/`.aggregate`/`.groupBy` on a non-database object (an array/stream helper) from firing. Uniqueness of the sort key and the inconsistent-count-vs-page sub-case are deliberate recall gaps.
 
 Offset pagination over mutable data silently drops and duplicates rows as records are inserted between page fetches — the classic "the report is missing three orders and nobody knows why." Flags: `OFFSET`/`skip` without a stable, unique sort key; pagination over a table with active writes where a cursor is the correct pattern; and inconsistent sort keys between the count query and the page query.
 
@@ -1397,7 +1399,9 @@ Whether the service speaks one error language: the same failure mapped to differ
 # Part XXXVII — Supply Chain, Packages & Topology
 
 ## 154. Phantom & Undeclared Dependency Detection ★
-**Status: Planned** · ⚙️ Now
+**Status: Core** (`node-doctor deslop`) · ⚙️ Now
+
+**Shipped in `deslop`:** the inverse of §19's unused-package check — a package **imported but not declared** in `package.json` (any dep list), which works locally only because a hoisted transitive dependency happens to provide it and breaks the moment the tree changes or a `--production` install runs. `deslop` now returns `undeclaredDependencies` (and renders them). Precision: Node builtins (with/without the `node:` prefix), the package's own name, and same-scope workspace siblings (`@org/api` importing `@org/shared`) are excluded, subpath imports resolve to their bare package name, and each import is checked against the **nearest-ancestor** `package.json` — so a sample app under `tests/fixtures/<app>/` (with its own manifest) is never attributed to the root. The `devDependencies-imported-by-production-code` sub-case remains a follow-up (needs per-file production classification).
 
 The exact inverse of §19's unused-package check, and a nastier failure: a package **imported but not declared**, working locally only because a hoisted transitive dependency happens to provide it. It breaks the moment the tree changes, the package manager switches, or a Docker build installs with `--production`. Also flags imports of transitive dependencies (using a package you never declared) and `devDependencies` imported by production code.
 
@@ -1407,7 +1411,9 @@ The exact inverse of §19's unused-package check, and a nastier failure: a packa
 §78 does semver for your **HTTP** API; this does it for your **package exports**. In a monorepo, diff a package's public surface between revisions — removed exports, narrowed parameter types, changed return shapes, newly-required options — and flag breaking changes shipped without a major bump. Reuses the baseline-delta machinery, applied to an export surface instead of a finding set.
 
 ## 156. Lockfile Integrity & Build Reproducibility ★
-**Status: Planned** · ⚙️ Now
+**Status: Detected** (`no-unpinned-dependency`, opt-in) · ⚙️ Now
+
+**Shipped (opt-in), the per-manifest slice:** `no-unpinned-dependency` (Security/warn, a whole-tree text-scan on `package.json`) flags a dependency that is not a registry semver range — a git ref (`github:…`, `git+…`, `…#ref`), a tarball URL, or a floating tag/wildcard (`*`, `x`, `latest`, `next`, `beta`, …) — because it makes the build non-reproducible from the registry + lockfile and, for git refs, is a moving-target supply-chain risk. Deliberately silent on normal semver ranges (a `1.x`/`^1` floats only within the lockfile's pin), prerelease *versions* (`1.2.3-beta.1` is not the `beta` tag), and intentional protocols (`workspace:`, `file:`, `link:`, `portal:`, `catalog:`, `npm:`, `jsr:`). The cross-file checks (manifest-vs-lockfile drift, missing/mixed lockfiles, install-time network fetch) remain Planned.
 
 Whether a build is reproducible from the repo alone: `package.json` ranges that drift from the lockfile, dependencies pinned by tag or git ref rather than version, lockfile absent or stale relative to the manifest, mixed package-manager lockfiles in one tree, and install scripts that fetch at build time (unpinned network dependencies inside a "reproducible" build).
 

@@ -17,6 +17,7 @@ import { CONTAINER_DIAGNOSTICS } from "./container/index.ts";
 import { K8S_DIAGNOSTICS } from "./k8s/index.ts";
 import { CICD_DIAGNOSTICS } from "./cicd/index.ts";
 import { MIGRATION_DIAGNOSTICS } from "./migrations/index.ts";
+import { SUPPLYCHAIN_DIAGNOSTICS } from "./supplychain/index.ts";
 
 export const ALL_TEXT_DIAGNOSTICS: TextDiagnostic[] = [
   ...TEXT_DIAGNOSTICS,
@@ -25,4 +26,5 @@ export const ALL_TEXT_DIAGNOSTICS: TextDiagnostic[] = [
   ...K8S_DIAGNOSTICS,
   ...CICD_DIAGNOSTICS,
   ...MIGRATION_DIAGNOSTICS,
+  ...SUPPLYCHAIN_DIAGNOSTICS,
 ];

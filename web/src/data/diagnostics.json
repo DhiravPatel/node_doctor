@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 126,
+  "total": 128,
   "defaultOn": 95,
-  "optIn": 31,
+  "optIn": 33,
   "byCategory": {
     "Performance": 12,
-    "Security": 58,
+    "Security": 59,
     "Maintainability": 10,
     "Reliability": 32,
-    "Bugs": 14
+    "Bugs": 15
   },
   "categoryWeights": {
     "Security": 2,
@@ -1703,6 +1703,20 @@
       "recommendation": "Normalize both sides before comparing: `a.normalize(\"NFKC\").toLowerCase() === b.normalize(\"NFKC\").toLowerCase()` (normalize first, case-fold after), or compare a stored canonical form. Case-folding and trimming do not collapse homoglyphs or compatibility characters, so `admin` and `аdmin` (Cyrillic `а`) stay distinct."
     },
     {
+      "id": "no-unpinned-dependency",
+      "title": "Unpinned dependency (git ref, URL, or floating tag) in package.json",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "text",
+      "tags": [
+        "supply-chain"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Pin the dependency to an exact or registry semver range (e.g. `^1.2.3`, `~1.2.0`, `1.2.3`) so the install is reproducible from package.json + lockfile and every version resolves through the registry."
+    },
+    {
       "id": "no-unreachable-code",
       "title": "Unreachable code after a control-flow exit",
       "category": "Bugs",
@@ -1745,6 +1759,20 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Never build a RegExp from raw input. Escape the value with an escape-regexp helper before interpolating it, or match against a fixed pattern and treat input as data."
+    },
+    {
+      "id": "no-unstable-offset-pagination",
+      "title": "Offset pagination without a stable sort order",
+      "category": "Bugs",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "correctness"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Give every `skip`/`OFFSET` query a stable, unique sort key (e.g. `orderBy: { id: 'asc' }` or `ORDER BY id`), or switch to keyset/cursor pagination. Without a deterministic order, rows inserted or deleted between page fetches shift the window, so pages silently drop and duplicate records."
     },
     {
       "id": "no-vm-run-untrusted",
