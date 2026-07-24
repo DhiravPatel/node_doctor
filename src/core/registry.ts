@@ -64,6 +64,7 @@ import { noMissingBodySizeLimit } from "../diagnostics/http/no-missing-body-size
 import { noSendAfterNext } from "../diagnostics/http/no-send-after-next.ts";
 import { noSharedCacheAuthenticatedResponse } from "../diagnostics/http/no-shared-cache-authenticated-response.ts";
 import { noTrustProxyTrue } from "../diagnostics/http/no-trust-proxy-true.ts";
+import { noWildcardBodyParser } from "../diagnostics/http/no-wildcard-body-parser.ts";
 import { requireErrorHandlingMiddleware } from "../diagnostics/http/require-error-handling-middleware.ts";
 // maintainability
 import { deepNesting } from "../diagnostics/maintainability/deep-nesting.ts";
@@ -191,6 +192,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noSendAfterNext,
   noSharedCacheAuthenticatedResponse,
   noTrustProxyTrue,
+  noWildcardBodyParser,
   requireErrorHandlingMiddleware,
   // maintainability
   deepNesting,

@@ -1,0 +1,105 @@
+{
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/:id",
+      "normalizedFilePath": "src/routes/users.js",
+      "line": 8,
+      "checks": {
+        "error-handling": "fail",
+        "logs-on-failure": "na",
+        "timed-external-calls": "na",
+        "correlation-id": "na"
+      },
+      "score": 0
+    },
+    {
+      "method": "POST",
+      "path": "/bulk",
+      "normalizedFilePath": "src/routes/users.js",
+      "line": 15,
+      "checks": {
+        "error-handling": "fail",
+        "logs-on-failure": "na",
+        "timed-external-calls": "na",
+        "correlation-id": "na"
+      },
+      "score": 0
+    },
+    {
+      "method": "POST",
+      "path": "/login",
+      "normalizedFilePath": "src/routes/users.js",
+      "line": 24,
+      "checks": {
+        "error-handling": "fail",
+        "logs-on-failure": "na",
+        "timed-external-calls": "na",
+        "correlation-id": "na"
+      },
+      "score": 0
+    },
+    {
+      "method": "GET",
+      "path": "/shutdown",
+      "normalizedFilePath": "src/routes/admin.js",
+      "line": 9,
+      "checks": {
+        "error-handling": "na",
+        "logs-on-failure": "na",
+        "timed-external-calls": "na",
+        "correlation-id": "na"
+      },
+      "score": 100
+    },
+    {
+      "method": "POST",
+      "path": "/backup",
+      "normalizedFilePath": "src/routes/admin.js",
+      "line": 15,
+      "checks": {
+        "error-handling": "na",
+        "logs-on-failure": "na",
+        "timed-external-calls": "na",
+        "correlation-id": "na"
+      },
+      "score": 100
+    },
+    {
+      "method": "GET",
+      "path": "/files/:name",
+      "normalizedFilePath": "src/routes/admin.js",
+      "line": 21,
+      "checks": {
+        "error-handling": "na",
+        "logs-on-failure": "na",
+        "timed-external-calls": "na",
+        "correlation-id": "na"
+      },
+      "score": 100
+    },
+    {
+      "method": "GET",
+      "path": "/raw",
+      "normalizedFilePath": "src/routes/admin.js",
+      "line": 27,
+      "checks": {
+        "error-handling": "na",
+        "logs-on-failure": "na",
+        "timed-external-calls": "na",
+        "correlation-id": "na"
+      },
+      "score": 100
+    }
+  ],
+  "score": 57,
+  "summary": {
+    "routes": 7,
+    "checkPassRate": {
+      "error-handling": 0,
+      "logs-on-failure": 100,
+      "timed-external-calls": 100,
+      "correlation-id": 100
+    }
+  }
+}

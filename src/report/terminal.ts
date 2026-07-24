@@ -387,3 +387,62 @@ export const renderContextHygiene = (
   lines.push("");
   return lines.join("\n");
 };
+
+/**
+ * §151 — the Observability Coverage Score: per route, "could you debug this at
+ * 3am?". Leads with the codebase score bar (the observability equivalent of a
+ * coverage number), then lists the routes that fall short (score < 100) with the
+ * exact checks they failed, and closes with the per-check pass-rate summary. A
+ * codebase at 100 gets a one-line all-clear.
+ */
+const OBSERVABILITY_CHECK_ORDER = [
+  "error-handling",
+  "logs-on-failure",
+  "timed-external-calls",
+  "correlation-id",
+];
+
+export const renderObservability = (
+  report: import("../core/observability.ts").ObservabilityReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  lines.push(`  ${p.bold("Observability coverage")}  ${bar(report.score, p)}  ${p.bold(`${report.score}/100`)}`);
+  lines.push(p.dim(`  ${report.summary.routes} route(s) scored — could you debug this at 3am?`));
+  lines.push("");
+
+  if (report.summary.routes === 0) {
+    lines.push(p.dim("  No scorable route handlers found."));
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  const worst = report.routes.filter((r) => r.score < 100);
+  if (worst.length === 0) {
+    lines.push(`  ${p.green("✓")} All routes observable — every applicable check passes.`);
+    lines.push("");
+  } else {
+    lines.push(`  ${p.bold(String(worst.length))} route(s) below full coverage:`);
+    lines.push("");
+    for (const r of worst) {
+      const failed = OBSERVABILITY_CHECK_ORDER.filter((c) => r.checks[c] === "fail");
+      const color = r.score >= 75 ? p.yellow : p.red;
+      lines.push(
+        `  ${color("✖")} ${r.method.padEnd(7)}${r.path.padEnd(30)} ${p.bold(String(r.score).padStart(3))}/100`,
+      );
+      lines.push(`       ${p.cyan(`${r.normalizedFilePath}:${r.line}`)}`);
+      lines.push(`       ${p.dim("failed:")} ${failed.join(", ")}`);
+    }
+    lines.push("");
+  }
+
+  lines.push(`  ${p.bold("Per-check pass rate")}`);
+  for (const c of OBSERVABILITY_CHECK_ORDER) {
+    const rate = report.summary.checkPassRate[c] ?? 100;
+    lines.push(`    ${c.padEnd(22)} ${String(rate).padStart(3)}%`);
+  }
+  lines.push("");
+  return lines.join("\n");
+};

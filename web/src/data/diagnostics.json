@@ -1,11 +1,11 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 128,
+  "total": 129,
   "defaultOn": 95,
-  "optIn": 33,
+  "optIn": 34,
   "byCategory": {
     "Performance": 12,
-    "Security": 59,
+    "Security": 60,
     "Maintainability": 10,
     "Reliability": 32,
     "Bugs": 15
@@ -1816,6 +1816,21 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use a slow, salted, memory-hard KDF for passwords: `argon2.hash(pw)`, `scrypt`, or `bcrypt`. MD5/SHA-1 are GPU-crackable at billions of guesses per second."
+    },
+    {
+      "id": "no-wildcard-body-parser",
+      "title": "Body parser accepts any content-type",
+      "category": "Security",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "http",
+        "injection"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Scope the parser to the media type it actually handles — `express.json({ type: 'application/json' })`, a scoped subtype like `'application/*+json'` / `'text/*'`, or an explicit list. A `type` of `'*/*'` (or a `() => true` predicate) parses every body regardless of its declared Content-Type, so a mislabeled request bypasses content-type-based validation."
     },
     {
       "id": "no-xss-in-html-response",

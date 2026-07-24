@@ -29,7 +29,7 @@ Express handler with no error path, a `readFileSync` on the request path, an N+1
 across a loop, a `Promise.all` that opens a socket per row, injection and
 secret-handling sinks.
 
-It runs **128 diagnostics** — including a whole-tree scan for **committed secrets**
+It runs **129 diagnostics** — including a whole-tree scan for **committed secrets**
 in `.env`, config, CI, and key files — produces a transparent **0–100 health
 score** entirely on your machine (no network, no telemetry), and can push the
 same knowledge **upstream into your coding agent** as an installable skill and an
@@ -72,7 +72,7 @@ Typical output on a codebase that needs help:
 
 ## Features
 
-- **128 diagnostics** across Security, Reliability, Bugs, Performance, and
+- **129 diagnostics** across Security, Reliability, Bugs, Performance, and
   Maintainability — each with a valid + invalid test; FP-prone ones are opt-in.
 - **Whole-tree secret scan** — committed credentials in `.env`, YAML/CI configs,
   and `*.pem`/`*.key` files, gated to git-tracked files so a local `.env` is safe.
@@ -124,6 +124,12 @@ Typical output on a codebase that needs help:
   which routes and files a change reaches downstream. `impact --diff main` answers
   "what does my PR touch?" before review: *your two-line change to `db/pool.ts` is
   reachable from 14 routes.* Deterministic graph reachability, not a heuristic.
+- **Observability coverage** (`node-doctor observability`) — the observability
+  equivalent of test coverage. It scores each route's handler on whether an async
+  failure path is handled, whether failures actually log (a swallowing
+  `catch`/`.catch(() => {})` fails), whether outbound calls are timed, and whether
+  logs carry a correlation id — then reports a per-route and codebase score. Answers
+  "could you debug this route at 3am from the logs alone?", a number nobody measures.
 - **Agent context hygiene** (`node-doctor context`) — a new privacy surface that
   exists only because agents read your repo. It finds the on-disk files an AI agent
   must never load into context — `.env` files, private keys, credential files, DB
@@ -211,6 +217,7 @@ node-doctor ci                                  scaffold a GitHub Actions workfl
 node-doctor conventions [dir]                   write CLAUDE.md/AGENTS.md from your stack
 node-doctor ratchet init|check                  lock current debt; fail only on new findings
 node-doctor surface [--baseline <f>]            map routes + auth posture; diff for breaking changes
+node-doctor observability [dir]                 per-route "could you debug this at 3am?" coverage score
 node-doctor impact <files…> | --diff [base]     blast radius: what routes/files a change reaches
 node-doctor paths [directory]                   source→sink attack paths (exploitability proof)
 node-doctor context [dir] [--write]             find files an AI agent must not read; --write fences them off

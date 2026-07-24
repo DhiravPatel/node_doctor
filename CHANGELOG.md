@@ -11,6 +11,23 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Observability coverage — `node-doctor observability` (§151) + frontier wave F
+
+- **`node-doctor observability`** (alias `observe`) — the observability equivalent of
+  test coverage: "could you debug this route at 3am?". It scores each route's handler
+  on four checks — does an async path have error handling, does a failure path emit a
+  log (a swallowing `catch`/`.catch(() => {})` fails), are outbound calls timed, and
+  do logs carry a correlation/request id — as pass/fail/**na** (a risk a route cannot
+  have never counts against it), and reports a per-route + codebase score. Only
+  `(req, res)`/`ctx`-shaped handlers are scored, so a `cache.get(key, loader)` /
+  `config.get(x, default)` look-alike is never mistaken for a route. Deterministic;
+  cross-file handlers are under-reported rather than guessed at.
+- **`no-wildcard-body-parser`** (Security, §149, opt-in) — a body parser that accepts
+  ANY content-type (`express.json({ type: "*/*" })` or `type: () => true`), so a
+  form/text/binary body is parsed as JSON and a client can mislabel a body to bypass
+  content-type-based validation. Silent on scoped media types, real type predicates,
+  and the `res.json` response serializer.
+
 ### Diagnostics — frontier wave E (§141/§156/§154)
 
 A correctness + supply-chain wave. The two new opt-in diagnostics were hardened
@@ -101,7 +118,7 @@ provider-key / PEM patterns — never an entropy heuristic. The generated fences
 verified to actually cover what they flag (scan → write → re-scan reports zero
 exposed).
 
-### Diagnostics (62 → 128)
+### Diagnostics (62 → 129)
 
 Frontier wave B (FEATURE.md §147/§148) — two opt-in, precision-first rules
 (`defaultEnabled: false`, so they never affect the default health score), each

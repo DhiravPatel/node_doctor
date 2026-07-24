@@ -1,0 +1,10 @@
+import { lintSource } from "../src/core/scan.ts";
+import { noWildcardBodyParser as W } from "../src/diagnostics/http/no-wildcard-body-parser.ts";
+const caps=new Set(["node","esm","typescript","express"]);
+const nw=(s)=>lintSource({filePath:"a.ts",sourceText:s,diagnostics:[W],capabilities:caps}).findings.length;
+let fail=0;const w=(l,g,e)=>{const ok=g===e;if(!ok)fail++;console.log(`${ok?"✓":"✗"} [${g}/${e}] ${l}`)};
+w("§149 express.response.json FP-fixed", nw(`import express from "express"; express.response.json({ type: "*/*" });`),0);
+w("§149 express.request.json FP-fixed", nw(`express.request.json({ type: "*/*" });`),0);
+w("§149 express.json TP", nw(`app.use(express.json({ type: "*/*" }));`),1);
+w("§149 bodyParser.raw TP", nw(`bodyParser.raw({ type: () => true });`),1);
+console.log(fail?`${fail} FAILED`:"§149 ok");

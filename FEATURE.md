@@ -1358,7 +1358,9 @@ Identity comparisons on un-normalized strings: two different byte sequences rend
 **Shipped, narrow-by-design (opt-in):** `no-unnormalized-identity-comparison` (Security/warn/high) fires on an equality comparison where one operand is identity-named (username/email/login/handle/slug/tenant/…), one shows canonicalization intent (`.toLowerCase()`/`.toLocaleLowerCase()`/`.trim()`), and neither calls `.normalize()`. The demonstrated-intent-plus-omission shape is what makes the omission a real bug rather than an incidental compare. Both operands must be DYNAMIC — a comparison to a constant (`slug.toLowerCase() === "admin"`, `=== Roles.ADMIN`, `=== ""`) is a reserved-name/emptiness check a homoglyph can't collide with, so it stays silent. The `toLocaleLowerCase` Turkish-ı and code-unit-length sub-cases are deliberately not attempted (too noisy).
 
 ## 149. Content-Type & Encoding Confusion ★
-**Status: Planned** · ⚙️ Now
+**Status: Detected** (`no-wildcard-body-parser`, opt-in) · ⚙️ Now
+
+**Shipped (opt-in), the precise high-confidence slice:** `no-wildcard-body-parser` (Security/warn/high) flags a body parser configured to parse EVERY request regardless of Content-Type — `express.json({ type: "*/*" })`, `bodyParser.urlencoded({ type: "*/*" })`, `express.raw/text({ type: "*/*" })`, or `type: () => true`. That defeats content-type negotiation (a form/text/binary body is JSON-parsed, and a client can mislabel a body to slip past content-type-based validation/WAF rules). Fires only on a POSITIVELY-universal `type` (the literal `*/*`, or a function whose body is exactly `return true`), and only on the immediate `express.`/`bodyParser.` receiver (so the `express.response.json` serializer, a scoped subtype like `application/*`, a real type-predicate function, and a non-body-parser `.json` all stay silent). The other §149 sub-cases (parser selection driven by the client Content-Type, charset mismatch, upload-extension-over-magic-bytes) remain Planned.
 
 Parser confusion at the request boundary: trusting a client-declared `Content-Type` to select a parser, accepting `application/json` bodies on endpoints that assume form encoding (or vice versa), charset mismatches that defeat downstream sanitization, and uploads whose extension is trusted over their magic bytes.
 
@@ -1374,7 +1376,9 @@ Parser confusion at the request boundary: trusting a client-declared `Content-Ty
 # Part XXXVI — Observability & Debuggability
 
 ## 151. Observability Coverage Score ★ Differentiator
-**Status: Planned** · ⚙️ Now
+**Status: Core** (`node-doctor observability`) · ⚙️ Now
+
+**Shipped as a command** (`observability`, alias `observe`): the observability equivalent of test coverage — "could you debug this route at 3am from the logs alone?". For each route's registered handler it answers four pass/fail/**na** questions: (1) error-handling — does an async path that can reject have a try/catch, an async-error wrapper, or a `.catch`; (2) logs-on-failure — does an error path actually emit something (a log, `next(err)`, `captureException`), so a swallowing `catch`/`.catch(() => {})` FAILS; (3) timed-external-calls — do outbound `fetch`/`axios`/`got` calls carry a timeout/signal; (4) correlation-id — do logs carry a request/correlation id. "na" (a risk the handler cannot have — e.g. a sync route, no outbound call) never counts against the score. It reports a per-route score (passed/applicable) and a codebase mean, worst routes first, plus a per-check pass-rate. Precision: only `(req,res)`/`(request,reply)`/`ctx`-shaped handlers are scored, so a `cache.get(key, loader)` / `config.get(x, default)` look-alike is never mistaken for a route; cross-file handlers are under-reported rather than guessed; deterministic and offline.
 
 §21 asks "are there logs?"; this asks **"could you actually debug this route at 3am?"** Score each route on whether its failure paths emit anything, whether errors carry a correlation ID, whether external calls are timed, and whether the catch blocks that swallow errors do so silently. Report per-route coverage and a codebase-level score — the observability equivalent of test coverage, which does not currently exist.
 

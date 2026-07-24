@@ -24,10 +24,11 @@ export type Command =
   | "impact"
   | "paths"
   | "context"
+  | "observability"
   | "version";
 
-// "rules" is accepted as a legacy alias for "diagnostics".
-const COMMAND_ALIASES: Record<string, Command> = { rules: "diagnostics" };
+// "rules" is accepted as a legacy alias for "diagnostics"; "observe" for "observability".
+const COMMAND_ALIASES: Record<string, Command> = { rules: "diagnostics", observe: "observability" };
 
 const COMMANDS = new Set<string>([
   "scan",
@@ -49,6 +50,8 @@ const COMMANDS = new Set<string>([
   "impact",
   "paths",
   "context",
+  "observability",
+  "observe",
   "version",
   "rules",
 ]);

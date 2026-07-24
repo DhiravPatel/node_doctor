@@ -99,6 +99,9 @@ export { ALL_TEXT_DIAGNOSTICS } from "./diagnostics/text-diagnostics.ts";
 // §120 — blast-radius / change-impact over the import graph.
 export { buildImpactGraph, computeImpact } from "./core/impact.ts";
 export type { ImpactReport, Dependent } from "./core/impact.ts";
+// §151 — Observability Coverage Score: per-route "could you debug this at 3am?".
+export { buildObservabilityReport } from "./core/observability.ts";
+export type { ObservabilityReport, RouteObservability } from "./core/observability.ts";
 // §158 — agent context hygiene: detect secrets/keys an AI agent can read and
 // generate the ignore artifacts (.aiignore/.cursorignore/Claude deny) to fence them off.
 export { scanAgentContext, applyContextHygiene, buildIgnoreEntries } from "./core/agent-context.ts";

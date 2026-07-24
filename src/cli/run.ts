@@ -24,7 +24,7 @@ import { installGitHook } from "../install/git-hook.ts";
 import { scanProject } from "../core/scan.ts";
 import type { ScanReport } from "../core/scan.ts";
 import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
-import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene } from "../report/terminal.ts";
+import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability } from "../report/terminal.ts";
 import { scanAgentContext, applyContextHygiene } from "../core/agent-context.ts";
 import { isWorkspaceRoot, scanWorkspaces, workspaceFindings, discoverWorkspaces } from "../core/workspaces.ts";
 import { toJson, toJsonError } from "../report/json.ts";
@@ -50,6 +50,7 @@ import { RATCHET_FILENAME, buildRatchet, compareToRatchet, readRatchet, writeRat
 import { extractRoutes, buildApiSurface, diffApiSurface, type RouteEntry } from "../core/api-surface.ts";
 import { buildSbom } from "../core/sbom.ts";
 import { buildModernizationReport } from "../core/modernization.ts";
+import { buildObservabilityReport } from "../core/observability.ts";
 import { buildImpactGraph, computeImpact } from "../core/impact.ts";
 import { collectAttackPaths } from "../core/attack-paths.ts";
 import { loadCodeowners, groupByOwner, scorePrRisk } from "../core/ownership.ts";
@@ -291,6 +292,7 @@ Usage:
   node-doctor surface --baseline <f>     Diff the API surface; fail on breaking changes
   node-doctor sbom [--framework spdx]    Emit a CycloneDX (or SPDX) SBOM
   node-doctor modernize [dir]            Score how far the code is from current practice
+  node-doctor observability [dir]        Score per-route observability ("could you debug this at 3am?")
   node-doctor context [dir] [--write]    Find files an AI agent must not read; --write fences them off
   node-doctor deslop [directory]         Dead-code scan (unused files/exports/deps)
   node-doctor explain <diagnostic-id>          Explain a diagnostic and its fix
@@ -1348,6 +1350,29 @@ const runModernize = async (args: ParsedArgs): Promise<number> => {
   return 0;
 };
 
+/**
+ * §151 — the Observability Coverage Score: the observability equivalent of test
+ * coverage, computed per route ("could you debug this at 3am?"). Informational,
+ * like `modernize`/`impact` — it never gates a build.
+ */
+const runObservability = async (args: ParsedArgs): Promise<number> => {
+  const { dir, config } = await resolveScanTarget(args);
+  const report = await buildObservabilityReport(dir, { config });
+
+  if (args.jsonOut) {
+    await writeFile(
+      resolve(args.jsonOut),
+      (args.jsonCompact ? JSON.stringify(report) : JSON.stringify(report, null, 2)) + "\n",
+    );
+  }
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(report) : JSON.stringify(report, null, 2)) + "\n");
+    return 0;
+  }
+  process.stdout.write(renderObservability(report, { color: useColor(args) }));
+  return 0;
+};
+
 const runFix = async (args: ParsedArgs, version: string): Promise<number> => {
   const dir = resolve(args.positionals[0] ?? ".");
   const only = await resolveOnly(args, dir);
@@ -1431,6 +1456,8 @@ export const main = async (argv: string[]): Promise<number> => {
         return await runInit(args);
       case "modernize":
         return await runModernize(args);
+      case "observability":
+        return await runObservability(args);
       case "lsp":
         await startLanguageServer();
         return 0;
