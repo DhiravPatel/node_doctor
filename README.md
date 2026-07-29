@@ -29,7 +29,7 @@ Express handler with no error path, a `readFileSync` on the request path, an N+1
 across a loop, a `Promise.all` that opens a socket per row, injection and
 secret-handling sinks.
 
-It runs **129 diagnostics** — including a whole-tree scan for **committed secrets**
+It runs **130 diagnostics** — including a whole-tree scan for **committed secrets**
 in `.env`, config, CI, and key files — produces a transparent **0–100 health
 score** entirely on your machine (no network, no telemetry), and can push the
 same knowledge **upstream into your coding agent** as an installable skill and an
@@ -72,7 +72,7 @@ Typical output on a codebase that needs help:
 
 ## Features
 
-- **129 diagnostics** across Security, Reliability, Bugs, Performance, and
+- **130 diagnostics** across Security, Reliability, Bugs, Performance, and
   Maintainability — each with a valid + invalid test; FP-prone ones are opt-in.
 - **Whole-tree secret scan** — committed credentials in `.env`, YAML/CI configs,
   and `*.pem`/`*.key` files, gated to git-tracked files so a local `.env` is safe.
@@ -124,6 +124,29 @@ Typical output on a codebase that needs help:
   which routes and files a change reaches downstream. `impact --diff main` answers
   "what does my PR touch?" before review: *your two-line change to `db/pool.ts` is
   reachable from 14 routes.* Deterministic graph reachability, not a heuristic.
+- **Data access map** (`node-doctor data-map`) — the matrix of which routes touch
+  which database entities, and how (read/write/delete). It walks the call graph
+  forward from each route handler (cross-file), recognizes Prisma/TypeORM/Knex and
+  raw SQL — including `` $queryRaw`…` `` tagged templates and interpolated query
+  strings — and inverts the index so you can also ask *which endpoints write
+  `payments`?*. Conservative: an entity is emitted only when it can be proven from
+  source; a dynamic table is counted as unresolved, never guessed. Deterministic.
+- **Schema drift & dead data** (`node-doctor schema-drift`) — the Prisma schema
+  crossed against every statically-visible model access, in both directions: code
+  referencing a field the schema does not define (a runtime validation error found
+  at build time, with a did-you-mean suggestion) and schema models nothing touches
+  (migration debt and compliance surface). Operators, relation traversals, and
+  compound unique keys are understood; a spread silences the object; dead-model
+  claims are made only when no dynamic access or unresolved raw SQL could hide a
+  use. Exits 1 on drift.
+- **Queue & topic topology** (`node-doctor queues`) — the event-driven equivalent
+  of the import graph: who publishes to each Kafka topic / Rabbit queue / BullMQ
+  queue / NATS subject, who consumes it, and what falls out — orphan topics
+  (published, never consumed) and dead consumers (subscribed, nothing publishes).
+  Every receiver is traced to a client binding constructed from the library's own
+  entry point (an EventEmitter's `.publish` never counts), topics come only from
+  static strings, a dynamic topic suppresses exactly the claims it could hide, and
+  a same-file re-enqueue loop is shown as info, never judged.
 - **Observability coverage** (`node-doctor observability`) — the observability
   equivalent of test coverage. It scores each route's handler on whether an async
   failure path is handled, whether failures actually log (a swallowing
@@ -219,6 +242,9 @@ node-doctor ratchet init|check                  lock current debt; fail only on 
 node-doctor surface [--baseline <f>]            map routes + auth posture; diff for breaking changes
 node-doctor observability [dir]                 per-route "could you debug this at 3am?" coverage score
 node-doctor impact <files…> | --diff [base]     blast radius: what routes/files a change reaches
+node-doctor data-map [directory]                which routes touch which DB entities, and how (read/write/delete)
+node-doctor schema-drift [directory]            Prisma schema vs code: unknown-field drift + dead models
+node-doctor queues [directory]                  queue/topic topology: publishers, consumers, orphans
 node-doctor paths [directory]                   source→sink attack paths (exploitability proof)
 node-doctor context [dir] [--write]             find files an AI agent must not read; --write fences them off
 node-doctor sbom [--framework spdx]             CycloneDX / SPDX bill of materials

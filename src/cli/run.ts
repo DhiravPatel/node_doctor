@@ -24,7 +24,7 @@ import { installGitHook } from "../install/git-hook.ts";
 import { scanProject } from "../core/scan.ts";
 import type { ScanReport } from "../core/scan.ts";
 import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
-import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability } from "../report/terminal.ts";
+import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology } from "../report/terminal.ts";
 import { scanAgentContext, applyContextHygiene } from "../core/agent-context.ts";
 import { isWorkspaceRoot, scanWorkspaces, workspaceFindings, discoverWorkspaces } from "../core/workspaces.ts";
 import { toJson, toJsonError } from "../report/json.ts";
@@ -51,6 +51,9 @@ import { extractRoutes, buildApiSurface, diffApiSurface, type RouteEntry } from 
 import { buildSbom } from "../core/sbom.ts";
 import { buildModernizationReport } from "../core/modernization.ts";
 import { buildObservabilityReport } from "../core/observability.ts";
+import { buildDataAccessMap } from "../core/data-map.ts";
+import { buildSchemaDriftReport } from "../core/schema-drift.ts";
+import { buildQueueTopology } from "../core/queue-topology.ts";
 import { buildImpactGraph, computeImpact } from "../core/impact.ts";
 import { collectAttackPaths } from "../core/attack-paths.ts";
 import { loadCodeowners, groupByOwner, scorePrRisk } from "../core/ownership.ts";
@@ -293,6 +296,8 @@ Usage:
   node-doctor sbom [--framework spdx]    Emit a CycloneDX (or SPDX) SBOM
   node-doctor modernize [dir]            Score how far the code is from current practice
   node-doctor observability [dir]        Score per-route observability ("could you debug this at 3am?")
+  node-doctor data-map [dir]             Map which routes touch which DB entities, and how (read/write/delete)
+  node-doctor schema-drift [dir]         Prisma schema vs code: unknown-field drift + dead models\n  node-doctor queues [dir]               Queue/topic topology: publishers, consumers, orphans, dead consumers
   node-doctor context [dir] [--write]    Find files an AI agent must not read; --write fences them off
   node-doctor deslop [directory]         Dead-code scan (unused files/exports/deps)
   node-doctor explain <diagnostic-id>          Explain a diagnostic and its fix
@@ -1373,6 +1378,67 @@ const runObservability = async (args: ParsedArgs): Promise<number> => {
   return 0;
 };
 
+/**
+ * §143 — the Data Access Map & Route → Entity Lineage: the matrix of which routes
+ * touch which database entities (tables/models) and how (read/write/delete),
+ * derived from the call graph + ORM detection. Informational — it never gates a
+ * build.
+ */
+const runDataMap = async (args: ParsedArgs): Promise<number> => {
+  const { dir, config } = await resolveScanTarget(args);
+  const map = await buildDataAccessMap(dir, { config });
+
+  if (args.jsonOut) {
+    await writeFile(
+      resolve(args.jsonOut),
+      (args.jsonCompact ? JSON.stringify(map) : JSON.stringify(map, null, 2)) + "\n",
+    );
+  }
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(map) : JSON.stringify(map, null, 2)) + "\n");
+    return 0;
+  }
+  process.stdout.write(renderDataMap(map, { color: useColor(args) }));
+  return 0;
+};
+
+const runSchemaDrift = async (args: ParsedArgs): Promise<number> => {
+  const { dir, config } = await resolveScanTarget(args);
+  const report = await buildSchemaDriftReport(dir, { config });
+
+  if (args.jsonOut) {
+    await writeFile(
+      resolve(args.jsonOut),
+      (args.jsonCompact ? JSON.stringify(report) : JSON.stringify(report, null, 2)) + "\n",
+    );
+  }
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(report) : JSON.stringify(report, null, 2)) + "\n");
+    return report.drift.length > 0 ? 1 : 0;
+  }
+  process.stdout.write(renderSchemaDrift(report, { color: useColor(args) }));
+  // Drift is a latent runtime error — surface it in the exit code; dead models are advisory.
+  return report.drift.length > 0 ? 1 : 0;
+};
+
+const runQueues = async (args: ParsedArgs): Promise<number> => {
+  const { dir, config } = await resolveScanTarget(args);
+  const report = await buildQueueTopology(dir, { config });
+
+  if (args.jsonOut) {
+    await writeFile(
+      resolve(args.jsonOut),
+      (args.jsonCompact ? JSON.stringify(report) : JSON.stringify(report, null, 2)) + "\n",
+    );
+  }
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(report) : JSON.stringify(report, null, 2)) + "\n");
+    return 0;
+  }
+  process.stdout.write(renderQueueTopology(report, { color: useColor(args) }));
+  return 0;
+};
+
 const runFix = async (args: ParsedArgs, version: string): Promise<number> => {
   const dir = resolve(args.positionals[0] ?? ".");
   const only = await resolveOnly(args, dir);
@@ -1458,6 +1524,12 @@ export const main = async (argv: string[]): Promise<number> => {
         return await runModernize(args);
       case "observability":
         return await runObservability(args);
+      case "schema-drift":
+        return await runSchemaDrift(args);
+      case "queues":
+        return await runQueues(args);
+      case "data-map":
+        return await runDataMap(args);
       case "lsp":
         await startLanguageServer();
         return 0;

@@ -25,10 +25,21 @@ export type Command =
   | "paths"
   | "context"
   | "observability"
+  | "data-map"
+  | "schema-drift"
+  | "queues"
   | "version";
 
-// "rules" is accepted as a legacy alias for "diagnostics"; "observe" for "observability".
-const COMMAND_ALIASES: Record<string, Command> = { rules: "diagnostics", observe: "observability" };
+// "rules" is accepted as a legacy alias for "diagnostics"; "observe" for
+// "observability"; "lineage" for "data-map"; "dead-schema" for "schema-drift".
+const COMMAND_ALIASES: Record<string, Command> = {
+  rules: "diagnostics",
+  observe: "observability",
+  lineage: "data-map",
+  "dead-schema": "schema-drift",
+  topics: "queues",
+  topology: "queues",
+};
 
 const COMMANDS = new Set<string>([
   "scan",
@@ -52,6 +63,13 @@ const COMMANDS = new Set<string>([
   "context",
   "observability",
   "observe",
+  "data-map",
+  "lineage",
+  "schema-drift",
+  "dead-schema",
+  "queues",
+  "topics",
+  "topology",
   "version",
   "rules",
 ]);

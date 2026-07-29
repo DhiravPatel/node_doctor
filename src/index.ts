@@ -102,6 +102,20 @@ export type { ImpactReport, Dependent } from "./core/impact.ts";
 // §151 — Observability Coverage Score: per-route "could you debug this at 3am?".
 export { buildObservabilityReport } from "./core/observability.ts";
 export type { ObservabilityReport, RouteObservability } from "./core/observability.ts";
+// §143 — Data Access Map & Route → Entity Lineage: which routes touch which DB
+// entities (tables/models) and how (read/write/delete), from the call graph.
+export { buildDataAccessMap, queryTarget } from "./core/data-map.ts";
+export type { DataAccessMap, RouteAccess, EntityAccess, DataOp } from "./core/data-map.ts";
+// §142 — Dead Schema & Schema Drift: the Prisma schema crossed against every
+// statically-visible model access — unknown-field drift + provably-dead models.
+export { buildSchemaDriftReport } from "./core/schema-drift.ts";
+export type { SchemaDriftReport, DriftFinding, DeadModelEntry } from "./core/schema-drift.ts";
+export { parsePrismaSchema } from "./core/prisma-schema.ts";
+export type { PrismaSchema, PrismaModel, PrismaField, PrismaEnum } from "./core/prisma-schema.ts";
+// §157 — Queue & Topic Topology: who publishes to each topic/queue, who consumes
+// it, orphan topics, dead consumers — the event-driven import graph.
+export { buildQueueTopology } from "./core/queue-topology.ts";
+export type { QueueTopologyReport, TopicEntry, TopologySite, QueueSystem } from "./core/queue-topology.ts";
 // §158 — agent context hygiene: detect secrets/keys an AI agent can read and
 // generate the ignore artifacts (.aiignore/.cursorignore/Claude deny) to fence them off.
 export { scanAgentContext, applyContextHygiene, buildIgnoreEntries } from "./core/agent-context.ts";

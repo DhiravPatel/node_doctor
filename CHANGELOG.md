@@ -11,6 +11,83 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Queue & topic topology — `node-doctor queues` (§157)
+
+- **`node-doctor queues`** (aliases `topics`/`topology`) — the event-driven import
+  graph: who publishes to each topic/queue and who consumes it, across kafkajs,
+  amqplib, BullMQ/bull, NATS, MQTT, and Redis pub/sub. Reports **orphan topics**
+  (published, never consumed — messages into the void) and **dead consumers**
+  (subscribed, nothing publishes — dead code that looks alive). Precision: every
+  fact receiver is traced to a client binding constructed from the library's own
+  entry point — `new Kafka(…)` → `.producer()`, `amqp.connect(…)` →
+  `.createChannel()`, nats/mqtt `connect(…)`, `new Redis()`/`.duplicate()` — so an
+  EventEmitter's `.publish`, an RxJS `.subscribe`, or a broker-named object yields
+  nothing regardless of imports; topics come only from static strings, bull's ambiguous single
+  `Queue` claims nothing until a same-file `.add`/`.process` classifies it, and a
+  dynamic topic suppresses exactly the claims it could hide while the map still
+  renders. A same-file consume+publish loop is info, never judged.
+
+### Schema drift & dead data — `node-doctor schema-drift` (§142)
+
+- **`node-doctor schema-drift`** (alias `dead-schema`) — the Prisma schema crossed
+  against every statically-visible model access, both directions. **Drift**: a
+  `where`/`select`/`data`/`orderBy`/aggregate key naming a field the schema does
+  not define — the runtime `PrismaClientValidationError` found at build time, with
+  a did-you-mean suggestion (exit 1). **Dead models**: schema models no code path
+  touches. A dependency-free `.prisma` parser (models, `@@map`/`@map`, relations,
+  compound `@@unique` aliases, enums, multi-file schemas); operators, relation
+  traversals (validated against the related model), and compound where-unique keys
+  are understood; any spread/computed key silences its object; dead-model claims
+  require a full proof — no dynamic `client[expr]` access and no unresolved raw
+  SQL anywhere, with resolved raw-SQL tables crediting their models via `@@map`.
+
+### Diagnostics — timeout budget consistency (§136)
+
+- **`no-inverted-timeout-budget`** (Reliability, §136, opt-in) — an outer timeout
+  budget B (the `p-timeout` package — proven **by binding**, not by name — or a
+  `Promise.race` against a provably-rejecting timer) governing an operation whose
+  outbound call keeps trying for T > B: the caller gives up at B while the HTTP
+  request runs to T — orphaned work and a held socket, the connection leak that
+  only shows under load. Hardened against an adversarial hunt: a same-file
+  `withTimeout(fn, retries)` retry helper, a lock wrapper taking seconds, a
+  resolve-only sleep, a `.timeout(n)` query method, a conditionally-rejecting
+  guard, a `timeout` field in a POST **body**, and a shadowed local `fetch`/`got`
+  are all silent — every client is verified by its import, and hops follow only
+  module-level `const`/`function` bindings. Both numbers must be statically
+  provable; the correct inner-≤-outer direction is never flagged. A second
+  adversarial round hardened the proofs further: a name declared more than once in
+  the file (a block-scoped shim shadowing the import, a shadowing param) is
+  ambiguous and never proven; only IMMUTABLE bindings (ESM import /
+  `const … = require`) prove a package — a reassignable `let`/`var` never does; a
+  race-timer helper must RETURN its rejecting timer (not merely contain one),
+  must not reassign its delay param, must reject unconditionally (no
+  `if (CHAOS)` guards inside the callback), and must not `clearTimeout` itself;
+  and a constructed-but-not-invoked closure (a factory-returned thunk, a lazy
+  stream `.map`, a thenable lookalike's `.then`) never counts — array callbacks
+  are followed only in the provable `Promise.all(ids.map(cb))` combinator shape.
+
+### Data access map — `node-doctor data-map` (§143)
+
+- **`node-doctor data-map`** (alias `lineage`) — the matrix of which routes touch which
+  database entities, and how (read/write/delete). It walks the project call graph
+  forward from each route handler (cross-file, depth-bounded), classifies every query
+  call it reaches with a single pure `queryTarget`, and unions the `(entity, op)` pairs;
+  inverting the index answers "which endpoints write `payments`?". Recognizes Prisma
+  model calls, TypeORM `getRepository`, ORM `Model.method()`, Knex builder chains, and
+  raw SQL — `db.query(...)`, `prisma.$queryRawUnsafe(...)`, and Prisma's typed
+  tagged-template `` $queryRaw`…` `` / `` $executeRaw`…` ``. Raw-SQL **template
+  literals** with interpolations are read from their static parts
+  (`` `SELECT * FROM users WHERE id = ${x}` `` → `users:read`), while an interpolated
+  **table position** (`` FROM ${t} ``), a bare `` sql`…` `` tag, and any
+  dynamically-built SQL stay deliberately unresolved (counted, never guessed). The
+  SQL reader strips comments, string literals, and row-locking clauses
+  (`FOR UPDATE OF …` / `SKIP LOCKED` / `NOWAIT` / `FOR SHARE`) before parsing and
+  resolves quoted/schema-qualified identifiers (`"public"."Users"` → `Users`), so a
+  keyword hidden in a comment/value or a locking clause never invents a phantom
+  table; the Knex/ORM side is gated on a db-hint chain root and a known query method,
+  so `Buffer.from(…)` / `Array.from(…)` / `Object.create(…)` are never read as tables.
+  Deterministic and offline; entities sorted, ops in fixed `read < write < delete` order.
+
 ### Observability coverage — `node-doctor observability` (§151) + frontier wave F
 
 - **`node-doctor observability`** (alias `observe`) — the observability equivalent of
@@ -118,7 +195,7 @@ provider-key / PEM patterns — never an entropy heuristic. The generated fences
 verified to actually cover what they flag (scan → write → re-scan reports zero
 exposed).
 
-### Diagnostics (62 → 129)
+### Diagnostics (62 → 130)
 
 Frontier wave B (FEATURE.md §147/§148) — two opt-in, precision-first rules
 (`defaultEnabled: false`, so they never affect the default health score), each

@@ -446,3 +446,207 @@ export const renderObservability = (
   lines.push("");
   return lines.join("\n");
 };
+
+/**
+ * §143 — the Data Access Map: which routes touch which database entities, and how
+ * (read / write / delete). Two views: per-route lineage (a route then the entities
+ * its call graph reaches, each tagged r/w/d with the source location), and the
+ * inverse entity index (an entity then the routes that touch it — the "which routes
+ * write payments?" answer). Closes with a one-line summary; an empty project gets
+ * a single clear message.
+ */
+const OP_MARK: Record<string, string> = { read: "r", write: "w", delete: "d" };
+/** Render an op list as fixed-width `rwd` markers with absent ops dimmed. */
+const opMarkers = (ops: readonly string[], p: Palette): string => {
+  const has = new Set(ops);
+  return (["read", "write", "delete"] as const)
+    .map((op) => {
+      const ch = OP_MARK[op]!;
+      return has.has(op) ? (op === "delete" ? p.red(ch) : op === "write" ? p.yellow(ch) : p.green(ch)) : p.dim("·");
+    })
+    .join("");
+};
+
+export const renderQueueTopology = (
+  report: import("../core/queue-topology.ts").QueueTopologyReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  if (report.topics.length === 0 && report.unresolvedPublishes === 0 && report.unresolvedSubscribes === 0) {
+    lines.push(p.dim("  No queue/topic usage found — nothing to map."));
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  lines.push(
+    `  ${p.bold("Queue & topic topology")}  ${p.dim(
+      `${report.summary.topics} topic(s) · ${report.summary.publishers} publisher site(s) · ${report.summary.consumers} consumer site(s)`,
+    )}`,
+  );
+  lines.push("");
+
+  for (const t of report.topics) {
+    const badge =
+      report.orphanTopics.includes(t.name) && t.publishers.length > 0
+        ? `  ${p.red("⚠ no consumer")}`
+        : report.deadConsumers.includes(t.name)
+          ? `  ${p.yellow("⚠ no publisher")}`
+          : report.loops.includes(t.name)
+            ? `  ${p.dim("↻ same-file loop")}`
+            : "";
+    lines.push(`  ${p.bold(t.name)}  ${p.dim(`[${t.system}]`)}${badge}`);
+    for (const s of t.publishers) {
+      lines.push(`      ${p.dim("→ publish")}  ${p.cyan(`${s.normalizedFilePath}:${s.line}`)}`);
+    }
+    for (const s of t.consumers) {
+      lines.push(`      ${p.dim("← consume")}  ${p.cyan(`${s.normalizedFilePath}:${s.line}`)}`);
+    }
+  }
+  lines.push("");
+
+  if (report.orphanTopics.length > 0) {
+    lines.push(`  ${p.red("✖")} ${report.orphanTopics.length} orphan topic(s) — published, never consumed (messages into the void).`);
+  }
+  if (report.deadConsumers.length > 0) {
+    lines.push(`  ${p.yellow("●")} ${report.deadConsumers.length} dead consumer topic(s) — subscribed, nothing publishes.`);
+  }
+  if (report.claimQuality.orphanTopics !== "full") {
+    lines.push(p.dim(`  Orphan-topic claims suppressed: ${report.unresolvedSubscribes} dynamic subscribe(s) could consume anything.`));
+  }
+  if (report.claimQuality.deadConsumers !== "full") {
+    lines.push(p.dim(`  Dead-consumer claims suppressed: ${report.unresolvedPublishes} dynamic publish(es) could feed anything.`));
+  }
+  lines.push("");
+  return lines.join("\n");
+};
+
+export const renderSchemaDrift = (
+  report: import("../core/schema-drift.ts").SchemaDriftReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  if (!report.schemaPresent) {
+    lines.push(p.dim("  No .prisma schema found — nothing to cross-check."));
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  lines.push(
+    `  ${p.bold("Schema ↔ code cross-check")}  ${p.dim(
+      `${report.models} model(s), ${report.enums} enum(s) · ${report.summary.filesScanned} file(s) scanned`,
+    )}`,
+  );
+  lines.push("");
+
+  // Drift: code → fields the schema does not have. The actionable half.
+  if (report.drift.length === 0) {
+    lines.push(`  ${p.green("✓")} No schema drift — every referenced field exists.`);
+  } else {
+    lines.push(`  ${p.bold("Schema drift")}  ${p.dim("(code references a field the schema does not define)")}`);
+    for (const d of report.drift) {
+      const hint = d.suggestion ? `  ${p.dim(`— did you mean \`${d.suggestion}\`?`)}` : "";
+      lines.push(
+        `  ${p.red("✖")} ${p.bold(`${d.model}.${d.key}`)} ${p.dim(`in ${d.section}`)}  ${p.cyan(
+          `${d.normalizedFilePath}:${d.line}:${d.column}`,
+        )}${hint}`,
+      );
+    }
+  }
+  lines.push("");
+
+  // Dead models — only when provable.
+  if (report.deadModelDetection !== "full") {
+    lines.push(
+      p.dim(
+        report.deadModelDetection === "skipped-dynamic-access"
+          ? "  Dead-model detection skipped: dynamic model access (client[expr]) present."
+          : "  Dead-model detection skipped: unresolved raw SQL present.",
+      ),
+    );
+  } else if (report.deadModels.length === 0) {
+    lines.push(`  ${p.green("✓")} Every model is referenced by code.`);
+  } else {
+    lines.push(`  ${p.bold("Dead models")}  ${p.dim("(no code path touches them)")}`);
+    for (const d of report.deadModels) {
+      const table = d.tableName === d.model ? "" : p.dim(` (table ${d.tableName})`);
+      lines.push(`  ${p.yellow("●")} ${p.bold(d.model)}${table}  ${p.dim(`${d.fieldCount} column(s)`)}`);
+    }
+  }
+  lines.push("");
+
+  lines.push(
+    p.dim(
+      `  ${report.summary.driftFindings} drift finding(s) · ${report.summary.modelsUsed}/${report.models} model(s) used` +
+        (report.deadModelDetection === "full" ? ` · ${report.summary.deadModels} dead` : ""),
+    ),
+  );
+  lines.push("");
+  return lines.join("\n");
+};
+
+export const renderDataMap = (
+  map: import("../core/data-map.ts").DataAccessMap,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  if (map.routes.length === 0) {
+    lines.push(p.dim("  No routes found — nothing to map."));
+    lines.push("");
+    return lines.join("\n");
+  }
+  if (map.entities.length === 0) {
+    lines.push(
+      `  ${p.bold("Data access map")} — ${map.summary.routes} route(s), no resolvable database access.`,
+    );
+    if (map.summary.unresolvedQueries > 0) {
+      lines.push(
+        p.dim(`  (${map.summary.unresolvedQueries} query call(s) recognized but their entity could not be resolved.)`),
+      );
+    }
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  // Per-route lineage.
+  lines.push(`  ${p.bold("Routes → entities")}  ${p.dim("(r read · w write · d delete)")}`);
+  lines.push("");
+  for (const r of map.routes) {
+    lines.push(`  ${p.bold(`${r.method} ${r.path}`)}  ${p.cyan(`${r.normalizedFilePath}:${r.line}`)}`);
+    if (r.entities.length === 0) {
+      lines.push(`      ${p.dim("(no database access)")}`);
+    } else {
+      for (const e of r.entities) {
+        lines.push(`      ${opMarkers(e.ops, p)}  ${e.entity}`);
+      }
+    }
+  }
+  lines.push("");
+
+  // Inverse index: entity → the routes that touch it.
+  lines.push(`  ${p.bold("Entities → routes")}`);
+  lines.push("");
+  for (const e of map.entities) {
+    lines.push(`  ${opMarkers(e.ops, p)}  ${p.bold(e.entity)}  ${p.dim(`(${e.routes.length} route(s))`)}`);
+    for (const rt of e.routes) {
+      lines.push(`      ${p.dim(`${rt.method} ${rt.path}`)}`);
+    }
+  }
+  lines.push("");
+
+  lines.push(
+    p.dim(
+      `  ${map.summary.routes} route(s) · ${map.summary.entities} entit${map.summary.entities === 1 ? "y" : "ies"}` +
+        (map.summary.unresolvedQueries > 0
+          ? ` · ${map.summary.unresolvedQueries} unresolved quer${map.summary.unresolvedQueries === 1 ? "y" : "ies"}`
+          : ""),
+    ),
+  );
+  lines.push("");
+  return lines.join("\n");
+};

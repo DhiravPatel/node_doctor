@@ -86,6 +86,7 @@ import { noCacheWithoutTtl } from "../diagnostics/reliability/no-cache-without-t
 import { noCrossRequestStateMutation } from "../diagnostics/reliability/no-cross-request-state-mutation.ts";
 import { noDroppedAbortSignal } from "../diagnostics/reliability/no-dropped-abort-signal.ts";
 import { noInfiniteRetryWithoutBackoff } from "../diagnostics/reliability/no-infinite-retry-without-backoff.ts";
+import { noInvertedTimeoutBudget } from "../diagnostics/reliability/no-inverted-timeout-budget.ts";
 import { noListenerAddedPerRequest } from "../diagnostics/reliability/no-listener-added-per-request.ts";
 import { noLivenessCheckWithDependency } from "../diagnostics/reliability/no-liveness-check-with-dependency.ts";
 import { noLostAsyncContext } from "../diagnostics/reliability/no-lost-async-context.ts";
@@ -214,6 +215,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noCrossRequestStateMutation,
   noDroppedAbortSignal,
   noInfiniteRetryWithoutBackoff,
+  noInvertedTimeoutBudget,
   noListenerAddedPerRequest,
   noLivenessCheckWithDependency,
   noLostAsyncContext,

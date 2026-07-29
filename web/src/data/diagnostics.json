@@ -1,13 +1,13 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 129,
+  "total": 130,
   "defaultOn": 95,
-  "optIn": 34,
+  "optIn": 35,
   "byCategory": {
     "Performance": 12,
     "Security": 60,
     "Maintainability": 10,
-    "Reliability": 32,
+    "Reliability": 33,
     "Bugs": 15
   },
   "categoryWeights": {
@@ -873,6 +873,21 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Add exponential backoff between attempts (`await sleep(base * 2 ** attempt)`) and a maximum-attempt cap so a downed dependency does not trigger a tight retry storm."
+    },
+    {
+      "id": "no-inverted-timeout-budget",
+      "title": "Inner timeout exceeds the outer budget",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "reliability",
+        "timeout"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Make timeouts decrease down the chain: give the inner call a timeout shorter than the outer budget (leaving headroom for retries/parsing), or derive it from the outer one. When the outer wrapper wins the race, also abort the inner request (pass the same AbortSignal) so the orphaned HTTP call does not keep holding a socket."
     },
     {
       "id": "no-jwt-decode-as-verify",
