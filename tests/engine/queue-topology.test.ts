@@ -201,6 +201,71 @@ describe("buildQueueTopology — import gating", () => {
   });
 });
 
+describe("buildQueueTopology — ambiguity guards (hunt regressions)", () => {
+  test("a local class shadowing the bullmq Queue import yields no facts", async () => {
+    const dir = await makeProject({
+      "src/a.ts": `
+        import { Queue } from "bullmq";
+        function local() {
+          class Queue { constructor(name) {} }
+          new Queue("scratch-fifo");
+        }
+      `,
+    });
+    try {
+      const r = await buildQueueTopology(dir);
+      assert.deepEqual(r.topics, [], "a shadowed constructor name is ambiguous");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("two same-named bindings (one traced, one not) yield no facts", async () => {
+    const dir = await makeProject({
+      "src/a.ts": `
+        import mqtt from "mqtt";
+        function a() {
+          const client = mqtt.connect("mqtt://h");
+          client.subscribe("live-scores");
+        }
+        function b(client) {
+          client.publish("live-scores", "1-0");
+        }
+      `,
+    });
+    try {
+      const r = await buildQueueTopology(dir);
+      assert.deepEqual(r.topics, [], "a client name declared twice is scope-ambiguous");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a one-sided bull queue suppresses the claim its hidden side could refute", async () => {
+    const dir = await makeProject({
+      "src/queue.js": `
+        import Queue from "bull";
+        export const emailQueue = new Queue("email");
+        emailQueue.process(async (job) => {});
+      `,
+      "src/queue2.js": `
+        import Queue from "bull";
+        export const reportQueue = new Queue("reports");
+        export const enqueue = async (p) => { await reportQueue.add(p); };
+      `,
+    });
+    try {
+      const r = await buildQueueTopology(dir);
+      assert.deepEqual(r.deadConsumers, [], "email's .add may live in another file");
+      assert.deepEqual(r.orphanTopics, [], "reports' .process may live in another file");
+      assert.equal(r.unresolvedPublishes, 1);
+      assert.equal(r.unresolvedSubscribes, 1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("buildQueueTopology — claims + degrade gates", () => {
   test("orphans and dead consumers under full proof", async () => {
     const dir = await makeProject({

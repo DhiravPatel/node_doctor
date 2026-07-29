@@ -78,24 +78,72 @@ const fieldMapName = (line: string): string | null => {
 
 /**
  * Compound keys from `@@unique([a, b])` / `@@id([a, b])`, honoring a custom
- * `name: "alias"`. The default where-unique alias is the fields joined by `_`.
+ * `name: "alias"` in ANY argument position (`@@unique(name: "k", fields: […])`
+ * and `@@unique([…], map: "x", name: "k")` both work). Field references may
+ * carry argument lists (`email(sort: Desc, length: 10)`), which are stripped
+ * before the default `a_b` alias is joined.
  */
 const compoundAliases = (body: string): string[] => {
   const aliases: string[] = [];
-  const re = /@@(?:unique|id)\(\s*(?:fields\s*:\s*)?\[([^\]]*)\]\s*(?:,\s*name\s*:\s*"([^"]+)")?/g;
+  const attrRe = /@@(?:unique|id)\s*\(/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(body)) !== null) {
-    if (m[2]) {
-      aliases.push(m[2]);
+  while ((m = attrRe.exec(body)) !== null) {
+    // Walk to the matching close paren, string-aware.
+    let depth = 1;
+    let inString = false;
+    let i = m.index + m[0].length;
+    const start = i;
+    while (i < body.length && depth > 0) {
+      const c = body[i]!;
+      if (c === '"') inString = !inString;
+      else if (!inString && c === "(") depth++;
+      else if (!inString && c === ")") depth--;
+      i++;
+    }
+    const args = body.slice(start, i - 1);
+    const named = /\bname\s*:\s*"([^"]+)"/.exec(args);
+    if (named) {
+      aliases.push(named[1]!);
       continue;
     }
-    const parts = m[1]!
+    const bracket = /\[([^\]]*)\]/.exec(args);
+    if (!bracket) continue;
+    const parts = bracket[1]!
+      .replace(/\([^)]*\)/g, "") // email(sort: Desc) → email
       .split(",")
       .map((p) => p.trim())
       .filter((p) => /^[A-Za-z_]\w*$/.test(p));
     if (parts.length >= 2) aliases.push(parts.join("_"));
   }
   return aliases;
+};
+
+/**
+ * Extract `model`/`enum` blocks with a string-aware brace walk — a `}` inside a
+ * string literal (`@default("{}")`, `dbgenerated("'{}'::jsonb")`) must not close
+ * the block, which a `[^}]*` regex would silently do, truncating the model and
+ * "losing" every field after it.
+ */
+const extractBlocks = (text: string): Array<{ kind: string; name: string; body: string }> => {
+  const blocks: Array<{ kind: string; name: string; body: string }> = [];
+  const headRe = /\b(model|enum)\s+([A-Za-z_]\w*)\s*\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = headRe.exec(text)) !== null) {
+    let depth = 1;
+    let inString = false;
+    let i = m.index + m[0].length;
+    const start = i;
+    while (i < text.length && depth > 0) {
+      const c = text[i]!;
+      if (c === '"') inString = !inString;
+      else if (!inString && c === "{") depth++;
+      else if (!inString && c === "}") depth--;
+      i++;
+    }
+    blocks.push({ kind: m[1]!, name: m[2]!, body: text.slice(start, i - 1) });
+    headRe.lastIndex = i;
+  }
+  return blocks;
 };
 
 /**
@@ -108,12 +156,10 @@ export const parsePrismaSchema = (sources: string[]): PrismaSchema => {
 
   for (const raw of sources) {
     const text = stripSchemaComments(raw);
-    const blockRe = /\b(model|enum)\s+([A-Za-z_]\w*)\s*\{([^}]*)\}/g;
-    let m: RegExpExecArray | null;
-    while ((m = blockRe.exec(text)) !== null) {
-      const kind = m[1]!;
-      const name = m[2]!;
-      const body = m[3]!;
+    for (const block of extractBlocks(text)) {
+      const kind = block.kind;
+      const name = block.name;
+      const body = block.body;
       if (kind === "enum") {
         const values = body
           .split("\n")

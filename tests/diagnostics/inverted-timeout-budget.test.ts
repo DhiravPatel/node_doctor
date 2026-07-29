@@ -394,6 +394,35 @@ describe("no-inverted-timeout-budget — round-2 hunt regressions (ambiguity bea
   });
 });
 
+describe("no-inverted-timeout-budget — round-3 hunt regressions (shadowed globals + ambiguous hops)", () => {
+  test("a hop target whose name is declared twice is never followed", () => {
+    silent(PT + `
+      const doWork = () => fetch(u, { signal: AbortSignal.timeout(30_000) });
+      function shadowed() {
+        const doWork = () => cachedLookup();
+        return pTimeout(doWork(), 2_000);
+      }
+    `);
+  });
+
+  test("a file-local setTimeout shim breaks the delay-is-ms premise", () => {
+    silent(`
+      const setTimeout = (cb, seconds) => globalThis.setTimeout(cb, seconds * 1000);
+      await Promise.race([
+        fetch(u, { signal: AbortSignal.timeout(10_000) }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("t")), 30)),
+      ]);
+    `);
+  });
+
+  test("a file-local AbortSignal shim is not the global", () => {
+    silent(PT + `
+      const AbortSignal = { timeout: (secs) => realAbortAfterSeconds(secs) };
+      await pTimeout(fetch(u, { signal: AbortSignal.timeout(30_000) }), 2_000);
+    `);
+  });
+});
+
 describe("no-inverted-timeout-budget — determinism", () => {
   test("same input, same findings", () => {
     const src = PT + `await pTimeout(fetch(url, { signal: AbortSignal.timeout(10_000) }), 2_000);`;

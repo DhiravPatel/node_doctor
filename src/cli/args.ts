@@ -28,6 +28,7 @@ export type Command =
   | "data-map"
   | "schema-drift"
   | "queues"
+  | "semver"
   | "version";
 
 // "rules" is accepted as a legacy alias for "diagnostics"; "observe" for
@@ -39,6 +40,8 @@ const COMMAND_ALIASES: Record<string, Command> = {
   "dead-schema": "schema-drift",
   topics: "queues",
   topology: "queues",
+  "api-semver": "semver",
+  exports: "semver",
 };
 
 const COMMANDS = new Set<string>([
@@ -70,6 +73,9 @@ const COMMANDS = new Set<string>([
   "queues",
   "topics",
   "topology",
+  "semver",
+  "api-semver",
+  "exports",
   "version",
   "rules",
 ]);

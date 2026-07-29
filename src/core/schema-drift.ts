@@ -249,7 +249,8 @@ const walkSelect = (model: PrismaModel, node: AstNode | undefined, section: stri
   for (const prop of (node.properties as AstNode[] | undefined) ?? []) {
     const key = propertyKey(prop);
     if (key === null) continue;
-    if (key === "_count") continue;
+    // `_count` selects relation counts; `_all` is the count() aggregate column.
+    if (key === "_count" || key === "_all") continue;
     if (!fields.has(key)) {
       wctx.report(model, key, section, prop);
       continue;
@@ -295,14 +296,87 @@ const walkData = (model: PrismaModel, node: AstNode | undefined, wctx: WalkConte
         const subKey = propertyKey(sub);
         if (!subKey || !DATA_RELATION_OPS.has(subKey)) continue;
         const subValue = sub.value as AstNode;
-        if (subKey === "create" || subKey === "update" || subKey === "createMany") {
+        if (subKey === "create") {
           walkData(rel, subValue, wctx);
-        } else if (subKey === "connect") {
-          walkWhere(rel, subValue, wctx);
+        } else if (subKey === "createMany") {
+          // Envelope: { data: […], skipDuplicates?: boolean } — only `data`
+          // holds related-model fields; the envelope keys are Prisma API.
+          walkData(rel, envelopeValue(subValue, "data"), wctx);
+        } else if (subKey === "update" || subKey === "updateMany" || subKey === "upsert") {
+          // To-many (and modern to-one) forms are envelopes — objects or arrays
+          // of `{ where?, data?, create?, update? }`. A bare to-one shorthand
+          // (fields directly) is walked as data only when NO envelope key is
+          // present, so the one valid spelling is never flagged.
+          walkRelationEnvelopes(rel, subValue, wctx);
+        } else if (subKey === "connect" || subKey === "connectOrCreate" || subKey === "disconnect" || subKey === "delete" || subKey === "deleteMany" || subKey === "set") {
+          walkConnectLike(rel, subKey, subValue, wctx);
         }
       }
     }
   }
+};
+
+/** The value of one named property of an object expression, or undefined. */
+const envelopeValue = (node: AstNode | undefined, key: string): AstNode | undefined => {
+  if (!node || node.type !== "ObjectExpression" || hasOpaqueParts(node)) return undefined;
+  for (const prop of (node.properties as AstNode[] | undefined) ?? []) {
+    if (propertyKey(prop) === key) return prop.value as AstNode;
+  }
+  return undefined;
+};
+
+const ENVELOPE_KEYS = new Set(["where", "data", "create", "update"]);
+
+/** Nested relation `update`/`updateMany`/`upsert` values: `{ where?, data?, create?,
+ *  update? }` envelopes (single or array). Each envelope part is walked against the
+ *  section it actually is; an object with NO envelope keys is the to-one shorthand
+ *  and is walked as bare data. */
+const walkRelationEnvelopes = (rel: PrismaModel, node: AstNode | undefined, wctx: WalkContext): void => {
+  if (!node) return;
+  if (node.type === "ArrayExpression") {
+    for (const el of (node.elements as AstNode[] | undefined) ?? []) {
+      if (el) walkRelationEnvelopes(rel, el, wctx);
+    }
+    return;
+  }
+  if (node.type !== "ObjectExpression" || hasOpaqueParts(node)) return;
+  const props = (node.properties as AstNode[] | undefined) ?? [];
+  const isEnvelope = props.some((p) => {
+    const k = propertyKey(p);
+    return k !== null && ENVELOPE_KEYS.has(k);
+  });
+  if (!isEnvelope) {
+    walkData(rel, node, wctx);
+    return;
+  }
+  for (const p of props) {
+    const k = propertyKey(p);
+    const v = p.value as AstNode;
+    if (k === "where") walkWhere(rel, v, wctx);
+    else if (k === "data" || k === "create") walkData(rel, v, wctx);
+    else if (k === "update") walkRelationEnvelopes(rel, v, wctx);
+  }
+};
+
+/** `connect`/`disconnect`/`set`/`delete` take where-unique inputs (single or array);
+ *  `connectOrCreate` takes `{ where, create }` envelopes; `deleteMany` takes a
+ *  plain where filter. */
+const walkConnectLike = (rel: PrismaModel, op: string, node: AstNode | undefined, wctx: WalkContext): void => {
+  if (!node) return;
+  if (node.type === "ArrayExpression") {
+    for (const el of (node.elements as AstNode[] | undefined) ?? []) {
+      if (el) walkConnectLike(rel, op, el, wctx);
+    }
+    return;
+  }
+  if (op === "connectOrCreate") {
+    walkWhere(rel, envelopeValue(node, "where"), wctx);
+    walkData(rel, envelopeValue(node, "create"), wctx);
+    return;
+  }
+  // `disconnect: true` / `delete: true` (to-one boolean forms) walk nothing.
+  if (node.type !== "ObjectExpression") return;
+  walkWhere(rel, node, wctx);
 };
 
 const walkOrderBy = (model: PrismaModel, node: AstNode | undefined, wctx: WalkContext): void => {
@@ -467,6 +541,20 @@ const scanFile = (
       localClientAliases.add(id.name as string);
     }
   }
+  // A RENAMED import of a client (`import { prisma as store } from "./client"`)
+  // hides the db hint behind the local alias — the IMPORTED name carries the
+  // hint, so the local name is a client too.
+  for (const stmt of (program.body as AstNode[] | undefined) ?? []) {
+    if (stmt.type !== "ImportDeclaration") continue;
+    for (const spec of (stmt.specifiers as AstNode[] | undefined) ?? []) {
+      if (spec.type !== "ImportSpecifier") continue;
+      const imported = (spec.imported as AstNode | undefined)?.name as string | undefined;
+      const local = (spec.local as AstNode | undefined)?.name as string | undefined;
+      if (imported && local && imported !== local && isDbReceiver(imported)) {
+        localClientAliases.add(local);
+      }
+    }
+  }
   const isClientReceiver = (path: string): boolean =>
     isDbReceiver(path) || localClientAliases.has(path.split(".")[0] ?? path);
 
@@ -514,10 +602,20 @@ const scanFile = (
       const obj = node.object as AstNode | undefined;
       const objPath = staticMemberPath(obj) ?? (obj?.type === "Identifier" ? (obj.name as string) : null);
       if (node.computed) {
-        // Dynamic model access: prisma[expr] — degrades the dead-model proof.
         const propNode = node.property as AstNode | undefined;
-        const isStaticKey = propNode?.type === "Literal" && typeof propNode.value === "string";
-        if (objPath && isClientReceiver(objPath) && !isStaticKey) scan.dynamicAccess = true;
+        const staticKey =
+          propNode?.type === "Literal" && typeof propNode.value === "string" ? propNode.value : null;
+        if (objPath && isClientReceiver(objPath)) {
+          if (staticKey !== null) {
+            // client["user"] with a STATIC key reaches the model just like
+            // client.user — credit it (assignment/call/delete alike).
+            const accessed = modelsByProperty.get(staticKey);
+            if (accessed) scan.usedModels.add(accessed.name);
+          } else {
+            // Truly dynamic model access — degrades the dead-model proof.
+            scan.dynamicAccess = true;
+          }
+        }
         continue;
       }
       // ANY bare `client.<model>` access credits the model — the handle may be

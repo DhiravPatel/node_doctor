@@ -354,6 +354,136 @@ describe("buildSchemaDriftReport — dead models", () => {
     }
   });
 
+  test("nested relation envelopes (createMany/update/connectOrCreate) are API keys, not drift", async () => {
+    const dir = await makeProject({
+      "prisma/schema.prisma": SCHEMA,
+      "src/app.ts": `
+        export const a = () => prisma.user.create({ data: { email: "e", posts: { createMany: { data: [{ id: 1, title: "t" }], skipDuplicates: true } } } });
+        export const b = () => prisma.user.update({ where: { id: 1 }, data: { posts: { update: { where: { id: 9 }, data: { title: "renamed" } } } } });
+        export const c = () => prisma.user.update({ where: { id: 1 }, data: { posts: { update: [{ where: { id: 1 }, data: { title: "x" } }] } } });
+        export const d = () => prisma.user.update({ where: { id: 1 }, data: { posts: { connectOrCreate: { where: { id: 2 }, create: { id: 2, title: "y" } } } } });
+        export const e = () => prisma.auditLog.findMany();
+      `,
+    });
+    try {
+      const r = await buildSchemaDriftReport(dir);
+      assert.deepEqual(r.drift, [], "envelope keys (data/skipDuplicates/where/create) are never drift");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a WRONG field inside a nested envelope's data IS still drift", async () => {
+    const dir = await makeProject({
+      "prisma/schema.prisma": SCHEMA,
+      "src/app.ts": `
+        export const a = () => prisma.user.update({ where: { id: 1 }, data: { posts: { update: { where: { id: 9 }, data: { titel: "typo" } } } } });
+      `,
+    });
+    try {
+      const r = await buildSchemaDriftReport(dir);
+      assert.equal(r.drift.length, 1);
+      assert.equal(r.drift[0]!.model, "Post");
+      assert.equal(r.drift[0]!.key, "titel");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("count({ select: { _all: true } }) is the aggregate column, not drift", async () => {
+    const dir = await makeProject({
+      "prisma/schema.prisma": SCHEMA,
+      "src/app.ts": `
+        export const n = () => prisma.user.count({ select: { _all: true, email: true } });
+        export const rest = () => { prisma.post.findMany(); prisma.auditLog.findMany(); };
+      `,
+    });
+    try {
+      const r = await buildSchemaDriftReport(dir);
+      assert.deepEqual(r.drift, []);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a brace inside a schema string never truncates the model", async () => {
+    const dir = await makeProject({
+      "prisma/schema.prisma": `
+model User {
+  id       Int    @id @default(autoincrement())
+  settings Json   @default("{}")
+  email    String @unique
+}
+model AuditLog {
+  id   Int  @id
+  data Json @default("{}")
+  @@map("audit_logs")
+}
+`,
+      "src/app.ts": `
+        export const a = () => prisma.user.findMany({ where: { email: "x" } });
+        export const b = () => db.query("SELECT id, data FROM audit_logs ORDER BY id DESC LIMIT 10");
+      `,
+    });
+    try {
+      const r = await buildSchemaDriftReport(dir);
+      assert.deepEqual(r.drift, [], "email survives the braces in the Json default");
+      assert.deepEqual(r.deadModels, [], "AuditLog is read via its @@map-ed table");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("compound aliases: per-field args and name-first named arguments", async () => {
+    const dir = await makeProject({
+      "prisma/schema.prisma": `
+model Account {
+  id    Int    @id
+  email String
+  name  String
+  @@unique([email(sort: Desc), name])
+}
+model Login {
+  id       Int    @id
+  username String
+  tenantId Int
+  @@unique(name: "loginKey", fields: [username, tenantId])
+}
+`,
+      "src/app.ts": `
+        export const a = () => prisma.account.findUnique({ where: { email_name: { email: "a", name: "b" } } });
+        export const b = () => prisma.login.findUnique({ where: { loginKey: { username: "u", tenantId: 1 } } });
+      `,
+    });
+    try {
+      const r = await buildSchemaDriftReport(dir);
+      assert.deepEqual(r.drift, []);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a renamed client import and a static bracket access both credit the model", async () => {
+    const dir = await makeProject({
+      "prisma/schema.prisma": SCHEMA,
+      "src/client.ts": `export const prisma = new PrismaClient();`,
+      "src/app.ts": `
+        import { prisma as store } from "./client.ts";
+        const client = new PrismaClient();
+        export const a = () => store.post.findMany();
+        export const b = (id) => client["user"].delete({ where: { id } });
+        export const c = () => prisma.auditLog.findMany();
+      `,
+    });
+    try {
+      const r = await buildSchemaDriftReport(dir);
+      assert.equal(r.deadModelDetection, "full");
+      assert.deepEqual(r.deadModels, [], "store.post and the bracket access are real uses");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("no schema → an explicitly empty report", async () => {
     const dir = await makeProject({ "src/app.ts": `await prisma.user.findMany();` });
     try {

@@ -1411,9 +1411,11 @@ Whether the service speaks one error language: the same failure mapped to differ
 The exact inverse of §19's unused-package check, and a nastier failure: a package **imported but not declared**, working locally only because a hoisted transitive dependency happens to provide it. It breaks the moment the tree changes, the package manager switches, or a Docker build installs with `--production`. Also flags imports of transitive dependencies (using a package you never declared) and `devDependencies` imported by production code.
 
 ## 155. Internal Package API Semver Linting ★
-**Status: Planned** · 🔧 Needs depth
+**Status: Core** (`node-doctor semver`, aliases `api-semver`/`exports`) · ⚙️ Now
 
 §78 does semver for your **HTTP** API; this does it for your **package exports**. In a monorepo, diff a package's public surface between revisions — removed exports, narrowed parameter types, changed return shapes, newly-required options — and flag breaking changes shipped without a major bump. Reuses the baseline-delta machinery, applied to an export surface instead of a finding set.
+
+**Shipped as a command** (`semver [--baseline <f>]`): for every workspace package (or the single root package) it resolves the entry file (package.json `exports`/`module`/`main`; a `dist/` target with no built artifact falls back to its `src/` twin) and extracts the name-level export surface — ESM named/default/class/type exports, `export * from` followed recursively through relative modules, structure-aware destructuring exports (`{ a: c }` binds `c`, never the key), and CJS `exports.x` / `module.exports = {…}`. `--baseline` snapshots on first run and diffs after: a **removed export is breaking** and errors (exit 1) unless the version bumped major (or minor while still 0.x, per semver); an added export with an unchanged version is a "minor expected" advisory. Precision: a surface with an unfollowable `export *`, an opaque `module.exports`, or a spread is marked **partial and never yields a removal claim** (the name may live behind the wildcard); an unresolvable entry is listed unanalyzed and claims nothing; a package that disappeared has no version to lint and is info, never an error. Typed shape-diffs (narrowed params, changed returns) remain Planned. Deterministic; entirely offline.
 
 ## 156. Lockfile Integrity & Build Reproducibility ★
 **Status: Detected** (`no-unpinned-dependency`, opt-in) · ⚙️ Now

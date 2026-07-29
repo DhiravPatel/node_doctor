@@ -247,7 +247,11 @@ export const noInvertedTimeoutBudget = defineDiagnostic({
           const options = args[1];
           if (options?.type === "ObjectExpression") {
             const signal = getObjectProperty(options, "signal");
-            if (signal) return abortSignalTimeoutMs(signal.value as AstNode);
+            // AbortSignal must be the GLOBAL — a file-local `AbortSignal` shim
+            // makes the number mean something else entirely.
+            if (signal && declarationCount("AbortSignal") === 0) {
+              return abortSignalTimeoutMs(signal.value as AstNode);
+            }
           }
           return null;
         }
@@ -306,6 +310,9 @@ export const noInvertedTimeoutBudget = defineDiagnostic({
      */
     const rejectingTimerDelay = (executor: AstNode | null | undefined): AstNode | null => {
       if (!executor || (executor.type !== "ArrowFunctionExpression" && executor.type !== "FunctionExpression")) return null;
+      // setTimeout must be the GLOBAL — a file-local shim (e.g. seconds-based)
+      // breaks the delay-is-milliseconds premise of the whole proof.
+      if (declarationCount("setTimeout") > 0) return null;
       const params = (executor.params as AstNode[] | undefined) ?? [];
       const rejectName = params[1]?.type === "Identifier" ? (params[1].name as string) : null;
       if (!rejectName) return null;
@@ -470,7 +477,7 @@ export const noInvertedTimeoutBudget = defineDiagnostic({
             if (isFnLike(a)) consider(maxInnerTimeout((a.body as AstNode) ?? a, hop - 1));
           }
         }
-        if (hop > 0 && calleeExpr?.type === "Identifier") {
+        if (hop > 0 && calleeExpr?.type === "Identifier" && declarationCount(calleeExpr.name as string) === 1) {
           const binding = bindingOf(calleeExpr.name as string, call);
           if (binding && binding.scopeKind === "module" && (binding.kind === "const" || binding.kind === "function")) {
             const fn =

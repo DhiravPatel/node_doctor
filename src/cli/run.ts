@@ -24,7 +24,7 @@ import { installGitHook } from "../install/git-hook.ts";
 import { scanProject } from "../core/scan.ts";
 import type { ScanReport } from "../core/scan.ts";
 import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
-import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology } from "../report/terminal.ts";
+import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver } from "../report/terminal.ts";
 import { scanAgentContext, applyContextHygiene } from "../core/agent-context.ts";
 import { isWorkspaceRoot, scanWorkspaces, workspaceFindings, discoverWorkspaces } from "../core/workspaces.ts";
 import { toJson, toJsonError } from "../report/json.ts";
@@ -54,6 +54,7 @@ import { buildObservabilityReport } from "../core/observability.ts";
 import { buildDataAccessMap } from "../core/data-map.ts";
 import { buildSchemaDriftReport } from "../core/schema-drift.ts";
 import { buildQueueTopology } from "../core/queue-topology.ts";
+import { buildApiSemverReport, type ApiSemverReport } from "../core/api-semver.ts";
 import { buildImpactGraph, computeImpact } from "../core/impact.ts";
 import { collectAttackPaths } from "../core/attack-paths.ts";
 import { loadCodeowners, groupByOwner, scorePrRisk } from "../core/ownership.ts";
@@ -297,7 +298,7 @@ Usage:
   node-doctor modernize [dir]            Score how far the code is from current practice
   node-doctor observability [dir]        Score per-route observability ("could you debug this at 3am?")
   node-doctor data-map [dir]             Map which routes touch which DB entities, and how (read/write/delete)
-  node-doctor schema-drift [dir]         Prisma schema vs code: unknown-field drift + dead models\n  node-doctor queues [dir]               Queue/topic topology: publishers, consumers, orphans, dead consumers
+  node-doctor schema-drift [dir]         Prisma schema vs code: unknown-field drift + dead models\n  node-doctor queues [dir]               Queue/topic topology: publishers, consumers, orphans, dead consumers\n  node-doctor semver [--baseline <f>]    Package-export surface; diff a baseline and lint version bumps
   node-doctor context [dir] [--write]    Find files an AI agent must not read; --write fences them off
   node-doctor deslop [directory]         Dead-code scan (unused files/exports/deps)
   node-doctor explain <diagnostic-id>          Explain a diagnostic and its fix
@@ -1439,6 +1440,45 @@ const runQueues = async (args: ParsedArgs): Promise<number> => {
   return 0;
 };
 
+const runSemver = async (args: ParsedArgs): Promise<number> => {
+  const { dir } = await resolveScanTarget(args);
+
+  // --baseline <file>: snapshot on first run, diff + lint after.
+  let baseline: ApiSemverReport | undefined;
+  let baselineMissing = false;
+  if (args.baseline) {
+    try {
+      baseline = JSON.parse(await readFile(resolve(args.baseline), "utf8")) as ApiSemverReport;
+    } catch {
+      baselineMissing = true;
+    }
+  }
+
+  const report = await buildApiSemverReport(dir, { baseline });
+
+  if (args.baseline && baselineMissing) {
+    await writeFile(resolve(args.baseline), JSON.stringify(report, null, 2) + "\n");
+    process.stdout.write(
+      `node-doctor semver: baseline written to ${args.baseline} (${report.packages.length} package(s)). ` +
+        "Re-run after changes to lint version bumps.\n",
+    );
+    return 0;
+  }
+
+  if (args.jsonOut) {
+    await writeFile(
+      resolve(args.jsonOut),
+      (args.jsonCompact ? JSON.stringify(report) : JSON.stringify(report, null, 2)) + "\n",
+    );
+  }
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(report) : JSON.stringify(report, null, 2)) + "\n");
+    return report.summary.breaking > 0 ? 1 : 0;
+  }
+  process.stdout.write(renderApiSemver(report, { color: useColor(args) }));
+  return report.summary.breaking > 0 ? 1 : 0;
+};
+
 const runFix = async (args: ParsedArgs, version: string): Promise<number> => {
   const dir = resolve(args.positionals[0] ?? ".");
   const only = await resolveOnly(args, dir);
@@ -1528,6 +1568,8 @@ export const main = async (argv: string[]): Promise<number> => {
         return await runSchemaDrift(args);
       case "queues":
         return await runQueues(args);
+      case "semver":
+        return await runSemver(args);
       case "data-map":
         return await runDataMap(args);
       case "lsp":

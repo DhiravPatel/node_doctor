@@ -116,6 +116,11 @@ export type { PrismaSchema, PrismaModel, PrismaField, PrismaEnum } from "./core/
 // it, orphan topics, dead consumers — the event-driven import graph.
 export { buildQueueTopology } from "./core/queue-topology.ts";
 export type { QueueTopologyReport, TopicEntry, TopologySite, QueueSystem } from "./core/queue-topology.ts";
+// §155 — Internal Package API Semver Linting: the export surface of every
+// workspace package, diffed against a baseline; a removed export without the
+// version bump to match is the finding.
+export { buildApiSemverReport } from "./core/api-semver.ts";
+export type { ApiSemverReport, PackageSurface, SemverChange, SemverVerdict } from "./core/api-semver.ts";
 // §158 — agent context hygiene: detect secrets/keys an AI agent can read and
 // generate the ignore artifacts (.aiignore/.cursorignore/Claude deny) to fence them off.
 export { scanAgentContext, applyContextHygiene, buildIgnoreEntries } from "./core/agent-context.ts";

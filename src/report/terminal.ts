@@ -467,6 +467,66 @@ const opMarkers = (ops: readonly string[], p: Palette): string => {
     .join("");
 };
 
+export const renderApiSemver = (
+  report: import("../core/api-semver.ts").ApiSemverReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  if (!report.diff) {
+    lines.push(
+      `  ${p.bold("Package export surface")}  ${p.dim(`${report.summary.packages} package(s)`)}`,
+    );
+    lines.push("");
+    for (const pkg of report.packages) {
+      const tag = pkg.entry === null ? `  ${p.yellow("(entry unresolved — unanalyzed)")}` : pkg.complete ? "" : `  ${p.dim("(partial — a re-export could not be followed)")}`;
+      lines.push(`  ${p.bold(pkg.name)}${pkg.version ? p.dim(" @" + pkg.version) : ""}${tag}`);
+      if (pkg.entry !== null) {
+        lines.push(`      ${p.dim(`${pkg.exports.length} export(s) from ${pkg.entry}`)}`);
+      }
+    }
+    lines.push("");
+    lines.push(p.dim("  Run with --baseline <file> to snapshot, then re-run to lint version bumps."));
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  lines.push(`  ${p.bold("Package API semver")}  ${p.dim(`${report.summary.packages} package(s) vs baseline`)}`);
+  lines.push("");
+  for (const v of report.diff.verdicts) {
+    if (v.removed.length === 0 && v.added.length === 0 && v.verdict === "ok") continue;
+    const badge =
+      v.verdict === "breaking-without-major"
+        ? p.red("✖ breaking without a major bump")
+        : v.verdict === "minor-expected"
+          ? p.yellow("● additions — a minor bump is expected")
+          : v.verdict === "unprovable"
+            ? p.dim("○ unprovable (partial surface or missing version)")
+            : p.green("✔ ok");
+    lines.push(`  ${p.bold(v.package)}  ${p.dim(`${v.baseVersion ?? "?"} → ${v.currentVersion ?? "?"}`)}  ${badge}`);
+    for (const n of v.removed) lines.push(`      ${p.red("− removed")}  ${n}`);
+    for (const n of v.added) lines.push(`      ${p.green("+ added")}    ${n}`);
+  }
+  const pkgChanges = report.diff.changes.filter((c) => c.kind === "removed-package" || c.kind === "added-package");
+  for (const c of pkgChanges) {
+    lines.push(
+      c.kind === "removed-package"
+        ? `  ${p.bold(c.package)}  ${p.yellow("package removed from the workspace (breaking for its consumers)")}`
+        : `  ${p.bold(c.package)}  ${p.dim("new package")}`,
+    );
+  }
+  if (report.diff.verdicts.every((v) => v.verdict === "ok") && pkgChanges.length === 0) {
+    lines.push(p.dim("  No surface changes against the baseline."));
+  }
+  lines.push("");
+  if (report.summary.breaking > 0) {
+    lines.push(`  ${p.red("✖")} ${report.summary.breaking} package(s) shipped a breaking export removal without the semver bump to match.`);
+    lines.push("");
+  }
+  return lines.join("\n");
+};
+
 export const renderQueueTopology = (
   report: import("../core/queue-topology.ts").QueueTopologyReport,
   options: { color?: boolean } = {},

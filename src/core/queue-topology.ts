@@ -343,15 +343,73 @@ const receiverLastName = (call: AstNode): string | null => {
   return null;
 };
 
+/**
+ * How many times a name is DECLARED in the file (imports, variables, classes,
+ * functions, params, catch clauses). Any name declared more than once is
+ * ambiguous — a local `class Queue {}` shadowing the bullmq import, or two
+ * distinct `client` bindings in different functions — and the tracing here is
+ * scope-blind, so an ambiguous name must yield NO facts rather than risk
+ * attributing the wrong object.
+ */
+const countDeclarations = (program: AstNode): Map<string, number> => {
+  const counts = new Map<string, number>();
+  const bump = (n: unknown): void => {
+    if (typeof n === "string") counts.set(n, (counts.get(n) ?? 0) + 1);
+  };
+  const decls = collectDescendants(
+    program,
+    (n) =>
+      n.type === "VariableDeclarator" ||
+      n.type === "FunctionDeclaration" ||
+      n.type === "ClassDeclaration" ||
+      n.type === "ImportDefaultSpecifier" ||
+      n.type === "ImportSpecifier" ||
+      n.type === "ImportNamespaceSpecifier" ||
+      n.type === "CatchClause" ||
+      n.type === "FunctionExpression" ||
+      n.type === "ArrowFunctionExpression",
+    undefined,
+    true,
+  );
+  for (const d of decls) {
+    if (d.type === "FunctionExpression" || d.type === "ArrowFunctionExpression" || d.type === "FunctionDeclaration") {
+      for (const p of (d.params as AstNode[] | undefined) ?? []) {
+        if (p.type === "Identifier") bump(p.name);
+        else for (const q of collectDescendants(p, (n) => n.type === "Identifier", undefined, true)) bump(q.name);
+      }
+      if (d.type !== "FunctionDeclaration") continue;
+    }
+    const id = (d.type === "ImportDefaultSpecifier" || d.type === "ImportSpecifier" || d.type === "ImportNamespaceSpecifier"
+      ? d.local
+      : d.type === "CatchClause"
+        ? d.param
+        : d.id) as AstNode | undefined;
+    if (!id) continue;
+    if (id.type === "Identifier") bump(id.name);
+    else for (const q of collectDescendants(id, (n) => n.type === "Identifier", undefined, true)) bump(q.name);
+  }
+  return counts;
+};
+
 const collectFileFacts = (program: AstNode, imports: FileImports): RawFact[] => {
   const facts: RawFact[] = [];
+  const declCounts = countDeclarations(program);
+  const unique = (name: string): boolean => (declCounts.get(name) ?? 0) === 1;
+  // Drop any ctor/entry-point name that is redeclared in the file (shadowed).
+  for (const set of [imports.bullmqQueueNames, imports.bullmqWorkerNames, imports.bullQueueNames]) {
+    for (const n of [...set]) if (!unique(n)) set.delete(n);
+  }
   const clients = collectClientNames(program, imports);
+  // A client binding name declared more than once is ambiguous — drop it.
+  for (const set of [clients.kafka, clients.amqp, clients.nats, clients.mqtt, clients.redis]) {
+    for (const n of [...set]) if (!unique(n)) set.delete(n);
+  }
   const push = (kind: RawFact["kind"], topic: string | null, system: QueueSystem, node: AstNode): void => {
     facts.push({ kind, topic, system, node });
   };
 
   // bull: `const q = new Queue("x")` bindings, classified by same-file .add/.process.
-  const bullBindings = new Map<string, { topic: string | null; node: AstNode }>();
+  const bullBindings = new Map<string, { topic: string | null; node: AstNode; sawAdd: boolean; sawProcess: boolean }>();
 
   const news = collectDescendants(program, (n) => n.type === "NewExpression", undefined, true);
   for (const n of news) {
@@ -365,10 +423,11 @@ const collectFileFacts = (program: AstNode, imports: FileImports): RawFact[] => 
       push("consume", topic, "bullmq", n);
     } else if (imports.bullQueueNames.has(ctor)) {
       const parent = (n as { parent?: AstNode }).parent;
-      if (parent?.type === "VariableDeclarator" && (parent.id as AstNode)?.type === "Identifier") {
-        bullBindings.set((parent.id as AstNode).name as string, { topic, node: n });
+      const idNode = parent?.type === "VariableDeclarator" ? (parent.id as AstNode) : undefined;
+      if (idNode?.type === "Identifier" && unique(idNode.name as string)) {
+        bullBindings.set(idNode.name as string, { topic, node: n, sawAdd: false, sawProcess: false });
       }
-      // A bare `new Bull("x")` with no tracked binding claims nothing (ambiguous).
+      // A bare/shadowed `new Bull("x")` with no tracked binding claims nothing.
     }
   }
 
@@ -382,8 +441,13 @@ const collectFileFacts = (program: AstNode, imports: FileImports): RawFact[] => 
     // bull bindings: q.add(...) publishes, q.process(...) consumes.
     if (receiver && bullBindings.has(receiver)) {
       const q = bullBindings.get(receiver)!;
-      if (method === "add") push("publish", q.topic, "bull", call);
-      else if (method === "process") push("consume", q.topic, "bull", call);
+      if (method === "add") {
+        q.sawAdd = true;
+        push("publish", q.topic, "bull", call);
+      } else if (method === "process") {
+        q.sawProcess = true;
+        push("consume", q.topic, "bull", call);
+      }
       continue;
     }
 
@@ -453,6 +517,17 @@ const collectFileFacts = (program: AstNode, imports: FileImports): RawFact[] => 
         push("consume", getStaticStringValue(args[0]), "redis", call);
       }
     }
+  }
+
+  // A bull Queue is BOTH producer and consumer. A side not seen in this file
+  // plausibly lives in another module (the binding may be exported/passed), so
+  // the missing side is recorded as UNRESOLVED — which suppresses exactly the
+  // claim class that one-sided visibility could get wrong — rather than letting
+  // a knowably partial view produce an orphan/dead-consumer claim.
+  for (const q of bullBindings.values()) {
+    if (!q.sawAdd && !q.sawProcess) continue; // never used here — claims nothing
+    if (!q.sawAdd) push("publish", null, "bull", q.node);
+    if (!q.sawProcess) push("consume", null, "bull", q.node);
   }
 
   return facts;

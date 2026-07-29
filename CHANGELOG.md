@@ -11,6 +11,19 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Package API semver lint — `node-doctor semver` (§155)
+
+- **`node-doctor semver`** (aliases `api-semver`/`exports`) — semver linting for
+  internal package exports. Extracts each workspace package's name-level export
+  surface (ESM incl. recursive relative `export *` and structure-aware
+  destructuring; CJS `exports.x` / `module.exports = {…}`; `dist/` entries fall
+  back to their `src/` twin), snapshots it with `--baseline`, and lints changes:
+  a removed export without a major bump (or a 0.x minor) exits 1; additions with
+  an unchanged version are advisory. A partial surface (unfollowable `export *`,
+  opaque or spread `module.exports`) never yields a removal claim, an
+  unresolvable entry is unanalyzed rather than guessed, and a removed package is
+  info (no version left to lint). Deterministic, offline.
+
 ### Queue & topic topology — `node-doctor queues` (§157)
 
 - **`node-doctor queues`** (aliases `topics`/`topology`) — the event-driven import
