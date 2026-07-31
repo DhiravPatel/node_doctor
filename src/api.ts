@@ -23,7 +23,6 @@ export interface BatchDiagnoseInput extends DiagnoseOptions {
   concurrency?: number;
 }
 
-
 export type DiagnoseOutcome =
   | { ok: true; directory: string; report: ScanReport }
   | { ok: false; directory: string; error: string };
