@@ -1,7 +1,7 @@
 {
   "name": "@dhiravpatel/node-doctor",
-  "version": "1.0.0",
-  "description": "Deterministic, offline-first static analysis for Node.js backends \u2014 catches the defects that compile, pass tests, and fail under concurrency.",
+  "version": "1.0.1",
+  "description": "Deterministic, offline-first static analysis for Node.js backends — catches the defects that compile, pass tests, and fail under concurrency.",
   "keywords": [
     "node",
     "static-analysis",
