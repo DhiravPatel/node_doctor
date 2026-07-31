@@ -400,7 +400,11 @@ Prisma, Sequelize, TypeORM, Mongoose, Knex, MikroORM, Objection.js, Drizzle ORM.
 - TODO/FIXME detection (optionally tied to issue references).
 
 ## 33. Architecture Analysis
-**Status: Planned** (built on the project import graph)
+**Status: Core** (`node-doctor architecture`, aliases `arch`/`layers`)
+
+**Shipped as a command** (`architecture`): three questions answered from the project import graph. **Import cycles** are found exactly (Tarjan's strongly-connected components, iterative so a deep graph cannot blow the stack) — and a cycle is not a style opinion but a live runtime hazard: under ESM one module observes the other mid-initialization, giving an import that is `undefined` at module scope, a class extending `undefined`, or a temporal-dead-zone `ReferenceError` that appears only once the entry point changes and evaluation order flips; it also defeats tree-shaking. Cycles exit non-zero. **Layer violations** catch a service/domain module importing back *up* into routes (welding business logic to the transport, making it un-reusable and un-testable) and a route reaching *past* the service layer straight into a repository. **Hub modules** — files with very high fan-in, where every change is a blast-radius change — are reported as information only.
+
+**Precision.** Cycles are a graph fact and always reported. Layer claims are opinion-shaped so they are gated hard: a file's layer is inferred only from an unambiguous directory segment (`routes/`, `services/`, `repositories/`, `infrastructure/`, …); a file matching none is unlayered and takes part in no claim; a file matching *two different* layers (`src/services/db/pool.ts`) is ambiguous and equally excluded. A project that does not use a layered convention therefore produces zero violations rather than a wall of noise. Deterministic: cycles normalized and sorted, violations and hubs sorted.
 
 - Layer violations (e.g. controller importing a repository directly).
 - Dependency graph construction.
@@ -1198,7 +1202,11 @@ A third extension, covering **net-new, differentiated** capabilities beyond the 
 **Status: Planned** (needs the flag service's state).
 
 ## 128. Backpressure & Streaming Correctness
-**Status: Planned** (extends the stream-leak rule, §13, into flow-control reasoning).
+**Status: Detected** (`no-unhandled-pipe-error`, opt-in)
+
+**Shipped, the resource-leak slice:** `no-unhandled-pipe-error` (Reliability/warn/high) flags a `.pipe()` whose source has no `error` listener. `.pipe()` does not forward errors and does not destroy the destination, so when the source fails — a disk read, a socket reset, corrupt gzip input — the destination is left open: a leaked file descriptor and a response that never ends, hanging until the client times out. And since the source is an EventEmitter, an `error` with no listener at all is re-thrown as an uncaught exception. It is the canonical "passes every test, falls over in production" defect, because the happy path never emits `error`.
+
+Precision: `.pipe()` is also RxJS's operator-composition method, so the source is never assumed — it must be provably a Node stream (a binding or inline chain rooted at `createReadStream`/`createWriteStream`/`createGzip`/`new PassThrough`/…). The rule stays silent whenever an error path might exist: an `.on("error")`/`.once("error")` on that binding anywhere in the file (registration order does not matter), a handler attached inline in the chain, a `pipeline(...)` wrapper (which handles teardown), a dynamic event name, or the stream escaping into a helper that could attach the listener. Write-side backpressure (ignoring the `false` return of `.write()`) remains Planned.
 
 ---
 

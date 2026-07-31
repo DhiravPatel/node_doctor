@@ -107,8 +107,10 @@ describe("no-invalid-cron-expression", () => {
     cron.fires(`import schedule from "node-schedule";\nschedule.scheduleJob("nightly", "0 0 32 * *", job);`);
   });
 
-  test("fires: BullMQ repeat pattern", () => {
-    cron.fires(`import { Queue } from "bullmq";\nqueue.add("sweep", {}, { repeat: { pattern: "0 0 * * 8" } });`);
+  test("fires: BullMQ repeat pattern on a proven queue binding", () => {
+    cron.fires(
+      `import { Queue } from "bullmq";\nconst queue = new Queue("jobs");\nqueue.add("sweep", {}, { repeat: { pattern: "0 0 * * 8" } });`,
+    );
   });
 
   test("fires: a zero step", () => {
@@ -141,6 +143,38 @@ describe("no-invalid-cron-expression", () => {
   test("silent: an unrelated .schedule() in a cron-importing file with a non-cron string", () => {
     cron.silent(CRON_IMPORT + `meeting.schedule("tomorrow at noon", invite);`);
   });
+
+  // ---- hunt regressions: the receiver must be PROVEN, not name-matched -------
+
+  test("silent: node-schedule's job NAME is never read as an expression", () => {
+    // scheduleJob([name], spec, method) — args[0] is the name whenever a readable
+    // spec sits in position 1. These names are digits/dashes only, so they would
+    // otherwise slip through the grammar gate.
+    cron.silent(`import schedule from "node-schedule";\nschedule.scheduleJob("2026-01-01", "0 9 * * 1-5", job);`);
+    cron.silent(`import schedule from "node-schedule";\nschedule.scheduleJob("30", "0 */30 * * * *", job);`);
+    cron.silent(`import schedule from "node-schedule";\nschedule.scheduleJob("7", "0 0 * * *", job);`);
+  });
+
+  test("silent: a Joi/zod/ajv `.validate()` is not a scheduler call", () => {
+    cron.silent(
+      `import { Queue } from "bullmq";\nimport Joi from "joi";\nconst schema = Joi.date().iso();\nschema.validate("2026-01-01");`,
+    );
+    cron.silent(CRON_IMPORT + `const phone = validator.validate("555-0100");`);
+  });
+
+  test("silent: a `{ repeat: { pattern } }` literal on a non-queue receiver", () => {
+    // The BullMQ shape must be anchored to a proven queue binding — an arbitrary
+    // call with a same-shaped options object is not a scheduled job.
+    cron.silent(`import { Queue } from "bullmq";\nanalytics.track("x", { repeat: { pattern: "1-2-1" } });`);
+  });
+
+  test("silent: month 0 (the `cron` package before v3 used zero-based months)", () => {
+    cron.silent(`import { CronJob } from "cron";\nnew CronJob("0 0 1 0 *", job);`);
+  });
+
+  test("silent: a scheduler method on an unproven receiver", () => {
+    cron.silent(CRON_IMPORT + `someObject.scheduleJob("0 25 * * *", job);`);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -148,10 +182,11 @@ describe("no-invalid-cron-expression", () => {
 // ---------------------------------------------------------------------------
 
 const ws = makeAsserts(noMissingWebsocketErrorHandler);
+const WS_IMPORT = `import { WebSocketServer } from "ws";\n`;
 
 describe("no-missing-websocket-error-handler", () => {
   test("fires: message + close listeners but no error listener", () => {
-    ws.fires(`
+    ws.fires(WS_IMPORT + `
       wss.on("connection", (socket) => {
         socket.on("message", handle);
         socket.on("close", cleanup);
@@ -160,7 +195,7 @@ describe("no-missing-websocket-error-handler", () => {
   });
 
   test("fires: a single message listener with no error path", () => {
-    ws.fires(`
+    ws.fires(WS_IMPORT + `
       wss.on("connection", function (socket, req) {
         socket.on("message", (data) => socket.send(process(data)));
       });
@@ -168,7 +203,7 @@ describe("no-missing-websocket-error-handler", () => {
   });
 
   test("silent: an error listener is registered", () => {
-    ws.silent(`
+    ws.silent(WS_IMPORT + `
       wss.on("connection", (socket) => {
         socket.on("message", handle);
         socket.on("error", (err) => logger.error({ err }, "socket error"));
@@ -177,13 +212,13 @@ describe("no-missing-websocket-error-handler", () => {
   });
 
   test("silent: the socket is handed off — the handler may be attached there", () => {
-    ws.silent(`
+    ws.silent(WS_IMPORT + `
       wss.on("connection", (socket) => {
         socket.on("message", handle);
         registerSocket(socket);
       });
     `);
-    ws.silent(`
+    ws.silent(WS_IMPORT + `
       wss.on("connection", (socket) => {
         socket.on("message", handle);
         clients.add(socket);
@@ -192,7 +227,7 @@ describe("no-missing-websocket-error-handler", () => {
   });
 
   test("silent: no listener registrations at all (not wiring this emitter here)", () => {
-    ws.silent(`
+    ws.silent(WS_IMPORT + `
       wss.on("connection", (socket) => {
         socket.send("hello");
       });
@@ -200,7 +235,7 @@ describe("no-missing-websocket-error-handler", () => {
   });
 
   test("silent: a dynamic event name", () => {
-    ws.silent(`
+    ws.silent(WS_IMPORT + `
       wss.on("connection", (socket) => {
         socket.on(eventName, handle);
       });
@@ -208,7 +243,7 @@ describe("no-missing-websocket-error-handler", () => {
   });
 
   test("silent: addEventListener (a listener API we do not model)", () => {
-    ws.silent(`
+    ws.silent(WS_IMPORT + `
       wss.on("connection", (socket) => {
         socket.addEventListener("message", handle);
       });
@@ -216,7 +251,7 @@ describe("no-missing-websocket-error-handler", () => {
   });
 
   test("silent: a non-connection event", () => {
-    ws.silent(`
+    ws.silent(WS_IMPORT + `
       emitter.on("data", (chunk) => {
         chunk.on("end", done);
       });
@@ -224,15 +259,100 @@ describe("no-missing-websocket-error-handler", () => {
   });
 
   test("silent: the socket parameter is destructured (not a plain binding)", () => {
-    ws.silent(`
+    ws.silent(WS_IMPORT + `
       wss.on("connection", ({ socket }) => {
         socket.on("message", handle);
       });
     `);
   });
 
-  test("silent: `once` counts as a registration and `once(\"error\")` satisfies it", () => {
+  // ---- hunt regressions --------------------------------------------------
+
+  test("silent: a CHAINED error registration (.on(a).on(\"error\", h))", () => {
+    ws.silent(WS_IMPORT + `
+      wss.on("connection", (socket) => {
+        socket.on("message", handle).on("error", onErr);
+      });
+    `);
+  });
+
+  test("silent: `socket.onerror = fn` is a real ws error listener", () => {
+    ws.silent(WS_IMPORT + `
+      wss.on("connection", (socket) => {
+        socket.on("message", handle);
+        socket.on("close", cleanup);
+        socket.onerror = (err) => logger.error(err);
+      });
+    `);
+  });
+
+  test("silent: a computed registration `socket[\"on\"](\"error\", h)`", () => {
+    ws.silent(WS_IMPORT + `
+      wss.on("connection", (socket) => {
+        socket.on("message", handle);
+        socket["on"]("error", onErr);
+      });
+    `);
+  });
+
+  test("silent: a second connection handler may attach the error listener", () => {
+    ws.silent(WS_IMPORT + `
+      wss.on("connection", (socket) => {
+        socket.on("message", handle);
+      });
+      wss.on("connection", (socket) => {
+        socket.on("error", onErr);
+      });
+    `);
+  });
+
+  test("silent: the file does not import ws (http.Server, socket.io, pg, a test double)", () => {
+    // Node's http server attaches its own socket error handler; socket.io buffers
+    // errors; pg owns its error handling; a mock is not a socket at all.
     ws.silent(`
+      import http from "node:http";
+      const server = http.createServer();
+      server.on("connection", (socket) => {
+        socket.on("data", read);
+        socket.on("close", done);
+      });
+    `);
+    ws.silent(`
+      import { Server } from "socket.io";
+      io.on("connection", (socket) => {
+        socket.on("join", join);
+        socket.on("leave", leave);
+      });
+    `);
+    ws.silent(`
+      const mockServer = new EventEmitter();
+      mockServer.on("connection", (socket) => {
+        socket.on("message", spy);
+        socket.on("close", spy);
+      });
+    `);
+  });
+
+  test("silent: a `connect` event is not a ws connection event", () => {
+    ws.silent(WS_IMPORT + `
+      pool.on("connect", (client) => {
+        client.on("notice", log);
+        client.on("end", done);
+      });
+    `);
+  });
+
+  test("silent: addEventListener(\"error\") also satisfies the requirement", () => {
+    ws.silent(WS_IMPORT + `
+      wss.on("connection", (socket) => {
+        socket.on("message", handle);
+        socket.addEventListener("error", onErr);
+      });
+    `);
+  });
+
+  test("silent: `once` counts as a registration and `once(\"error\")` satisfies it", () => {
+    ws.silent(WS_IMPORT + `
       wss.on("connection", (socket) => {
         socket.on("message", handle);
         socket.once("error", onErr);

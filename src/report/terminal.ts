@@ -467,6 +467,60 @@ const opMarkers = (ops: readonly string[], p: Palette): string => {
     .join("");
 };
 
+export const renderArchitecture = (
+  report: import("../core/architecture.ts").ArchitectureReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const { cycles, layerViolations, hubs, summary } = report;
+  const lines: string[] = [""];
+
+  lines.push(
+    `  ${p.bold("Architecture")}  ${p.dim(`${summary.modules} module(s) · ${summary.edges} import edge(s)`)}`,
+  );
+  lines.push("");
+
+  if (cycles.length > 0) {
+    lines.push(`  ${p.red("Import cycles")}  ${p.dim("(a runtime hazard: partially-initialized imports)")}`);
+    for (const cycle of cycles) {
+      lines.push(`      ${p.red("↻")} ${cycle.length} modules`);
+      for (const file of cycle.files) lines.push(`          ${p.cyan(file)}`);
+    }
+    lines.push("");
+  }
+
+  if (layerViolations.length > 0) {
+    lines.push(`  ${p.yellow("Layer violations")}`);
+    for (const v of layerViolations) {
+      lines.push(`      ${p.yellow("→")} ${p.cyan(v.from)} ${p.dim(`(${v.fromLayer})`)}`);
+      lines.push(`         imports ${p.cyan(v.to)} ${p.dim(`(${v.toLayer})`)}`);
+      lines.push(`         ${p.dim(v.reason)}`);
+    }
+    lines.push("");
+  }
+
+  if (hubs.length > 0) {
+    lines.push(`  ${p.bold("Hub modules")}  ${p.dim("(every change here has a wide blast radius)")}`);
+    for (const hub of hubs) {
+      lines.push(`      ${p.cyan(hub.file)}  ${p.dim(`${hub.dependents} dependents`)}`);
+    }
+    lines.push("");
+  }
+
+  if (cycles.length === 0 && layerViolations.length === 0) {
+    lines.push(`  ${p.green("✔")} No import cycles and no layer violations.`);
+    if (summary.unlayeredModules > 0) {
+      lines.push(
+        p.dim(
+          `  ${summary.unlayeredModules} module(s) sit outside a recognized layer directory and take part in no layer claim.`,
+        ),
+      );
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+};
+
 export const renderOpenApi = (
   result: import("../core/openapi.ts").OpenApiResult,
   options: { color?: boolean; writtenTo?: string } = {},

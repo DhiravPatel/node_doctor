@@ -29,7 +29,7 @@ Express handler with no error path, a `readFileSync` on the request path, an N+1
 across a loop, a `Promise.all` that opens a socket per row, injection and
 secret-handling sinks.
 
-It runs **132 diagnostics** — including a whole-tree scan for **committed secrets**
+It runs **133 diagnostics** — including a whole-tree scan for **committed secrets**
 in `.env`, config, CI, and key files — produces a transparent **0–100 health
 score** entirely on your machine (no network, no telemetry), and can push the
 same knowledge **upstream into your coding agent** as an installable skill and an
@@ -72,7 +72,7 @@ Typical output on a codebase that needs help:
 
 ## Features
 
-- **132 diagnostics** across Security, Reliability, Bugs, Performance, and
+- **133 diagnostics** across Security, Reliability, Bugs, Performance, and
   Maintainability — each with a valid + invalid test; FP-prone ones are opt-in.
 - **Whole-tree secret scan** — committed credentials in `.env`, YAML/CI configs,
   and `*.pem`/`*.key` files, gated to git-tracked files so a local `.env` is safe.
@@ -139,6 +139,13 @@ Typical output on a codebase that needs help:
   compound unique keys are understood; a spread silences the object; dead-model
   claims are made only when no dynamic access or unresolved raw SQL could hide a
   use. Exits 1 on drift.
+- **Architecture analysis** (`node-doctor architecture`) — import cycles found
+  exactly from the graph (a runtime hazard under ESM: partially-initialized
+  imports, `undefined` at module scope, TDZ errors that appear only when the
+  evaluation order flips), plus layer violations (a service importing back up
+  into routes, a route reaching past the service layer into a repository) and
+  hub modules. Layer claims fire only when both files sit in an unambiguous
+  layer directory, so an unlayered project gets zero noise. Cycles exit 1.
 - **OpenAPI spec generation** (`node-doctor openapi`) — an OpenAPI 3.1 document
   derived from the routes themselves, so the docs cannot drift from the code that
   serves them. Path params, query params mined from the handler, request-body
@@ -261,6 +268,7 @@ node-doctor schema-drift [directory]            Prisma schema vs code: unknown-f
 node-doctor queues [directory]                  queue/topic topology: publishers, consumers, orphans
 node-doctor semver [--baseline <f>]             package-export surface; lint version bumps against it
 node-doctor openapi [directory]                 generate an OpenAPI 3.1 spec from the actual routes
+node-doctor architecture [directory]            import cycles, layer violations, hub modules
 node-doctor paths [directory]                   source→sink attack paths (exploitability proof)
 node-doctor context [dir] [--write]             find files an AI agent must not read; --write fences them off
 node-doctor sbom [--framework spdx]             CycloneDX / SPDX bill of materials

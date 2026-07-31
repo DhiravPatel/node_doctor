@@ -1,6 +1,6 @@
 import { defineDiagnostic } from "../../core/types.ts";
 import type { AstNode } from "../../core/types.ts";
-import { getMethodName, getStaticStringValue, getObjectProperty, getCalleeName, staticMemberPath } from "../../core/ast.ts";
+import { getMethodName, getStaticStringValue, getObjectProperty, getCalleeName } from "../../core/ast.ts";
 import { collectDescendants } from "../../core/walk.ts";
 
 /**
@@ -42,7 +42,9 @@ const SIX_FIELD_RANGES: Array<{ name: string; min: number; max: number }> = [
   { name: "minute", min: 0, max: 59 },
   { name: "hour", min: 0, max: 23 },
   { name: "day-of-month", min: 1, max: 31 },
-  { name: "month", min: 1, max: 12 },
+  // The `cron` package before v3 used ZERO-based months, so `0` is valid there.
+  // Accepting it costs a sliver of recall and removes a version-dependent claim.
+  { name: "month", min: 0, max: 12 },
   { name: "day-of-week", min: 0, max: 7 },
 ];
 
@@ -142,24 +144,89 @@ export const noInvalidCronExpression = defineDiagnostic({
   recommendation:
     "Fix the cron expression so every field is inside its range (minute 0-59, hour 0-23, day-of-month 1-31, month 1-12, day-of-week 0-7) and the expression has 5 fields (or 6 with a leading seconds field). Most schedulers throw on a malformed expression at startup; the ones that do not simply never run the job.",
   create: (ctx) => {
-    // Import gate: only files that actually pull in a scheduler are considered.
-    const imported = new Set<string>();
+    // BINDING GATE. A method name alone proves nothing — `.validate()` belongs to
+    // Joi/zod/ajv far more often than to a scheduler, and `.schedule()` to any
+    // domain object. So we resolve the RECEIVER to a local binding that a cron
+    // package was imported into, and only those call sites are inspected.
+    const cronBindings = new Set<string>();
+    const queueBindings = new Set<string>();
+    const cronCtors = new Set<string>();
+
+    const noteSpecifier = (source: string, local: string, imported: string | null): void => {
+      if (CRON_SOURCES.has(source)) {
+        if (source === "bullmq" || source === "bull") {
+          // `new Queue(...)` bindings are tracked separately below; the class
+          // itself is what we record here.
+          if (imported === "Queue" || imported === null) queueBindings.add(local);
+          return;
+        }
+        if (imported === "CronJob" || imported === "Cron" || local === "CronJob" || local === "Cron") {
+          cronCtors.add(local);
+        }
+        cronBindings.add(local);
+      }
+    };
+
     for (const stmt of (ctx.program.body as AstNode[] | undefined) ?? []) {
-      if (stmt.type === "ImportDeclaration" && typeof stmt.source?.value === "string") {
-        imported.add(stmt.source.value);
+      if (stmt.type !== "ImportDeclaration" || typeof stmt.source?.value !== "string") continue;
+      const source = stmt.source.value;
+      for (const spec of (stmt.specifiers as AstNode[] | undefined) ?? []) {
+        const local = (spec.local as AstNode | undefined)?.name as string | undefined;
+        if (!local) continue;
+        const imported =
+          spec.type === "ImportSpecifier"
+            ? (((spec.imported as AstNode | undefined)?.name as string | undefined) ?? null)
+            : null;
+        noteSpecifier(source, local, imported);
       }
     }
-    for (const call of collectDescendants(
-      ctx.program,
-      (n) => n.type === "CallExpression" && getCalleeName(n.callee as AstNode) === "require",
-      undefined,
-      true,
-    )) {
-      const arg = ((call.arguments as AstNode[] | undefined) ?? [])[0];
-      const spec = getStaticStringValue(arg);
-      if (spec !== null) imported.add(spec);
+    // const cron = require("node-cron") / const { CronJob } = require("cron")
+    for (const decl of collectDescendants(ctx.program, (n) => n.type === "VariableDeclarator", undefined, true)) {
+      const init = decl.init as AstNode | undefined;
+      if (
+        init?.type !== "CallExpression" ||
+        getCalleeName(init.callee as AstNode) !== "require"
+      ) {
+        continue;
+      }
+      const source = getStaticStringValue(((init.arguments as AstNode[] | undefined) ?? [])[0]);
+      if (source === null || !CRON_SOURCES.has(source)) continue;
+      const id = decl.id as AstNode | undefined;
+      if (id?.type === "Identifier") {
+        noteSpecifier(source, id.name as string, null);
+      } else if (id?.type === "ObjectPattern") {
+        for (const prop of (id.properties as AstNode[] | undefined) ?? []) {
+          if (prop.type !== "Property" || prop.computed) continue;
+          const key = (prop.key as AstNode | undefined)?.name as string | undefined;
+          const local =
+            (prop.value as AstNode | undefined)?.type === "Identifier"
+              ? ((prop.value as AstNode).name as string)
+              : null;
+          if (key && local) noteSpecifier(source, local, key);
+        }
+      }
     }
-    const schedulesCron = [...imported].some((s) => CRON_SOURCES.has(s));
+    // `const q = new Queue("billing")` — a queue instance, for the BullMQ shape.
+    for (const decl of collectDescendants(ctx.program, (n) => n.type === "VariableDeclarator", undefined, true)) {
+      const init = decl.init as AstNode | undefined;
+      const id = decl.id as AstNode | undefined;
+      if (init?.type !== "NewExpression" || id?.type !== "Identifier") continue;
+      const ctor = getCalleeName(init.callee as AstNode);
+      if (ctor && queueBindings.has(ctor)) queueBindings.add(id.name as string);
+    }
+
+    /** The receiver identifier of `<receiver>.<method>()`, or null. */
+    const receiverName = (call: AstNode): string | null => {
+      const callee = call.callee as AstNode | undefined;
+      if (callee?.type !== "MemberExpression") return null;
+      const object = callee.object as AstNode | undefined;
+      if (object?.type === "Identifier") return object.name as string;
+      // `this.cron.schedule(...)` — use the trailing segment.
+      if (object?.type === "MemberExpression" && (object.property as AstNode | undefined)?.type === "Identifier") {
+        return (object.property as AstNode).name as string;
+      }
+      return null;
+    };
 
     const report = (node: AstNode, expression: string, problem: CronProblem): void => {
       ctx.report(
@@ -177,29 +244,41 @@ export const noInvalidCronExpression = defineDiagnostic({
       if (problem) report(node, expression, problem);
     };
 
+    /** BullMQ job-adding methods that accept a `{ repeat: … }` options object. */
+    const QUEUE_METHODS = new Set(["add", "addBulk", "upsertJobScheduler", "createJobScheduler"]);
+
     return {
       CallExpression: (node) => {
-        if (!schedulesCron) return;
         const args = (node.arguments as AstNode[] | undefined) ?? [];
         const method = getMethodName(node);
-        const path = staticMemberPath(node.callee as AstNode);
+        const receiver = receiverName(node);
 
-        // node-cron: cron.schedule("expr", fn) / cron.validate("expr")
-        // node-schedule: schedule.scheduleJob("expr", fn) — also (name, "expr", fn)
-        // croner: Cron("expr", fn)
-        if (method === "schedule" || method === "scheduleJob" || method === "validate") {
-          checkArgument(args[0]);
-          if (method === "scheduleJob" && getStaticStringValue(args[0]) !== null && args.length >= 3) {
-            checkArgument(args[1]); // scheduleJob(name, "expr", fn)
+        // A scheduler call — the receiver must be a cron-module binding.
+        if (method && receiver && cronBindings.has(receiver)) {
+          if (method === "schedule" || method === "validate") {
+            checkArgument(args[0]);
+            return;
           }
-          return;
+          if (method === "scheduleJob") {
+            // node-schedule: scheduleJob([name], spec, method). With 3+ args and a
+            // readable spec in position 1, args[0] is the NAME — never a cron
+            // expression — so only args[1] is checked.
+            if (args.length >= 3 && getStaticStringValue(args[1]) !== null) checkArgument(args[1]);
+            else checkArgument(args[0]);
+            return;
+          }
         }
-        if (path === "Cron" || getCalleeName(node.callee as AstNode) === "Cron") {
+
+        // croner: `Cron("expr", fn)` called as a bare imported function.
+        const bareCallee = getCalleeName(node.callee as AstNode);
+        if (bareCallee && cronCtors.has(bareCallee) && (node.callee as AstNode)?.type === "Identifier") {
           checkArgument(args[0]);
           return;
         }
 
-        // BullMQ / Bull: queue.add(name, data, { repeat: { pattern | cron } })
+        // BullMQ / Bull: <queue>.add(name, data, { repeat: { pattern | cron } }).
+        if (!method || !QUEUE_METHODS.has(method)) return;
+        if (!receiver || !queueBindings.has(receiver)) return;
         for (const arg of args) {
           if (arg?.type !== "ObjectExpression") continue;
           const repeat = getObjectProperty(arg, "repeat");
@@ -214,9 +293,8 @@ export const noInvalidCronExpression = defineDiagnostic({
 
       // cron package: new CronJob("expr", fn) / new CronJob({ cronTime: "expr" })
       NewExpression: (node) => {
-        if (!schedulesCron) return;
         const ctor = getCalleeName(node.callee as AstNode);
-        if (ctor !== "CronJob" && ctor !== "Cron") return;
+        if (!ctor || !cronCtors.has(ctor)) return;
         const args = (node.arguments as AstNode[] | undefined) ?? [];
         const first = args[0];
         if (first?.type === "ObjectExpression") {

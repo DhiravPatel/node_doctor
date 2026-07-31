@@ -11,6 +11,33 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Diagnostics — streaming correctness (§128)
+
+- **`no-unhandled-pipe-error`** (Reliability, §128, opt-in) — a `.pipe()` whose
+  source has no `error` listener. `.pipe()` neither forwards errors nor destroys
+  the destination, so a failing source leaks the destination's file descriptor
+  and hangs the response; an unhandled `error` event also crashes the process.
+  Precision: the source must be provably a Node stream (rooted at
+  `createReadStream`/`createGzip`/`new PassThrough`/…), so RxJS's `.pipe()`
+  operator composition is never touched; silent when an `error` listener exists
+  on the binding in any order, is attached inline in the chain, when a
+  `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
+  stream escapes into a helper that could attach the handler.
+
+### Architecture analysis — `node-doctor architecture` (§33)
+
+- **`node-doctor architecture`** (aliases `arch`/`layers`) — import cycles, layer
+  violations and hub modules from the project import graph. Cycles are found
+  exactly (iterative Tarjan SCC) and exit non-zero: under ESM a cycle means a
+  module observes another mid-initialization — an `undefined` import at module
+  scope, a class extending `undefined`, a TDZ `ReferenceError` that surfaces only
+  when the entry point changes — and it defeats tree-shaking. Layer violations
+  cover a service/domain module importing back *up* into routes and a route
+  skipping the service layer into a repository; they fire only when both files
+  sit in an unambiguous layer directory, so a project without a layered
+  convention (or a path naming two layers, like `services/db/`) produces no
+  claims at all. Hub modules (high fan-in) are informational. Deterministic.
+
 ### OpenAPI generation — `node-doctor openapi` (§77)
 
 - **`node-doctor openapi`** (aliases `swagger`/`spec`) — an OpenAPI **3.1** spec
@@ -27,6 +54,20 @@ while staying offline-first and deterministic.
   spec and prints a coverage summary.
 
 ### Diagnostics — scheduled jobs & websockets (§30/§31)
+
+Both rules were hardened against an adversarial false-positive hunt before
+shipping: `no-invalid-cron-expression` now resolves the call **receiver** to a
+binding a cron package was imported into (a Joi/zod/ajv `.validate("2026-01-01")`
+and a domain object's `.schedule()` are no longer scheduler calls), understands
+node-schedule's `scheduleJob(name, spec, fn)` overload so a job **name** is never
+read as an expression, anchors the BullMQ `{ repeat: { pattern } }` shape to a
+proven queue binding, and accepts month `0` (the `cron` package used zero-based
+months before v3). `no-missing-websocket-error-handler` now requires the **file**
+to import `ws` (an `http.Server` connection, a socket.io handler, a pg client and
+a test double are otherwise indistinguishable), follows chained registrations
+(`socket.on(a).on("error", h)`), accepts `socket["on"]("error", h)` and
+`socket.onerror = fn`, and stays silent when a second connection handler on the
+same server could attach the listener.
 
 - **`no-invalid-cron-expression`** (Bugs, §30, opt-in) — a scheduled job whose cron
   expression can never fire: an out-of-range field (`"0 25 * * *"`), the wrong

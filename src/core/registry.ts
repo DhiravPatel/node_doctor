@@ -97,6 +97,7 @@ import { noRetryAmplification } from "../diagnostics/reliability/no-retry-amplif
 import { noThrowInFinally } from "../diagnostics/reliability/no-throw-in-finally.ts";
 import { noUnboundedModuleCache } from "../diagnostics/reliability/no-unbounded-module-cache.ts";
 import { noUnclearedModuleInterval } from "../diagnostics/reliability/no-uncleared-module-interval.ts";
+import { noUnhandledPipeError } from "../diagnostics/reliability/no-unhandled-pipe-error.ts";
 import { requireSigtermHandler } from "../diagnostics/reliability/require-sigterm-handler.ts";
 // security
 import { jwtMissingExpiration } from "../diagnostics/security/jwt-missing-expiration.ts";
@@ -228,6 +229,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noThrowInFinally,
   noUnboundedModuleCache,
   noUnclearedModuleInterval,
+  noUnhandledPipeError,
   requireSigtermHandler,
   // security
   jwtMissingExpiration,

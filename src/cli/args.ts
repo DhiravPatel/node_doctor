@@ -30,6 +30,7 @@ export type Command =
   | "queues"
   | "semver"
   | "openapi"
+  | "architecture"
   | "version";
 
 // "rules" is accepted as a legacy alias for "diagnostics"; "observe" for
@@ -45,6 +46,8 @@ const COMMAND_ALIASES: Record<string, Command> = {
   exports: "semver",
   swagger: "openapi",
   spec: "openapi",
+  arch: "architecture",
+  layers: "architecture",
 };
 
 const COMMANDS = new Set<string>([
@@ -82,6 +85,9 @@ const COMMANDS = new Set<string>([
   "openapi",
   "swagger",
   "spec",
+  "architecture",
+  "arch",
+  "layers",
   "version",
   "rules",
 ]);

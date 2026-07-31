@@ -121,6 +121,10 @@ export type { QueueTopologyReport, TopicEntry, TopologySite, QueueSystem } from 
 // version bump to match is the finding.
 export { buildApiSemverReport } from "./core/api-semver.ts";
 export type { ApiSemverReport, PackageSurface, SemverChange, SemverVerdict } from "./core/api-semver.ts";
+// §33 — Architecture Analysis: import cycles (a runtime hazard), layer
+// violations, and hub modules, all from the project import graph.
+export { buildArchitectureReport } from "./core/architecture.ts";
+export type { ArchitectureReport, ImportCycle, LayerViolation, HubModule } from "./core/architecture.ts";
 // §77 — OpenAPI Generation From Code: a spec derived from the actual routes, so
 // it cannot drift from the code that serves it.
 export { buildOpenApiDocument } from "./core/openapi.ts";

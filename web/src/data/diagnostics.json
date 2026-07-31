@@ -1,13 +1,13 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 132,
+  "total": 133,
   "defaultOn": 95,
-  "optIn": 37,
+  "optIn": 38,
   "byCategory": {
     "Performance": 12,
     "Security": 60,
     "Maintainability": 10,
-    "Reliability": 34,
+    "Reliability": 35,
     "Bugs": 16
   },
   "categoryWeights": {
@@ -1735,6 +1735,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Store the handle and `clearInterval(handle)` on shutdown, or call `handle.unref()` so the interval does not by itself keep the process alive."
+    },
+    {
+      "id": "no-unhandled-pipe-error",
+      "title": "Piped stream has no error handler",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "reliability",
+        "resource-leak",
+        "streams"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Use `stream.pipeline(source, destination, callback)` instead of `.pipe()` — it forwards errors, destroys every stream in the chain, and calls back once. If you must keep `.pipe()`, register an `error` listener on the source: `src.on(\"error\", next)`. Bare `.pipe()` does not forward errors, so a failing source leaves the destination open — a leaked file descriptor and a request that hangs until the client gives up."
     },
     {
       "id": "no-unnormalized-identity-comparison",
