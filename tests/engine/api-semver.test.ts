@@ -240,6 +240,116 @@ describe("buildApiSemverReport — baseline diff + version lint", () => {
   });
 });
 
+describe("buildApiSemverReport — hunt regressions (a surface is complete only when proven)", () => {
+  const surfaceOf = async (files: Record<string, string>) => {
+    const dir = await makeProject(files);
+    try {
+      const r = await buildApiSemverReport(dir);
+      return { p: r.packages[0]!, report: r };
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+
+  test("a directory-form main resolves to its index, not a conventional guess", async () => {
+    const { p } = await surfaceOf({
+      "package.json": `{ "name": "a", "version": "1.0.0", "main": "./lib" }`,
+      "lib/index.js": `exports.alpha = () => 1;\nexports.beta = () => 2;`,
+      // A decoy the old fallthrough would have picked:
+      "src/index.ts": `export const internalHelper = 42;`,
+    });
+    assert.equal(p.entry, "lib/index.js");
+    assert.deepEqual(p.exports, ["alpha", "beta"]);
+  });
+
+  test("a declared-but-unresolvable entry is unanalyzed, never a conventional guess", async () => {
+    const { p } = await surfaceOf({
+      "package.json": `{ "name": "ghost", "version": "1.0.0", "main": "./dist/bundle.js" }`,
+      "src/index.ts": `export const internal = 1;`,
+    });
+    assert.equal(p.entry, null, "guessing src/index.ts would assert a surface consumers never see");
+    assert.equal(p.complete, false);
+  });
+
+  test("a `types` condition never wins over a runtime condition", async () => {
+    const { p } = await surfaceOf({
+      "package.json": `{ "name": "b", "version": "1.0.0", "exports": { ".": { "types": "./dist/index.d.ts", "require": "./dist/index.js", "default": "./dist/index.js" } } }`,
+      "dist/index.js": `function connect(){ return "c"; }\nmodule.exports = connect;`,
+      "dist/index.d.ts": `declare function connect(): string;\nexport = connect;`,
+    });
+    assert.equal(p.entry, "dist/index.js", "Node's resolver never uses the types condition");
+    assert.equal(p.complete, false, "an opaque module.exports value hides its shape");
+  });
+
+  for (const [label, body] of [
+    ["Object.assign(module.exports, …)", `Object.assign(module.exports, { alpha: 1, beta: 2 });`],
+    ["tsc __exportStar output", `__exportStar(require("./other"), exports);`],
+    ["a chained module.exports = exports.x = …", `module.exports = exports.parse = function(){};\nexports.stringify = function(){};`],
+    ["an exports assignment inside a block", `exports.visible = 1;\nif (true) { exports.hidden = 2; }`],
+    ["Object.defineProperty(exports, …) getters", `Object.defineProperty(exports, "greet", { get: () => 1 });`],
+  ] as Array<[string, string]>) {
+    test(`${label} makes the surface partial (no removal claims)`, async () => {
+      const { p } = await surfaceOf({
+        "package.json": `{ "name": "cjs", "version": "1.0.0", "main": "index.js" }`,
+        "index.js": body,
+      });
+      assert.equal(p.complete, false, `${label} may hide names we did not read`);
+    });
+  }
+
+  test("`export * as \"string name\"` exports one name, not the target's names", async () => {
+    const { p } = await surfaceOf({
+      "package.json": `{ "name": "strstar", "version": "1.0.0" }`,
+      "src/index.ts": `export * as "string name" from "./z.ts";`,
+      "src/z.ts": `export const zOnly1 = 1;\nexport const zOnly2 = 2;`,
+    });
+    assert.deepEqual(p.exports, ["string name"]);
+  });
+
+  test("a name reached through two different `export *` sources is ambiguous", async () => {
+    const { p } = await surfaceOf({
+      "package.json": `{ "name": "amb", "version": "1.0.0" }`,
+      "src/index.ts": `export * from "./a.ts";\nexport * from "./b.ts";`,
+      "src/a.ts": `export const x = 1;`,
+      "src/b.ts": `export const x = 2;`,
+    });
+    assert.equal(p.complete, false, "ES semantics exclude an ambiguous star name entirely");
+  });
+
+  test("controls: clean ESM and clean CJS surfaces stay complete", async () => {
+    const esm = await surfaceOf({
+      "package.json": `{ "name": "clean", "version": "1.0.0", "main": "dist/index.js" }`,
+      "src/index.ts": `export const a = 1;\nexport * from "./h.ts";\nexport default a;`,
+      "src/h.ts": `export const helper = 2;`,
+    });
+    assert.equal(esm.p.complete, true);
+    assert.deepEqual(esm.p.exports, ["a", "default", "helper"]);
+
+    const cjs = await surfaceOf({
+      "package.json": `{ "name": "cleancjs", "version": "1.0.0", "main": "index.js" }`,
+      "index.js": `exports.readThing = function () {};\nmodule.exports.writeThing = () => {};`,
+    });
+    assert.equal(cjs.p.complete, true);
+    assert.deepEqual(cjs.p.exports, ["readThing", "writeThing"]);
+  });
+
+  test("a packaging-only refactor (main form changed, same files) claims nothing", async () => {
+    const dir = await makeProject({
+      "package.json": `{ "name": "pkg", "version": "1.0.0", "main": "./lib/index.js" }`,
+      "lib/index.js": `exports.alpha = () => 1;\nexports.beta = () => 2;`,
+    });
+    try {
+      const baseline = await buildApiSemverReport(dir);
+      await writeFile(join(dir, "package.json"), `{ "name": "pkg", "version": "1.0.1", "main": "./lib" }`);
+      const r = await buildApiSemverReport(dir, { baseline });
+      assert.deepEqual(r.diff!.changes, [], "the consumer surface is byte-identical");
+      assert.equal(r.summary.breaking, 0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("buildApiSemverReport — determinism", () => {
   test("identical input yields byte-identical JSON across runs", async () => {
     const dir = await makeProject(WORKSPACE);

@@ -36,6 +36,7 @@ import { join, dirname, resolve as resolvePath, relative, sep } from "node:path"
 import type { AstNode } from "./types.ts";
 import { parseSource } from "./parse.ts";
 import { discoverWorkspaces } from "./workspaces.ts";
+import { collectDescendants, attachParents } from "./walk.ts";
 
 // ---------------------------------------------------------------------------
 // Public shape.
@@ -100,6 +101,9 @@ const exists = async (p: string): Promise<boolean> => {
 
 const SOURCE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs", ".jsx"];
 
+/** A declaration-only file: its names are types, not the runtime surface. */
+const isDeclarationFile = (p: string): boolean => /\.d\.[cm]?ts$/.test(p);
+
 /** Resolve a relative specifier from a file — exact, +ext, /index+ext. */
 const resolveRelative = async (fromFile: string, spec: string): Promise<string | null> => {
   const base = resolvePath(dirname(fromFile), spec);
@@ -113,44 +117,86 @@ const resolveRelative = async (fromFile: string, spec: string): Promise<string |
   return null;
 };
 
-/**
- * The entry SOURCE file of a package. package.json `exports`("."), `module`,
- * `main` are tried first; a target that points at a build artifact that does not
- * exist in the repo (dist/) falls back to the conventional source entries
- * (src/index.*, index.*). Returns null when nothing resolves.
- */
-const resolveEntry = async (pkgDir: string, pkg: Record<string, unknown>): Promise<string | null> => {
-  const candidates: string[] = [];
-  const exportsField = pkg.exports;
-  if (typeof exportsField === "string") candidates.push(exportsField);
-  else if (exportsField && typeof exportsField === "object") {
-    const dot = (exportsField as Record<string, unknown>)["."];
-    if (typeof dot === "string") candidates.push(dot);
-    else if (dot && typeof dot === "object") {
-      for (const v of Object.values(dot as Record<string, unknown>)) {
-        if (typeof v === "string") candidates.push(v);
-      }
+/** Resolve ONE declared entry target the way Node would: an exact file, a
+ *  directory (→ its index.*), or a `dist/` artifact absent from the repo (→ its
+ *  `src/` twin). Returns null when the target does not resolve. */
+const resolveEntryTarget = async (pkgDir: string, cand: string): Promise<string | null> => {
+  const abs = join(pkgDir, cand);
+  if (/\.[cm]?[jt]sx?$/.test(cand) && !isDeclarationFile(cand) && (await exists(abs))) return abs;
+  // A dist/ target with a source twin: dist/index.js → src/index.ts.
+  const m = /^(?:\.\/)?(?:dist|lib|build|out)\/(.+)\.[cm]?js$/.exec(cand);
+  if (m) {
+    for (const ext of SOURCE_EXTENSIONS) {
+      const src = join(pkgDir, "src", m[1] + ext);
+      if (await exists(src)) return src;
     }
   }
-  for (const key of ["module", "main"]) {
-    const v = pkg[key];
-    if (typeof v === "string") candidates.push(v);
-  }
-  candidates.push("src/index.ts", "src/index.tsx", "src/index.mts", "src/index.js", "src/index.mjs", "index.ts", "index.js", "index.mjs");
-
-  for (const cand of candidates) {
-    const abs = join(pkgDir, cand);
-    if (/\.[cm]?[jt]sx?$/.test(cand) && (await exists(abs))) return abs;
-    // A dist/ target with a source twin: dist/index.js → src/index.ts.
-    const m = /^(?:\.\/)?dist\/(.+)\.[cm]?js$/.exec(cand);
-    if (m) {
-      for (const ext of SOURCE_EXTENSIONS) {
-        const src = join(pkgDir, "src", m[1] + ext);
-        if (await exists(src)) return src;
-      }
+  // Directory form (`"main": "./lib"`): Node resolves it to <dir>/index.*.
+  if (!/\.[A-Za-z0-9]+$/.test(cand)) {
+    for (const ext of SOURCE_EXTENSIONS) {
+      const idx = join(abs, "index" + ext);
+      if (await exists(idx)) return idx;
     }
   }
   return null;
+};
+
+/**
+ * The entry SOURCE file of a package, and whether package.json DECLARED one.
+ *
+ * Declared entries (`exports["."]`, `module`, `main`) are authoritative: if a
+ * package declares an entry that cannot be resolved, the package is left
+ * unanalyzed rather than silently falling through to a conventional guess — a
+ * guessed entry (a CLI `bin` script, an internal `src/index.ts` consumers never
+ * import) yields a surface that is wrong with full confidence, which is exactly
+ * how a phantom "removed export" gets claimed. `types`/`.d.ts` conditions are
+ * skipped while any runtime condition exists: Node's resolver never uses them.
+ */
+const resolveEntry = async (
+  pkgDir: string,
+  pkg: Record<string, unknown>,
+): Promise<{ entry: string | null; declared: boolean }> => {
+  const runtime: string[] = [];
+  const typesOnly: string[] = [];
+  const addCondition = (key: string, value: unknown): void => {
+    if (typeof value !== "string") return;
+    if (key === "types" || key === "typings" || isDeclarationFile(value)) typesOnly.push(value);
+    else runtime.push(value);
+  };
+
+  const exportsField = pkg.exports;
+  if (typeof exportsField === "string") addCondition("default", exportsField);
+  else if (exportsField && typeof exportsField === "object") {
+    const dot = (exportsField as Record<string, unknown>)["."];
+    if (typeof dot === "string") addCondition("default", dot);
+    else if (dot && typeof dot === "object") {
+      // Node condition precedence for our purposes: import/require/node/default.
+      const conditions = dot as Record<string, unknown>;
+      for (const key of ["import", "require", "node", "default"]) {
+        if (key in conditions) addCondition(key, conditions[key]);
+      }
+      for (const [key, value] of Object.entries(conditions)) {
+        if (!["import", "require", "node", "default"].includes(key)) addCondition(key, value);
+      }
+    }
+  }
+  for (const key of ["module", "main"]) addCondition(key, pkg[key]);
+
+  const declaredCandidates = runtime.length > 0 ? runtime : typesOnly;
+  if (declaredCandidates.length > 0) {
+    for (const cand of declaredCandidates) {
+      const resolved = await resolveEntryTarget(pkgDir, cand);
+      if (resolved) return { entry: resolved, declared: true };
+    }
+    return { entry: null, declared: true }; // declared but unresolvable → unanalyzed
+  }
+
+  // Nothing declared: fall back to the conventional entries.
+  for (const cand of ["src/index.ts", "src/index.tsx", "src/index.mts", "src/index.js", "src/index.mjs", "index.ts", "index.js", "index.mjs", "index.cjs"]) {
+    const abs = join(pkgDir, cand);
+    if (await exists(abs)) return { entry: abs, declared: false };
+  }
+  return { entry: null, declared: false };
 };
 
 // ---------------------------------------------------------------------------
@@ -200,6 +246,10 @@ const extractExports = async (
   depth: number,
 ): Promise<{ names: Set<string>; complete: boolean }> => {
   const names = new Set<string>();
+  const starNames = new Set<string>();
+  /** CJS assignment nodes we fully understood — everything else that touches
+   *  `exports` makes the surface partial (see the sweep below). */
+  const handledCjs = new Set<AstNode>();
   let complete = true;
   if (depth > 8 || seen.has(file)) return { names, complete };
   seen.add(file);
@@ -212,6 +262,7 @@ const extractExports = async (
   }
   const parsed = parseSource(file, source);
   if (parsed.parseFailed) return { names, complete: false };
+  attachParents(parsed.program);
 
   for (const stmt of (parsed.program.body as AstNode[] | undefined) ?? []) {
     if (stmt.type === "ExportDefaultDeclaration") {
@@ -219,9 +270,16 @@ const extractExports = async (
       continue;
     }
     if (stmt.type === "ExportAllDeclaration") {
-      // `export * as ns from "./x"` exports ONE name; a bare `export *` splices.
-      const exported = (stmt.exported as AstNode | undefined)?.name as string | undefined;
-      if (exported) {
+      // `export * as ns from "./x"` / `export * as "str" from "./x"` export ONE
+      // name; a bare `export *` splices the target's names in.
+      const exportedNode = stmt.exported as AstNode | undefined;
+      const exported =
+        exportedNode?.type === "Identifier"
+          ? (exportedNode.name as string)
+          : exportedNode?.type === "Literal" && typeof exportedNode.value === "string"
+            ? exportedNode.value
+            : null;
+      if (exported !== null) {
         names.add(exported);
         continue;
       }
@@ -232,8 +290,23 @@ const extractExports = async (
         continue;
       }
       const sub = await extractExports(target, seen, depth + 1);
-      for (const n of sub.names) if (n !== "default") names.add(n);
+      for (const n of sub.names) {
+        if (n === "default") continue;
+        // A name reached through two DIFFERENT `export *` sources is ambiguous:
+        // ES semantics exclude it from the namespace entirely. We cannot tell
+        // which binding wins, so the surface stops being provable.
+        if (starNames.has(n)) complete = false;
+        starNames.add(n);
+        names.add(n);
+      }
       if (!sub.complete) complete = false;
+      continue;
+    }
+
+    // TypeScript `export = x` — a whole-module CJS export.
+    if (stmt.type === "TSExportAssignment") {
+      names.add("default");
+      complete = false; // the exported value's own shape is opaque here
       continue;
     }
     if (stmt.type === "ExportNamedDeclaration") {
@@ -276,23 +349,21 @@ const extractExports = async (
         (obj.object as AstNode | undefined)?.type === "Identifier" &&
         (obj.object as AstNode).name === "module" &&
         ((obj.property as AstNode | undefined)?.name as string | undefined) === "exports";
-      if (objIsExports && prop) {
+      if ((objIsExports || objIsModuleExports) && prop) {
         names.add(prop);
-      } else if (objIsModuleExports && prop) {
-        names.add(prop);
-      } else if (
-        obj?.type === "Identifier" &&
-        obj.name === "module" &&
-        prop === "exports"
-      ) {
+        handledCjs.add(left);
+        if (obj) handledCjs.add(obj);
+      } else if (obj?.type === "Identifier" && obj.name === "module" && prop === "exports") {
+        handledCjs.add(left);
         const value = expr.right as AstNode | undefined;
         if (value?.type === "ObjectExpression") {
           for (const p of (value.properties as AstNode[] | undefined) ?? []) {
             if (p.type === "Property" && !p.computed) {
               const key = (p.key as AstNode | undefined)?.name as string | undefined;
               if (key) names.add(key);
-            } else if (p.type === "SpreadElement") {
-              complete = false; // a spread hides names
+              else complete = false;
+            } else {
+              complete = false; // a spread / computed key hides names
             }
           }
         } else {
@@ -302,6 +373,35 @@ const extractExports = async (
       }
     }
   }
+
+  // CONSERVATIVE SWEEP. The surface is `complete` only when we understood every
+  // way this module writes its exports. Anything else that references `exports`
+  // or `module.exports` — `Object.assign(module.exports, …)`, tsc's
+  // `__exportStar`, `Object.defineProperty(exports, …)` getters, a chained
+  // `module.exports = exports.x = …`, an assignment nested in a block or an
+  // `if` — is a name we may have missed, so the surface becomes partial and can
+  // never produce a removal claim.
+  const exportRefs = collectDescendants(
+    parsed.program,
+    (n) =>
+      (n.type === "Identifier" && n.name === "exports") ||
+      (n.type === "MemberExpression" &&
+        !n.computed &&
+        (n.object as AstNode | undefined)?.type === "Identifier" &&
+        (n.object as AstNode).name === "module" &&
+        ((n.property as AstNode | undefined)?.name as string | undefined) === "exports"),
+    undefined,
+    true,
+  );
+  for (const ref of exportRefs) {
+    if (handledCjs.has(ref)) continue;
+    // The `exports` identifier inside an already-handled member expression.
+    const parent = (ref as { parent?: AstNode }).parent;
+    if (parent && handledCjs.has(parent)) continue;
+    complete = false;
+    break;
+  }
+
   return { names, complete };
 };
 
@@ -336,7 +436,7 @@ export const buildApiSemverReport = async (
         ? pkg.name
         : relative(root, dir).split(sep).join("/") || ".";
     const version = typeof pkg.version === "string" ? pkg.version : null;
-    const entryAbs = await resolveEntry(dir, pkg);
+    const { entry: entryAbs } = await resolveEntry(dir, pkg);
     if (!entryAbs) {
       packages.push({ name, version, entry: null, exports: [], complete: false });
       continue;

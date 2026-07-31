@@ -19,10 +19,18 @@ while staying offline-first and deterministic.
   destructuring; CJS `exports.x` / `module.exports = {…}`; `dist/` entries fall
   back to their `src/` twin), snapshots it with `--baseline`, and lints changes:
   a removed export without a major bump (or a 0.x minor) exits 1; additions with
-  an unchanged version are advisory. A partial surface (unfollowable `export *`,
-  opaque or spread `module.exports`) never yields a removal claim, an
-  unresolvable entry is unanalyzed rather than guessed, and a removed package is
-  info (no version left to lint). Deterministic, offline.
+  an unchanged version are advisory. Hardened against an adversarial hunt: the
+  surface is `complete` only when every export mechanism in the module was
+  understood, so an unfollowable `export *`, an ambiguous two-star name, an
+  opaque/spread `module.exports`, `Object.assign(module.exports, …)`, tsc's
+  `__exportStar`, `Object.defineProperty(exports, …)`, and chained or
+  block-nested `exports.x =` all mark it partial — and a partial surface never
+  yields a removal claim. A *declared* entry that will not resolve leaves the
+  package unanalyzed instead of falling through to a conventional guess,
+  directory-form `main` resolves to its `index.*` as Node does, and a
+  `types`/`.d.ts` condition never wins over a runtime one — so a packaging-only
+  refactor is never reported as a breaking release. A removed package is info
+  (no version left to lint). Deterministic, offline.
 
 ### Queue & topic topology — `node-doctor queues` (§157)
 
