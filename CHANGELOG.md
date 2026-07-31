@@ -11,6 +11,27 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Diagnostics — scheduled jobs & websockets (§30/§31)
+
+- **`no-invalid-cron-expression`** (Bugs, §30, opt-in) — a scheduled job whose cron
+  expression can never fire: an out-of-range field (`"0 25 * * *"`), the wrong
+  field count, a reversed range, or a zero step. Most schedulers throw at startup
+  (taking the process down on deploy); the rest silently never run the job, and
+  neither review nor the type checker catches it because it is a string. Parsed
+  only at recognized scheduler call sites (node-cron, node-schedule incl. the
+  `(name, expr, fn)` form, `new CronJob`/`{ cronTime }`, croner, BullMQ/Bull
+  `{ repeat: { pattern | cron } }`) behind an import gate, and only a static
+  string. `@daily` macros, month/day names and the Quartz extensions
+  (`L`/`W`/`#`/`?`) are deliberately unmodelled and never claimed invalid.
+- **`no-missing-websocket-error-handler`** (Reliability, §31, opt-in) — a `ws`
+  connection handler that registers `message`/`close` but no `error` listener. A
+  socket is an EventEmitter, so an `error` event with no listener is re-thrown as
+  an uncaught exception: one client vanishing mid-frame kills the process and
+  every other connected socket. Fires only when the socket parameter is a plain
+  binding with at least one statically-named registration here and no `error`
+  one, and never when the socket escapes (passed to a helper, stored, returned)
+  or uses a dynamic event name — the error path may then live out of sight.
+
 ### Package API semver lint — `node-doctor semver` (§155)
 
 - **`node-doctor semver`** (aliases `api-semver`/`exports`) — semver linting for

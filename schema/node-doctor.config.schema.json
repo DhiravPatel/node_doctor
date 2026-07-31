@@ -70,6 +70,7 @@
           "no-function-constructor-with-input",
           "no-hardcoded-secret-literal",
           "no-infinite-retry-without-backoff",
+          "no-invalid-cron-expression",
           "no-inverted-timeout-budget",
           "no-jwt-decode-as-verify",
           "no-jwt-none-algorithm",
@@ -83,6 +84,7 @@
           "no-missing-body-size-limit",
           "no-missing-catch-on-async-iife",
           "no-missing-stream-error-handler",
+          "no-missing-websocket-error-handler",
           "no-node-builtin-on-edge",
           "no-nondeterministic-stable-key",
           "no-nosql-object-injection",
@@ -164,6 +166,7 @@
           "architecture",
           "async",
           "auth",
+          "bugs",
           "cache",
           "ci",
           "complexity",
@@ -174,6 +177,8 @@
           "correctness",
           "cors",
           "cost",
+          "crash",
+          "cron",
           "crypto",
           "csrf",
           "data-loss",
@@ -237,7 +242,8 @@
           "transport",
           "typed",
           "unicode",
-          "validation"
+          "validation",
+          "websocket"
         ]
       },
       "uniqueItems": true
@@ -345,6 +351,7 @@
                 "no-function-constructor-with-input",
                 "no-hardcoded-secret-literal",
                 "no-infinite-retry-without-backoff",
+                "no-invalid-cron-expression",
                 "no-inverted-timeout-budget",
                 "no-jwt-decode-as-verify",
                 "no-jwt-none-algorithm",
@@ -358,6 +365,7 @@
                 "no-missing-body-size-limit",
                 "no-missing-catch-on-async-iife",
                 "no-missing-stream-error-handler",
+                "no-missing-websocket-error-handler",
                 "no-node-builtin-on-edge",
                 "no-nondeterministic-stable-key",
                 "no-nosql-object-injection",

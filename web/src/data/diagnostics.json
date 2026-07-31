@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 130,
+  "total": 132,
   "defaultOn": 95,
-  "optIn": 35,
+  "optIn": 37,
   "byCategory": {
     "Performance": 12,
     "Security": 60,
     "Maintainability": 10,
-    "Reliability": 33,
-    "Bugs": 15
+    "Reliability": 34,
+    "Bugs": 16
   },
   "categoryWeights": {
     "Security": 2,
@@ -875,6 +875,22 @@
       "recommendation": "Add exponential backoff between attempts (`await sleep(base * 2 ** attempt)`) and a maximum-attempt cap so a downed dependency does not trigger a tight retry storm."
     },
     {
+      "id": "no-invalid-cron-expression",
+      "title": "Cron expression is malformed and the job will never run",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "bugs",
+        "cron",
+        "reliability"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Fix the cron expression so every field is inside its range (minute 0-59, hour 0-23, day-of-month 1-31, month 1-12, day-of-week 0-7) and the expression has 5 fields (or 6 with a leading seconds field). Most schedulers throw on a malformed expression at startup; the ones that do not simply never run the job."
+    },
+    {
       "id": "no-inverted-timeout-budget",
       "title": "Inner timeout exceeds the outer budget",
       "category": "Reliability",
@@ -1073,6 +1089,24 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use `stream.pipeline(src, dest, cb)` (it forwards errors and cleans up), or attach `.on('error', handler)` to both the source and destination stream."
+    },
+    {
+      "id": "no-missing-websocket-error-handler",
+      "title": "WebSocket connection has no error listener",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "crash",
+        "reliability",
+        "websocket"
+      ],
+      "requires": [
+        "ws"
+      ],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Register an `error` listener on every websocket: `ws.on(\"error\", (err) => logger.error({ err }, \"socket error\"))`. A socket is an EventEmitter, so an `error` event with no listener is re-thrown as an uncaught exception — one client dropping its connection would otherwise take down the process and every other socket with it."
     },
     {
       "id": "no-node-builtin-on-edge",

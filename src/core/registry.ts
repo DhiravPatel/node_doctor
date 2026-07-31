@@ -86,11 +86,13 @@ import { noCacheWithoutTtl } from "../diagnostics/reliability/no-cache-without-t
 import { noCrossRequestStateMutation } from "../diagnostics/reliability/no-cross-request-state-mutation.ts";
 import { noDroppedAbortSignal } from "../diagnostics/reliability/no-dropped-abort-signal.ts";
 import { noInfiniteRetryWithoutBackoff } from "../diagnostics/reliability/no-infinite-retry-without-backoff.ts";
+import { noInvalidCronExpression } from "../diagnostics/reliability/no-invalid-cron-expression.ts";
 import { noInvertedTimeoutBudget } from "../diagnostics/reliability/no-inverted-timeout-budget.ts";
 import { noListenerAddedPerRequest } from "../diagnostics/reliability/no-listener-added-per-request.ts";
 import { noLivenessCheckWithDependency } from "../diagnostics/reliability/no-liveness-check-with-dependency.ts";
 import { noLostAsyncContext } from "../diagnostics/reliability/no-lost-async-context.ts";
 import { noMissingStreamErrorHandler } from "../diagnostics/reliability/no-missing-stream-error-handler.ts";
+import { noMissingWebsocketErrorHandler } from "../diagnostics/reliability/no-missing-websocket-error-handler.ts";
 import { noRetryAmplification } from "../diagnostics/reliability/no-retry-amplification.ts";
 import { noThrowInFinally } from "../diagnostics/reliability/no-throw-in-finally.ts";
 import { noUnboundedModuleCache } from "../diagnostics/reliability/no-unbounded-module-cache.ts";
@@ -215,11 +217,13 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noCrossRequestStateMutation,
   noDroppedAbortSignal,
   noInfiniteRetryWithoutBackoff,
+  noInvalidCronExpression,
   noInvertedTimeoutBudget,
   noListenerAddedPerRequest,
   noLivenessCheckWithDependency,
   noLostAsyncContext,
   noMissingStreamErrorHandler,
+  noMissingWebsocketErrorHandler,
   noRetryAmplification,
   noThrowInFinally,
   noUnboundedModuleCache,

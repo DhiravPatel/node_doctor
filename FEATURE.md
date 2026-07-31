@@ -459,17 +459,23 @@ Singleton, Factory, Repository, Strategy, Observer, Decorator, Builder, Adapter 
 > Config-file linting (Dockerfiles, K8s manifests, CI YAML, serverless configs) is statically analyzable and in progress — Terraform/CloudFormation security checks ship today (`no-open-security-group`, `no-overbroad-iam-policy`, `no-public-cloud-storage`) via the whole-tree text scan. **Planned**. Runtime/cloud-account analysis (live AWS resources) is **Vision**.
 
 ## 24. Docker Analysis
-**Status: Planned** (Dockerfile static analysis)
+**Status: Detected** (`dockerfile-runs-as-root`, `dockerfile-mutable-base-tag`, `dockerfile-secret-in-build-stage`)
+
+**Shipped:** the engine reads Dockerfiles as a first-class input — a final stage running as root, a mutable base tag (`:latest`/a floating major) that makes the build irreproducible, and a secret baked into a build layer (where it survives in the image history even if a later stage deletes it). Each rule demands positive evidence the file IS a Dockerfile, so a docker-compose file or a shell script is never mis-analyzed. Layer-size/cache-order and multi-stage-optimization advice remain Planned.
 
 Dockerfile optimization, multi-stage builds, root-user detection, image size, layer optimization, healthcheck presence, image security scanning.
 
 ## 25. Kubernetes Analysis
-**Status: Planned** (manifest static analysis)
+**Status: Detected** (`k8s-privileged-container`, `k8s-host-namespace`, `k8s-missing-resource-limits`)
+
+**Shipped:** Kubernetes manifests are parsed and checked for the container-escape and noisy-neighbour classes — a `privileged: true` container, a pod sharing a host namespace (`hostNetwork`/`hostPID`/`hostIPC`), and a container with no resource limits. Detection requires positive manifest evidence (`apiVersion` + `kind`), so a docker-compose file with a `privileged:` key is never reported as a Kubernetes finding. Probe/affinity/PDB-level advice remains Planned.
 
 Missing resource limits, missing requests, health probes, secret handling, ConfigMaps, autoscaling config, ingress validation.
 
 ## 26. CI/CD Analysis
-**Status: Planned** (pipeline-config static analysis)
+**Status: Detected** (`ci-script-injection`, `ci-pull-request-target-checkout`, `ci-unpinned-action`)
+
+**Shipped:** GitHub Actions workflows are analyzed for the pipeline-compromise classes — script injection through `${{ github.event.* }}` interpolated into a `run:` block, a `pull_request_target` workflow checking out untrusted PR code (which then runs with write-scoped secrets), and an action pinned to a mutable tag rather than a commit SHA. Other CI providers remain Planned.
 
 ### Providers
 GitHub Actions, GitLab CI, Jenkins, CircleCI, Azure DevOps.
@@ -492,7 +498,9 @@ Cold starts, bundle size, timeout validation, memory optimization, event-schema 
 # Part X — Messaging, Jobs & Realtime
 
 ## 29. Message Queue Analysis
-**Status: Planned**
+**Status: Core** (`node-doctor queues`) — see §157 for the topology map.
+
+**Shipped:** `node-doctor queues` maps the publish/consume graph across kafkajs, amqplib, BullMQ/bull, NATS, MQTT and Redis pub/sub, reporting orphan topics (published, never consumed) and dead consumers (subscribed, nothing publishes). Per-consumer correctness checks (ack/nack discipline, DLQ configuration, prefetch tuning) remain Planned.
 
 ### Supported
 RabbitMQ, Kafka, SQS, BullMQ, Redis Queue.
@@ -501,14 +509,18 @@ RabbitMQ, Kafka, SQS, BullMQ, Redis Queue.
 Retry strategy, dead-letter queue presence, duplicate processing, idempotency, consumer health.
 
 ## 30. Cron Job Analysis
-**Status: Planned**
+**Status: Detected** (`no-invalid-cron-expression`, opt-in)
 
 Duplicate jobs, missing locks (no distributed lock on scheduled work), long-running jobs, retry policies, schedule conflicts.
 
+**Shipped, the provable slice:** `no-invalid-cron-expression` (Bugs/error/high) catches a scheduled job whose cron expression can never fire — the nightly rollup that silently never runs, or the malformed string that throws at startup and takes the process down on deploy. Nothing else catches it: it is a string, so neither review nor the type checker sees it. It parses the expression at recognized scheduler call sites only (node-cron `schedule`, node-schedule `scheduleJob` incl. the `(name, expr, fn)` form, `new CronJob(expr)` / `{ cronTime }`, croner `Cron(expr)`, BullMQ/Bull `{ repeat: { pattern | cron } }`), behind an import gate, and claims invalid **only** for what a parse proves: a field count that is neither 5 nor 6, a value outside its field's range, a reversed range, or a zero/non-numeric step. Everything it does not fully model stays silent — `@daily` macros, month/day names, and the Quartz extensions (`L`, `W`, `#`, `?`) — as does any expression that is not a readable static string. Overlap/lock/duration analysis remains Planned.
+
 ## 31. WebSocket Analysis
-**Status: Planned**
+**Status: Detected** (`no-missing-websocket-error-handler`, opt-in)
 
 Socket leaks, authentication on connect, event/payload validation, room management, connection cleanup.
+
+**Shipped, the crash-class slice:** `no-missing-websocket-error-handler` (Reliability/warn/high) flags a `ws` connection handler that wires up `message`/`close` but never `error`. A socket is an EventEmitter, and an `error` event with no listener is re-thrown as an uncaught exception — so one client vanishing mid-frame, one ECONNRESET on a flaky mobile network, takes down the process and every *other* connected socket with it. It survives every test because the happy path never emits `error`. Precision: it fires only when the socket parameter is a plain binding that already has at least one statically-named listener registration here, has no `error` registration, and never escapes — if the socket is passed to a helper, stored in a set, returned, or used with a dynamic event name or `addEventListener`, the handler may live out of sight and the rule stays silent. Authentication-on-connect, payload validation and room-lifecycle checks remain Planned.
 
 ## 32. Microservice Analysis
 **Status: Vision** (cross-service reachability and topology)
@@ -554,7 +566,7 @@ Auto format · Auto lint fix · Import cleanup · Remove dead code · Fix async 
 Health score, dependency graph, API graph, architecture graph, database graph, route map, performance dashboard, security dashboard, technical-debt dashboard.
 
 ## 39. Reports
-**Status:** JSON is **Core**; SARIF/Markdown are **Planned**; HTML/PDF/CSV/trend reports are **Vision**.
+**Status:** JSON, **SARIF** (`--sarif-out`, for GitHub code scanning), **Markdown** (PR comments) and **HTML** (`--html-out`) are all **Core**; PDF/CSV and historical trend reports remain **Vision** (they need persisted state).
 
 - **JSON report** — full structured output (stable schema). *(Core)*
 - **SARIF report** — for code-scanning ingestion. *(Planned)*
@@ -583,7 +595,9 @@ Health score, dependency graph, API graph, architecture graph, database graph, r
 - CI mode (blocking levels, baseline delta, machine output).
 
 ## 41. IDE Integration
-**Status: Planned** (LSP-first, VS Code first)
+**Status: Core** (`node-doctor lsp`)
+
+**Shipped:** a language server over the same engine as the CLI — inline diagnostics, hover explanations and quick fixes computed on the *unsaved* buffer, so a finding appears as you type rather than on save. Editor-specific surfaces beyond the LSP (CodeLens, an inline history gutter) remain Planned.
 
 - VS Code extension.
 - JetBrains plugin *(Vision)*.
@@ -736,7 +750,9 @@ The Node equivalent of React Bench: a public benchmark measuring **which models 
 Full source→sink tracking **across files and function boundaries**: request input flowing through helpers, services, and utilities into an injection sink, a log, a response, or a client bundle. This is the sound version of today's intra-file taint, and it is what makes the security and privacy rules trustworthy rather than heuristic.
 
 ## 57. Type-Aware Analysis
-**Status: Planned** (opt-in `--typed`, via a TypeScript type source)
+**Status: Core** (opt-in `--typed`)
+
+**Shipped:** an optional pass that reads the project's own TypeScript types, catching what a syntactic check structurally cannot — most importantly a **discarded promise** where the callee is typed `(): Promise<T>` rather than written `async`, the majority case in a real TypeScript codebase. `typescript@^5` is an optional peer: without it a normal scan is unchanged and `--typed` fails loudly rather than silently finding nothing.
 
 - **Floating-promise detection via types** (`Promise<T>` return, not just the `async` keyword).
 - Nullability / undefined-access analysis.
@@ -804,7 +820,9 @@ Use production route-hit data to weight findings: a critical issue on a hot path
 # Part XIX — Security & Compliance Depth
 
 ## 67. SBOM Generation
-**Status: Planned**
+**Status: Core** (`node-doctor sbom`)
+
+**Shipped:** a CycloneDX or SPDX (`--framework spdx`) bill of materials generated from the dependency tree, entirely offline and deterministic — the same bytes for the same input, so it can be committed and diffed. Vulnerability enrichment is deliberately excluded (it requires network access; see §60).
 
 Emit a Software Bill of Materials in **CycloneDX** and **SPDX** formats for the full dependency tree — increasingly a procurement and compliance requirement.
 
@@ -826,7 +844,9 @@ Emit a Software Bill of Materials in **CycloneDX** and **SPDX** formats for the 
 - Newly-published / low-maturity package flags (release-age policy).
 
 ## 70. Attack-Surface & Authorization Mapping ★ Differentiator
-**Status: Planned**
+**Status: Core** (`node-doctor surface`, `node-doctor paths`)
+
+**Shipped:** `surface` enumerates every route with its middleware chain and authentication posture — the "which endpoints are unauthenticated?" question answered from source — and `paths` proves exploitability by printing the source→sink chain for each injection sink fed by request data, `file:line` at every hop. Together they map the attack surface and which of it is reachable. Per-route authorization *correctness* (does this route check the right permission?) needs per-model scope knowledge and remains Planned (see §114).
 
 - **Attack-surface map** — enumerate every externally reachable entry point (routes, webhooks, queue consumers, GraphQL fields) with its auth posture.
 - **Authorization matrix** — auto-generate a route → required-permission table and flag inconsistencies and gaps. Enormously useful for security review and impossible to maintain by hand.
@@ -837,7 +857,9 @@ Emit a Software Bill of Materials in **CycloneDX** and **SPDX** formats for the 
 Curated rule bundles mapped to **SOC 2, PCI-DSS, HIPAA, GDPR, ISO 27001** controls, with per-control pass/fail and evidence export for auditors.
 
 ## 72. IaC & Cloud-Config Security
-**Status: Planned** (static config analysis)
+**Status: Detected** (`no-open-security-group`, `no-overbroad-iam-policy`, `no-public-cloud-storage`)
+
+**Shipped:** Terraform and CloudFormation configs are read by the same engine — a security group open to `0.0.0.0/0`, an IAM policy granting `*` action or resource, and a publicly-readable storage bucket. Each requires positive evidence of the file type before firing. Drift detection against a live account stays out of scope (it needs network access).
 
 Extend infra analysis (Docker/K8s already cataloged in Part IX) with Terraform/Pulumi/CloudFormation static checks: public buckets, over-broad IAM, unencrypted resources, open security groups.
 
@@ -880,7 +902,9 @@ Flag analytics/tracking calls that fire before consent, and PII sent to analytic
 Generate an OpenAPI/Swagger spec **from the actual routes, DTOs, and validators** — the inverse of the "missing spec" detection in §22. Keeps docs honest because they're derived, not hand-written.
 
 ## 78. API Breaking-Change Detection ★ Differentiator
-**Status: Planned**
+**Status: Core** (`node-doctor surface --baseline <f>`)
+
+**Shipped:** the route surface is snapshotted to a baseline file and diffed on every run — a removed route, a changed method, or a route that lost its authentication middleware is reported as a breaking change and exits non-zero in CI. The package-export equivalent ships as §155 (`node-doctor semver`). Request/response *shape* diffing (a narrowed field, a newly-required body property) remains Planned.
 
 Diff the API surface between two revisions and flag **breaking changes** (removed endpoints, changed shapes, tightened validation) — semver for your API, enforceable in CI. High value, low competition, and it reuses the baseline-delta machinery that already ships.
 
@@ -919,7 +943,9 @@ Flag APIs deprecated or removed across Node major versions, and surface new-vers
 Apply known migration codemods for major-version bumps of common libraries.
 
 ## 85. Modernization Score
-**Status: Planned**
+**Status: Core** (`node-doctor modernize`)
+
+**Shipped:** a second number, separate from the health score, that goes *up* as deprecated APIs and unsupported Node majors are retired — so modernization work shows measurable progress instead of competing with feature work for attention. Deterministic and offline.
 
 A dedicated score for "how far from current best practices" (deprecated APIs, legacy patterns, outdated deps), tracked over time to show modernization progress.
 
@@ -946,12 +972,16 @@ Generate new routes/services/consumers from templates that are **pre-verified cl
 Accept / dismiss / snooze findings with a required reason, persisted across scans, with an audit trail — so the same debate isn't re-litigated every run.
 
 ## 89. Ownership-Aware Routing
-**Status: Planned**
+**Status: Core** (`--owners`)
+
+**Shipped:** findings are grouped by the team that owns the file, resolved from `CODEOWNERS` — so a 200-finding monorepo report becomes each team's own short list instead of a wall nobody triages.
 
 Use CODEOWNERS / directory ownership to route each finding to the responsible team and scope PR comments accordingly.
 
 ## 90. PR Risk Scoring & Effort Estimates
-**Status: Planned** — PR summary comments and inline review comments already ship (§42); the scoring layer is the remaining work.
+**Status: Core** (`--risk`)
+
+**Shipped:** one explainable number per change for triage, alongside the PR summary and inline review comments (§42). Effort *estimates* (how long a fix will take) remain Vision — they need historical data this tool does not collect.
 
 - A **risk score** per pull request (how dangerous is this change), from touched surface + finding severity.
 - Time-to-fix estimates per finding to help planning.
