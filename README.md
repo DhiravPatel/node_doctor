@@ -8,13 +8,13 @@ Deterministic, offline-first static analysis for Node.js backends — built for 
 class of defect that compiles, passes the tests, runs fine on your machine, and
 falls over the moment two requests arrive at once.
 
-[![npm version](https://img.shields.io/npm/v/node-doctor.svg)](https://www.npmjs.com/package/node-doctor)
+[![npm version](https://img.shields.io/npm/v/@dhiravpatel/node-doctor.svg)](https://www.npmjs.com/package/@dhiravpatel/node-doctor)
 [![CI](https://img.shields.io/github/actions/workflow/status/DhiravPatel/node_doctor/ci.yml?branch=main)](https://github.com/DhiravPatel/node_doctor/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](#license)
-[![Node](https://img.shields.io/node/v/node-doctor.svg)](#requirements)
+[![Node](https://img.shields.io/node/v/@dhiravpatel/node-doctor.svg)](#requirements)
 
 ```bash
-npx node-doctor@latest .
+npx @dhiravpatel/node-doctor@latest .
 ```
 
 </div>
@@ -38,9 +38,9 @@ MCP tool.
 ## Quick start
 
 ```bash
-npx node-doctor@latest .              # scan the current directory
-npx node-doctor@latest diagnostics    # list every diagnostic + gating
-npx node-doctor@latest . --json       # machine-readable report
+npx @dhiravpatel/node-doctor@latest .              # scan the current directory
+npx @dhiravpatel/node-doctor@latest diagnostics    # list every diagnostic + gating
+npx @dhiravpatel/node-doctor@latest . --json       # machine-readable report
 ```
 
 Typical output on a codebase that needs help:
@@ -213,7 +213,7 @@ scans, then offers to pass every finding straight to a coding agent (Claude Code
 Codex, or Cursor) with a precise, root-cause-first instruction prompt:
 
 ```bash
-npx node-doctor@latest fix .
+npx @dhiravpatel/node-doctor@latest fix .
 ```
 
 ```
@@ -318,7 +318,7 @@ genuinely new defect fails the check.
 Scaffold the whole thing in one command:
 
 ```bash
-npx node-doctor@latest ci        # writes .github/workflows/node-doctor.yml
+npx @dhiravpatel/node-doctor@latest ci        # writes .github/workflows/node-doctor.yml
 ```
 
 The bundled [GitHub Action](./.github/action.yml) runs the baseline delta and, on
@@ -329,10 +329,10 @@ wire it by hand:
 ```yaml
 - run: |
     git checkout origin/$BASE
-    npx node-doctor@latest . --json-out base.json --blocking none
+    npx @dhiravpatel/node-doctor@latest . --json-out base.json --blocking none
     git checkout $SHA
-    npx node-doctor@latest . --json-out head.json --blocking none
-    npx node-doctor@latest delta --baseline base.json --current head.json --blocking error
+    npx @dhiravpatel/node-doctor@latest . --json-out head.json --blocking none
+    npx @dhiravpatel/node-doctor@latest delta --baseline base.json --current head.json --blocking error
 ```
 
 For local enforcement, `node-doctor install --git-hook` writes an advisory
@@ -343,10 +343,10 @@ pre-commit hook that scans staged files.
 Push node.doctor's knowledge into the agent that writes the code:
 
 ```bash
-npx node-doctor@latest install         # skill → detected clients (Claude Code, Cursor, …)
-npx node-doctor@latest install --skill improve-node   # a read-only audit-then-plan skill
-npx node-doctor@latest install --agent-hooks          # post-edit hooks (feedback as it edits)
-npx node-doctor@latest mcp             # …or run as an MCP server
+npx @dhiravpatel/node-doctor@latest install         # skill → detected clients (Claude Code, Cursor, …)
+npx @dhiravpatel/node-doctor@latest install --skill improve-node   # a read-only audit-then-plan skill
+npx @dhiravpatel/node-doctor@latest install --agent-hooks          # post-edit hooks (feedback as it edits)
+npx @dhiravpatel/node-doctor@latest mcp             # …or run as an MCP server
 ```
 
 ```json

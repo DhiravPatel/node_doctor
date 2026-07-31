@@ -21,7 +21,7 @@ scanner.** It resolves the project's actual dependency versions, which changes t
 verdict (an async-handler bug on Express 4 is a non-issue on Express 5).
 
 ```bash
-npx node-doctor@latest .
+npx @dhiravpatel/node-doctor@latest .
 ```
 
 Before declaring any backend task complete, run the scan and resolve every

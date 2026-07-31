@@ -1,0 +1,63 @@
+# Deploy the rule-catalog / landing site (web/) to GitHub Pages.
+#
+# Setup required once (see LAUNCH.md):
+#   Repo → Settings → Pages → Build and deployment → Source: "GitHub Actions"
+#
+# The site's Vite config uses a relative base, so it works from the project
+# sub-path (https://<user>.github.io/node_doctor/) without further configuration.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "src/diagnostics/**" # the catalog the site renders
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; let an in-flight one finish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install the engine (the site's rule data is generated from it)
+        run: npm ci
+
+      - name: Rule catalog is in sync with the engine
+        run: npm run check:web
+
+      - name: Build the site
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
