@@ -1,7 +1,7 @@
 {
   "name": "@dhiravpatel/node-doctor",
   "version": "1.0.0",
-  "description": "Deterministic, offline-first static analysis for Node.js backends — catches the defects that compile, pass tests, and fail under concurrency.",
+  "description": "Deterministic, offline-first static analysis for Node.js backends \u2014 catches the defects that compile, pass tests, and fail under concurrency.",
   "keywords": [
     "node",
     "static-analysis",
@@ -18,7 +18,7 @@
   ],
   "license": "MIT",
   "author": "Dhirav Patel",
-  "homepage": "https://github.com/DhiravPatel/node_doctor#readme",
+  "homepage": "https://node-doctor.vercel.app/",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/DhiravPatel/node_doctor.git"

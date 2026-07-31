@@ -73,7 +73,7 @@ While you are there, add a description and topics (`static-analysis`, `nodejs`,
 
 ---
 
-## 3. Deploy the docs site to Vercel
+## 3. Deploy the docs site to Vercel — ✅ DONE (https://node-doctor.vercel.app/)
 
 The site lives in `web/` (Vite + React: the landing page and the browsable rule
 catalog). It builds standalone — `web/src/data/diagnostics.json` is committed, so
@@ -179,6 +179,6 @@ smoke test of the packed artifact.
 | MIT `LICENSE` | ✅ present |
 | CI (test matrix on Node 20.19 + 22) | ✅ existing `ci` workflow |
 | Release automation with provenance | ✅ new `release` workflow |
-| Docs-site deploy | ➡️ Vercel (see step 3) — `web/` builds standalone |
+| Docs-site deploy | ✅ live at https://node-doctor.vercel.app/ |
 | Install-from-tarball verification | ✅ proven locally and enforced in CI |
 | README / SKILL install commands | ✅ updated to the scoped name |

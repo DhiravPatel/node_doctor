@@ -17,6 +17,8 @@ falls over the moment two requests arrive at once.
 npx @dhiravpatel/node-doctor@latest .
 ```
 
+**[node-doctor.vercel.app](https://node-doctor.vercel.app/)** — browse all 133 diagnostics
+
 </div>
 
 ---
