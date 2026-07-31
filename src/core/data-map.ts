@@ -854,7 +854,9 @@ export const taggedTemplateTarget = (node: AstNode): QueryTarget | null => {
  * The node is what the forward walk starts from — a route table on its own is not
  * enough; we need the body to trace its data access.
  */
-interface RouteHandler {
+/** A route registration together with the function node it registers — shared
+ *  with the OpenAPI generator (§77) so both commands agree on what a route is. */
+export interface RouteHandler {
   method: string;
   path: string;
   normalizedFilePath: string;
@@ -924,7 +926,7 @@ const resolveHandlerFromArg = (arg: AstNode | null | undefined, scope: ScopeReso
  * captures the handler FUNCTION NODE rather than a middleware-name chain — the node
  * is what we walk the call graph from.
  */
-const collectRouteHandlers = (
+export const collectRouteHandlers = (
   program: AstNode,
   scope: ScopeResolver,
   normalizedFilePath: string,

@@ -11,6 +11,21 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### OpenAPI generation — `node-doctor openapi` (§77)
+
+- **`node-doctor openapi`** (aliases `swagger`/`spec`) — an OpenAPI **3.1** spec
+  generated from the actual route registrations (same collector as `data-map` and
+  `surface`, so all three agree on what a route is). Derives path parameters,
+  query parameters (`req.query.x`, `req.query["x"]`, destructured), request-body
+  presence, response status codes from `res.status(N)`/`res.sendStatus(N)`, and
+  security from the auth middleware chain. Honest by construction: a body is a
+  free-form object rather than an invented schema, a dynamic status code or route
+  path is skipped and *counted* rather than guessed, and duplicate registrations
+  union their facts. Deterministic output (paths sorted, methods in fixed order)
+  so the spec can be committed and diffed — which is what keeps docs from drifting
+  from the code in CI. Prints to stdout by default; `--json-out <f>` writes the
+  spec and prints a coverage summary.
+
 ### Diagnostics — scheduled jobs & websockets (§30/§31)
 
 - **`no-invalid-cron-expression`** (Bugs, §30, opt-in) — a scheduled job whose cron

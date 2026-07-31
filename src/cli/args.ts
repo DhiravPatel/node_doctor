@@ -29,6 +29,7 @@ export type Command =
   | "schema-drift"
   | "queues"
   | "semver"
+  | "openapi"
   | "version";
 
 // "rules" is accepted as a legacy alias for "diagnostics"; "observe" for
@@ -42,6 +43,8 @@ const COMMAND_ALIASES: Record<string, Command> = {
   topology: "queues",
   "api-semver": "semver",
   exports: "semver",
+  swagger: "openapi",
+  spec: "openapi",
 };
 
 const COMMANDS = new Set<string>([
@@ -76,6 +79,9 @@ const COMMANDS = new Set<string>([
   "semver",
   "api-semver",
   "exports",
+  "openapi",
+  "swagger",
+  "spec",
   "version",
   "rules",
 ]);

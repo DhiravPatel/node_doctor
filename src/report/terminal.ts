@@ -467,6 +467,40 @@ const opMarkers = (ops: readonly string[], p: Palette): string => {
     .join("");
 };
 
+export const renderOpenApi = (
+  result: import("../core/openapi.ts").OpenApiResult,
+  options: { color?: boolean; writtenTo?: string } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const { summary, document } = result;
+  const lines: string[] = [""];
+
+  lines.push(
+    `  ${p.bold("OpenAPI 3.1 spec")}  ${p.dim(`${document.info.title} @${document.info.version}`)}`,
+  );
+  lines.push("");
+  if (options.writtenTo) {
+    lines.push(`  ${p.green("✔")} written to ${p.cyan(options.writtenTo)}`);
+  }
+  lines.push(
+    `  ${summary.operations} operation(s) across ${Object.keys(document.paths).length} path(s) · ${summary.securedOperations} secured`,
+  );
+  if (summary.inferredResponses > 0) {
+    lines.push(
+      p.dim(
+        `  ${summary.inferredResponses} operation(s) documented a default 200 — no explicit status code was readable in the handler.`,
+      ),
+    );
+  }
+  if (summary.dynamicRoutesSkipped > 0) {
+    lines.push(
+      `  ${p.yellow("●")} ${summary.dynamicRoutesSkipped} route(s) skipped — their path is not statically known, so they cannot be documented honestly.`,
+    );
+  }
+  lines.push("");
+  return lines.join("\n");
+};
+
 export const renderApiSemver = (
   report: import("../core/api-semver.ts").ApiSemverReport,
   options: { color?: boolean } = {},

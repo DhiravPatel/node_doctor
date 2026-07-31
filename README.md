@@ -139,6 +139,14 @@ Typical output on a codebase that needs help:
   compound unique keys are understood; a spread silences the object; dead-model
   claims are made only when no dynamic access or unresolved raw SQL could hide a
   use. Exits 1 on drift.
+- **OpenAPI spec generation** (`node-doctor openapi`) — an OpenAPI 3.1 document
+  derived from the routes themselves, so the docs cannot drift from the code that
+  serves them. Path params, query params mined from the handler, request-body
+  presence, response codes from `res.status(…)`, and security from the auth
+  middleware chain. It asserts only what it can prove — a body is a free-form
+  object rather than an invented schema, and a route whose path is not static is
+  skipped and reported rather than guessed at. Deterministic, so it can be
+  committed and diffed in CI.
 - **Package API semver lint** (`node-doctor semver`) — semver for your internal
   package exports. Snapshots every workspace package's export surface, then on
   each run diffs it: a removed export is breaking and fails the build unless the
@@ -252,6 +260,7 @@ node-doctor data-map [directory]                which routes touch which DB enti
 node-doctor schema-drift [directory]            Prisma schema vs code: unknown-field drift + dead models
 node-doctor queues [directory]                  queue/topic topology: publishers, consumers, orphans
 node-doctor semver [--baseline <f>]             package-export surface; lint version bumps against it
+node-doctor openapi [directory]                 generate an OpenAPI 3.1 spec from the actual routes
 node-doctor paths [directory]                   source→sink attack paths (exploitability proof)
 node-doctor context [dir] [--write]             find files an AI agent must not read; --write fences them off
 node-doctor sbom [--framework spdx]             CycloneDX / SPDX bill of materials

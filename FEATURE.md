@@ -897,9 +897,13 @@ Flag analytics/tracking calls that fire before consent, and PII sent to analytic
 # Part XXI — API Lifecycle
 
 ## 77. OpenAPI Generation From Code ★ Differentiator
-**Status: Planned**
+**Status: Core** (`node-doctor openapi`, aliases `swagger`/`spec`)
 
 Generate an OpenAPI/Swagger spec **from the actual routes, DTOs, and validators** — the inverse of the "missing spec" detection in §22. Keeps docs honest because they're derived, not hand-written.
+
+**Shipped as a command** (`openapi`): emits an OpenAPI **3.1** document built from the route registrations themselves, using the same collector as `data-map` and `surface` so all three agree on what a route is. Per operation it derives **path parameters** (`/users/:id` → `{id}`, required), **query parameters** mined from the handler (`req.query.page`, `req.query["size"]`, and `const { include } = req.query`), **request-body presence** from a `req.body` read on a body-carrying method, **response status codes** from `res.status(N)`/`res.sendStatus(N)` literals, **security** from the middleware chain (an auth-guarded route gets a `bearerAuth` requirement plus the scheme component), plus a tag from the first concrete path segment and a readable `operationId`. With no flags the spec goes to stdout so it can be piped; `--json-out <f>` writes it and prints a coverage summary instead.
+
+**Honesty over coverage.** The spec asserts only what is provable from source: a request body is described as a free-form object rather than an invented schema, a `res.status(variable)` contributes nothing (the operation falls back to a documented 200, and those are *counted* so the gap is visible), and a route whose path is not statically known is skipped and reported rather than guessed at. Duplicate registrations across files union their facts. Deterministic — paths sorted, methods in a fixed order — so the spec can be committed and diffed, which is what makes it impossible for the docs to drift from the code in CI. DTO/validator-derived response *schemas* remain Planned.
 
 ## 78. API Breaking-Change Detection ★ Differentiator
 **Status: Core** (`node-doctor surface --baseline <f>`)

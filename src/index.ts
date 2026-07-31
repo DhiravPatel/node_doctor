@@ -121,6 +121,10 @@ export type { QueueTopologyReport, TopicEntry, TopologySite, QueueSystem } from 
 // version bump to match is the finding.
 export { buildApiSemverReport } from "./core/api-semver.ts";
 export type { ApiSemverReport, PackageSurface, SemverChange, SemverVerdict } from "./core/api-semver.ts";
+// §77 — OpenAPI Generation From Code: a spec derived from the actual routes, so
+// it cannot drift from the code that serves it.
+export { buildOpenApiDocument } from "./core/openapi.ts";
+export type { OpenApiDocument, OpenApiResult, OpenApiOperation, OpenApiParameter } from "./core/openapi.ts";
 // §158 — agent context hygiene: detect secrets/keys an AI agent can read and
 // generate the ignore artifacts (.aiignore/.cursorignore/Claude deny) to fence them off.
 export { scanAgentContext, applyContextHygiene, buildIgnoreEntries } from "./core/agent-context.ts";
