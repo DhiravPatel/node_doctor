@@ -73,22 +73,28 @@ While you are there, add a description and topics (`static-analysis`, `nodejs`,
 
 ---
 
-## 3. Turn on GitHub Pages for the docs site
+## 3. Deploy the docs site to Vercel
 
-GitHub → repo → **Settings → Pages → Build and deployment → Source:
-"GitHub Actions"**.
+The site lives in `web/` (Vite + React: the landing page and the browsable rule
+catalog). It builds standalone — `web/src/data/diagnostics.json` is committed, so
+Vercel never needs the analyzer itself.
 
-The `pages` workflow then publishes `web/` on every push to `main` that touches
-the site or the rule catalog. It lands at:
+1. <https://vercel.com/new> → **Import** `DhiravPatel/node_doctor`.
+2. Set **Root Directory** to `web`. This is the only setting that matters — the
+   repo root is the CLI, not the site.
+3. Everything else auto-detects (Framework: Vite · Build: `npm run build` ·
+   Output: `dist`). Leave it alone.
+4. **Deploy.**
 
-```
-https://dhiravpatel.github.io/node_doctor/
-```
+Vercel then rebuilds on every push to `main` automatically.
 
-Confirm: after the next push, the **pages** workflow is green and the URL loads
-the rule catalog.
+Once you have the URL, put it in the repo's **About** panel (⚙️ next to About →
+Website) and in the README header.
 
----
+> The rule catalog stays honest because CI enforces it: `ci.yml` runs
+> `npm run check:web`, which fails the build if `web/src/data/diagnostics.json`
+> drifts from the engine's actual diagnostic set. Regenerate with
+> `npm run gen:web` whenever you add or change a rule.
 
 ## 4. Publish
 
@@ -173,6 +179,6 @@ smoke test of the packed artifact.
 | MIT `LICENSE` | ✅ present |
 | CI (test matrix on Node 20.19 + 22) | ✅ existing `ci` workflow |
 | Release automation with provenance | ✅ new `release` workflow |
-| Docs-site deploy | ✅ new `pages` workflow |
+| Docs-site deploy | ➡️ Vercel (see step 3) — `web/` builds standalone |
 | Install-from-tarball verification | ✅ proven locally and enforced in CI |
 | README / SKILL install commands | ✅ updated to the scoped name |
