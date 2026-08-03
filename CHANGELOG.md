@@ -43,6 +43,24 @@ while staying offline-first and deterministic.
   sight and is silent — the design that took this rule from 674 false positives on
   this repo's own suite to zero.
 
+### Diagnostics — test-suite quality, continued (§174/§176)
+
+- **`no-flaky-test-pattern`** (Maintainability, §174, opt-in) — the mechanical
+  causes of non-determinism, caught before the test starts failing intermittently:
+  a hard-coded `setTimeout` sleep, an assertion against `Date.now()`/`new Date()`,
+  and `Math.random()` in the case body. A file that controls time
+  (`useFakeTimers`/`setSystemTime`) silences the sleep and clock cases; a
+  `setTimeout` that schedules real work is not a sleep. Order assumptions, shared
+  state and real I/O are deliberately out of scope — they need dataflow this rule
+  does not have.
+- **`no-tautological-mock-assertion`** (Maintainability, §176, opt-in) — a test
+  that asserts its own mock's configured return value back to itself, exercising
+  none of the code under test while counting toward coverage. Only the provable
+  sub-case ships (the section's "mocked surface dwarfs real surface" ratio is a
+  judgement call): the assertion subject must be a direct call to a mock this file
+  configured, with a value matcher. Silent when real code wraps the value, on
+  behavioural assertions like `toHaveBeenCalledWith`, and on unconfigured spies.
+
 ### Diagnostics — streaming correctness (§128)
 
 - **`no-unhandled-pipe-error`** (Reliability, §128, opt-in) — a `.pipe()` whose

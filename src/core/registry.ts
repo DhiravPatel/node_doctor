@@ -75,7 +75,9 @@ import { noCircularImports } from "../diagnostics/maintainability/no-circular-im
 import { noConsoleLogInCommittedCode } from "../diagnostics/maintainability/no-console-log-in-committed-code.ts";
 import { noDeadAsync } from "../diagnostics/maintainability/no-dead-async.ts";
 import { noDuplicateRouteDefinition } from "../diagnostics/maintainability/no-duplicate-route-definition.ts";
+import { noFlakyTestPattern } from "../diagnostics/maintainability/no-flaky-test-pattern.ts";
 import { noRedundantTryCatchRethrow } from "../diagnostics/maintainability/no-redundant-try-catch-rethrow.ts";
+import { noTautologicalMockAssertion } from "../diagnostics/maintainability/no-tautological-mock-assertion.ts";
 import { preferNodeProtocolImports } from "../diagnostics/maintainability/prefer-node-protocol-imports.ts";
 // modernization
 import { noDeprecatedNodeApi } from "../diagnostics/modernization/no-deprecated-node-api.ts";
@@ -208,7 +210,9 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noConsoleLogInCommittedCode,
   noDeadAsync,
   noDuplicateRouteDefinition,
+  noFlakyTestPattern,
   noRedundantTryCatchRethrow,
+  noTautologicalMockAssertion,
   preferNodeProtocolImports,
   // modernization
   noDeprecatedNodeApi,

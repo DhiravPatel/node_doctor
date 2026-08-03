@@ -1,12 +1,12 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 134,
+  "total": 136,
   "defaultOn": 95,
-  "optIn": 39,
+  "optIn": 41,
   "byCategory": {
     "Performance": 12,
     "Security": 60,
-    "Maintainability": 11,
+    "Maintainability": 13,
     "Reliability": 35,
     "Bugs": 16
   },
@@ -834,6 +834,22 @@
       "recommendation": "Move the predicate into the query's `where` (e.g. `db.user.findMany({ where: { active: true } })`) so the database returns only the rows you keep instead of streaming the whole table into JS."
     },
     {
+      "id": "no-flaky-test-pattern",
+      "title": "Test is non-deterministic by construction",
+      "category": "Maintainability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "flaky",
+        "maintainability",
+        "testing"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Make the test deterministic: wait for a condition rather than a fixed duration (`await waitFor(() => …)`), freeze the clock (`vi.useFakeTimers()` / `jest.useFakeTimers()`) instead of comparing against `Date.now()`, and use a fixed seed or a literal instead of `Math.random()`. A test that fails once in fifty runs teaches the team to re-run CI, which is how a real regression gets retried away."
+    },
+    {
       "id": "no-floating-promise",
       "title": "Promise result discarded",
       "category": "Reliability",
@@ -1612,6 +1628,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Parameterize the sink where it lives: bind SQL parameters (`db.query('… = $1', [value])`), use `execFile`/`spawn` with an argument array instead of a shell string, and never pass request data to `eval`/`Function`. Validating in the handler is not enough — the helper is the sink."
+    },
+    {
+      "id": "no-tautological-mock-assertion",
+      "title": "Test asserts its own mock's configured value",
+      "category": "Maintainability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "coverage",
+        "maintainability",
+        "testing"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Assert on the output of the code under test, not on the mock you configured. Passing the mock's value through your own function and asserting the result is what makes the test meaningful; asserting the mock's return value only re-states the setup. If the intent is to verify how your code *uses* the collaborator, assert that instead: `expect(getUser).toHaveBeenCalledWith(1)`."
     },
     {
       "id": "no-throw-in-finally",

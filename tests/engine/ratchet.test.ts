@@ -702,7 +702,7 @@ const reportWith = (
       ...base.project,
       complete: over.complete ?? true,
       parseFailures: over.complete === false
-        ? [{ normalizedFilePath: "src/a.js", message: "Expected `}` but found `EOF`" }]
+        ? [{ filePath: "/repo/src/a.js", normalizedFilePath: "src/a.js", message: "Expected `}` but found `EOF`" }]
         : [],
     },
   };
