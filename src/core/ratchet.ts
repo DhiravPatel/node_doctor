@@ -61,6 +61,13 @@ export interface ResolvedEntry {
 export interface RatchetFile {
   schemaVersion: number;
   toolVersion: string;
+  /**
+   * The ruleset the baseline was measured with. A finding that is absent because
+   * FEWER RULES RAN was never fixed — recording it as resolved poisons the
+   * history and makes every later full scan report a false regression. Comparing
+   * this against the current scan's hash is what makes "absent" mean "fixed".
+   */
+  rulesetHash: string;
   score: number;
   counts: { error: number; warn: number };
   /** Accepted debt: the evidenceKey of every finding present when the ratchet was set. */
@@ -107,6 +114,12 @@ export interface RatchetComparison {
    * (and every failing scan) leaves the stored baseline exactly as it was.
    */
   tightened: RatchetFile | null;
+  /**
+   * False when this scan was not strong enough evidence to record fixes — a
+   * different ruleset ran, or the scan did not complete. The comparison still
+   * reports pass/fail; it simply refuses to write history it cannot stand behind.
+   */
+  recordedResolutions: boolean;
 }
 
 /**
@@ -139,25 +152,44 @@ export const recordResolutions = (
   at: string,
   version: string = toolVersion(),
 ): ResolvedEntry[] => {
+  const added = new Set(resolvedKeys);
   const byKey = new Map<string, ResolvedEntry>();
   for (const entry of history) byKey.set(entry.key, entry);
   for (const key of resolvedKeys) byKey.set(key, { key, resolvedAt: at, toolVersion: version });
 
-  return [...byKey.values()]
-    // Newest first so the cap drops the oldest knowledge, not the newest.
-    .sort((a, b) => (a.resolvedAt < b.resolvedAt ? 1 : a.resolvedAt > b.resolvedAt ? -1 : a.key < b.key ? -1 : 1))
+  // Entries recorded in THIS call are never evicted: an undated resolution
+  // (`at === ""`) would otherwise sort oldest and be dropped by the very call
+  // that created it, silently losing the fact we just learned.
+  const fresh: ResolvedEntry[] = [];
+  const prior: ResolvedEntry[] = [];
+  for (const entry of byKey.values()) (added.has(entry.key) ? fresh : prior).push(entry);
+
+  const byRecency = (a: ResolvedEntry, b: ResolvedEntry): number =>
+    a.resolvedAt < b.resolvedAt ? 1 : a.resolvedAt > b.resolvedAt ? -1 : a.key < b.key ? -1 : 1;
+
+  return [...fresh.sort(byRecency), ...prior.sort(byRecency)]
     .slice(0, MAX_RESOLVED_HISTORY)
     .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 };
 
-/** Freeze a report as today's accepted debt. `accepted` is sorted for determinism. */
-export const buildRatchet = (report: ScanReport): RatchetFile => ({
+/**
+ * Freeze a report as today's accepted debt. `accepted` is sorted for determinism.
+ *
+ * `priorHistory` is carried forward: re-baselining replaces the ACCEPTED SET, but
+ * the record of what this project has previously fixed is independent knowledge
+ * and must survive `ratchet init` — dropping it would silently disarm §161.
+ */
+export const buildRatchet = (
+  report: ScanReport,
+  priorHistory: readonly ResolvedEntry[] = [],
+): RatchetFile => ({
   schemaVersion: RATCHET_SCHEMA_VERSION,
   toolVersion: toolVersion(),
+  rulesetHash: report.provenance.rulesetHash,
   score: report.score.score,
   counts: countBySeverity(report.findings),
   accepted: report.findings.map(identityKey).sort(),
-  resolvedHistory: [],
+  resolvedHistory: recordResolutions(priorHistory, [], ""),
 });
 
 /**
@@ -203,12 +235,32 @@ export const compareToRatchet = (
     }
   }
 
+  // A key is only genuinely gone when NO copy of it is present now. With 3
+  // accepted and 2 present, one pool entry is left over — but the evidence is
+  // still in the code, so recording it as fixed would fabricate a later
+  // regression the moment the third copy returns.
+  const presentKeys = new Set(report.findings.map(identityKey));
+
   const resolvedKeys: string[] = [];
   for (const [key, remaining] of pool) {
     for (let i = 0; i < remaining; i++) resolvedKeys.push(key);
   }
   resolvedKeys.sort();
   const resolved = resolvedKeys.length;
+
+  /**
+   * Is this scan strong enough evidence that the missing findings were FIXED?
+   *
+   * A finding also disappears when fewer rules ran (`--ignore-tag`, a config
+   * change, a narrower diagnostic set) or when the scanner could not read the
+   * file at all. Both look identical to a fix in `report.findings`, and both
+   * previously poisoned the committed history into permanent false "previously
+   * fixed, and back" claims. So a resolution is recorded only from a scan that
+   * ran the SAME ruleset and completed cleanly.
+   */
+  const comparableRuleset = ratchet.rulesetHash === "" || ratchet.rulesetHash === report.provenance.rulesetHash;
+  const completeScan = report.project.complete;
+  const canRecordResolutions = comparableRuleset && completeScan;
 
   const scoreDelta = report.score.score - ratchet.score;
   const passed = introduced.length === 0 && scoreDelta >= 0;
@@ -218,20 +270,30 @@ export const compareToRatchet = (
   // caller's reading of `scoreDelta >= 0`. The history is carried forward and
   // extended — it is the whole point of the file, and must survive tightening.
   const tightened: RatchetFile | null =
-    passed && resolved > 0
+    passed && resolved > 0 && canRecordResolutions
       ? {
           ...buildRatchet(report),
           score: Math.max(report.score.score, ratchet.score),
           resolvedHistory: recordResolutions(
             ratchet.resolvedHistory,
-            // Dedupe: N copies of one key resolved is still one fact.
-            [...new Set(resolvedKeys)],
+            // Dedupe (N copies resolved is one fact), and record only keys with
+            // no surviving copy in the current scan.
+            [...new Set(resolvedKeys)].filter((k) => !presentKeys.has(k)),
             options.now ?? "",
           ),
         }
       : null;
 
-  return { introduced, regressed, resolved, resolvedKeys, scoreDelta, passed, tightened };
+  return {
+    introduced,
+    regressed,
+    resolved,
+    resolvedKeys,
+    scoreDelta,
+    passed,
+    tightened,
+    recordedResolutions: canRecordResolutions,
+  };
 };
 
 const isPopulation = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 0;
@@ -248,6 +310,7 @@ const isRatchetFile = (value: unknown): value is RatchetFile => {
   // Counts are populations, so a fraction or a negative is not a "close enough"
   // value to round — it is proof the file was hand-edited or machine-mangled.
   if (!isPopulation(r.counts.error) || !isPopulation(r.counts.warn)) return false;
+  if (r.rulesetHash !== undefined && typeof r.rulesetHash !== "string") return false;
   if (!Array.isArray(r.accepted) || r.accepted.some((k) => typeof k !== "string")) return false;
   // `resolvedHistory` is absent in a v1 file — that is valid, not corrupt. When
   // present it must be well-formed; a mangled history would fabricate a
@@ -288,6 +351,8 @@ export const readRatchet = async (path: string): Promise<RatchetFile | null> => 
     // tightens, so merely running against an old file never churns the diff.
     schemaVersion: RATCHET_SCHEMA_VERSION,
     toolVersion: parsed.toolVersion,
+    // Absent in v1: "" means "unknown ruleset", which never blocks a comparison.
+    rulesetHash: typeof parsed.rulesetHash === "string" ? parsed.rulesetHash : "",
     score: parsed.score,
     counts: { error: parsed.counts.error, warn: parsed.counts.warn },
     accepted: parsed.accepted.slice().sort(),
@@ -304,6 +369,7 @@ export const writeRatchet = async (path: string, ratchet: RatchetFile): Promise<
   const body: RatchetFile = {
     schemaVersion: ratchet.schemaVersion,
     toolVersion: ratchet.toolVersion,
+    rulesetHash: ratchet.rulesetHash ?? "",
     score: ratchet.score,
     counts: { error: ratchet.counts.error, warn: ratchet.counts.warn },
     accepted: ratchet.accepted.slice().sort(),

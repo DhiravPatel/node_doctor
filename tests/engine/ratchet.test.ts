@@ -279,6 +279,7 @@ describe("ratchet — compareToRatchet", () => {
       counts: { error: 3, warn: 0 },
       accepted: ["z", "a", "m"],
       resolvedHistory: [],
+      rulesetHash: "ruleset",
     });
     assert.deepEqual(cmp.introduced, []);
     assert.equal(cmp.resolved, 1);
@@ -375,7 +376,7 @@ describe("ratchet — persistence", () => {
 
       // ...and the untouched baseline still loads, so the guard is not just refusing everything.
       await writeFile(path, JSON.stringify(base), "utf8");
-      assert.deepEqual(await readRatchet(path), { ...base, resolvedHistory: [] });
+      assert.deepEqual(await readRatchet(path), { ...base, resolvedHistory: [], rulesetHash: "" });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -435,6 +436,7 @@ describe("ratchet — persistence", () => {
           "{",
           `  "schemaVersion": ${RATCHET_SCHEMA_VERSION},`,
           '  "toolVersion": "1.2.3",',
+          '  "rulesetHash": "ruleset",',
           '  "score": 40,',
           '  "counts": {',
           '    "error": 1,',
@@ -675,5 +677,110 @@ describe("§161 fix-regression — purity, schema and bounds", () => {
     );
     assert.equal(merged.length, 1);
     assert.equal(merged[0]!.resolvedAt, "2026-05-05");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §161 — hunt regressions: "absent" only counts as "fixed" when PROVEN.
+//
+// Every case below previously wrote a permanent false "previously fixed, and
+// back" claim into the committed ratchet. A finding disappears for reasons
+// other than a fix, and each of those reasons has to be excluded explicitly.
+// ---------------------------------------------------------------------------
+
+/** A report whose provenance/completeness can be varied. */
+const reportWith = (
+  findings: Finding[],
+  score: number,
+  over: { rulesetHash?: string; complete?: boolean } = {},
+): ScanReport => {
+  const base = report(findings, score);
+  return {
+    ...base,
+    provenance: { ...base.provenance, rulesetHash: over.rulesetHash ?? base.provenance.rulesetHash },
+    project: {
+      ...base.project,
+      complete: over.complete ?? true,
+      parseFailures: over.complete === false
+        ? [{ normalizedFilePath: "src/a.js", message: "Expected `}` but found `EOF`" }]
+        : [],
+    },
+  };
+};
+
+describe("§161 — a finding must be PROVEN fixed before it enters history", () => {
+  test("a narrower ruleset (--ignore-tag / config off) never records a fix", () => {
+    const base = buildRatchet(report([finding("a")], 0));
+    // The finding is gone only because fewer rules ran.
+    const cmp = compareToRatchet(reportWith([], 100, { rulesetHash: "narrower" }), base, {
+      now: "2026-03-11",
+    });
+    assert.equal(cmp.resolved, 1, "it is absent, so the pool still reports it");
+    assert.equal(cmp.recordedResolutions, false, "but the scan is not comparable");
+    assert.equal(cmp.tightened, null, "so nothing is written to the committed file");
+  });
+
+  test("an INCOMPLETE scan (parse failure) never records a fix", () => {
+    const base = buildRatchet(report([finding("a")], 0));
+    const cmp = compareToRatchet(reportWith([], 100, { complete: false }), base, { now: "2026-03-11" });
+    assert.equal(cmp.recordedResolutions, false, "a file we could not read teaches us nothing");
+    assert.equal(cmp.tightened, null);
+  });
+
+  test("and therefore no false REGRESSED claim on the next full scan", () => {
+    const base = buildRatchet(report([finding("a")], 0));
+    const narrowed = compareToRatchet(reportWith([], 100, { rulesetHash: "narrower" }), base, {
+      now: "2026-03-11",
+    });
+    // The baseline is untouched, so the finding is still accepted debt.
+    const next = compareToRatchet(report([finding("a")], 0), narrowed.tightened ?? base);
+    assert.deepEqual(next.regressed, [], "nothing was fixed, so nothing can have regressed");
+    assert.deepEqual(next.introduced, [], "it is still accepted debt");
+    assert.equal(next.passed, true);
+  });
+
+  test("a key with a surviving copy is never recorded as fixed", () => {
+    // 3 accepted, 2 present: one pool entry is left over, but the evidence is
+    // still in the code — recording it would fabricate a later regression.
+    const base = buildRatchet(report([finding("dup"), finding("dup"), finding("dup")], 70));
+    const cmp = compareToRatchet(report([finding("dup"), finding("dup")], 72), base, { now: "2026-03-11" });
+    assert.equal(cmp.resolved, 1);
+    assert.deepEqual(cmp.tightened!.resolvedHistory, [], "the key is still present, so it is not fixed");
+  });
+
+  test("a genuine fix under the SAME ruleset on a COMPLETE scan is still recorded", () => {
+    const base = buildRatchet(report([finding("a"), finding("b")], 70));
+    const cmp = compareToRatchet(report([finding("a")], 85), base, { now: "2026-03-11" });
+    assert.equal(cmp.recordedResolutions, true);
+    assert.deepEqual(
+      cmp.tightened!.resolvedHistory.map((e) => [e.key, e.resolvedAt]),
+      [["b", "2026-03-11"]],
+      "the guards must not break the real path",
+    );
+  });
+
+  test("the cap never evicts the resolution it just recorded, even undated", () => {
+    const old = Array.from({ length: MAX_RESOLVED_HISTORY }, (_, i) => ({
+      key: `old-${String(i).padStart(4, "0")}`,
+      resolvedAt: "2020-01-01",
+      toolVersion: "1.0.0",
+    }));
+    // An undated entry sorts oldest — it must still survive the same call that added it.
+    const merged = recordResolutions(old, ["fresh"], "");
+    assert.equal(merged.length, MAX_RESOLVED_HISTORY);
+    assert.ok(merged.some((e) => e.key === "fresh"), "the newly-learned fact must not be dropped");
+  });
+
+  test("buildRatchet carries prior history forward, so re-baselining keeps the fix record", () => {
+    const prior = [{ key: "fixed-long-ago", resolvedAt: "2026-01-01", toolVersion: "1.0.0" }];
+    const r = buildRatchet(report([finding("a")], 70), prior);
+    assert.deepEqual(r.resolvedHistory.map((e) => e.key), ["fixed-long-ago"]);
+    assert.deepEqual(r.accepted, ["a"], "the accepted set is still re-pinned");
+  });
+
+  test("a v1 ratchet has no rulesetHash, and that never blocks recording", () => {
+    const v1 = { ...buildRatchet(report([finding("a")], 70)), rulesetHash: "" };
+    const cmp = compareToRatchet(report([], 100), v1, { now: "2026-03-11" });
+    assert.equal(cmp.recordedResolutions, true, "unknown ruleset must not punish an upgraded file");
   });
 });

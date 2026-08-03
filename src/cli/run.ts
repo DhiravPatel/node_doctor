@@ -1069,7 +1069,11 @@ const runRatchet = async (args: ParsedArgs, version: string): Promise<number> =>
   });
 
   if (sub === "init") {
-    const ratchet = buildRatchet(report);
+    // Re-baselining replaces the ACCEPTED SET, but what this project has already
+    // fixed is independent knowledge (§161) — dropping it would silently disarm
+    // regression detection on every future run.
+    const existing = await readRatchet(ratchetPath);
+    const ratchet = buildRatchet(report, existing?.resolvedHistory ?? []);
     await writeRatchet(ratchetPath, ratchet);
     process.stdout.write(
       `  ✓ ratchet set at ${report.score.score}/100 with ${ratchet.accepted.length} accepted finding(s)\n` +
@@ -1100,6 +1104,12 @@ const runRatchet = async (args: ParsedArgs, version: string): Promise<number> =>
       `\n  Ratchet: ${cmp.passed ? "PASS" : "FAIL"}  ·  score ${ratchet.score} → ${report.score.score} (${cmp.scoreDelta >= 0 ? "+" : ""}${cmp.scoreDelta})\n`,
     );
     if (cmp.resolved > 0) process.stdout.write(`  ✓ ${cmp.resolved} accepted finding(s) resolved\n`);
+    if (cmp.resolved > 0 && !cmp.recordedResolutions) {
+      process.stdout.write(
+        "  ○ Not recorded as fixed: this scan ran a different ruleset or did not complete,\n" +
+          "    so a finding being absent is not proof it was fixed.\n",
+      );
+    }
     if (cmp.regressed.length > 0) {
       process.stdout.write(
         `  ⟲ ${cmp.regressed.length} finding(s) REGRESSED — previously fixed, and back:\n`,

@@ -23,6 +23,14 @@ while staying offline-first and deterministic.
   rather than fabricating a claim. `compareToRatchet` remains a pure function (the
   CLI owns the clock). A v1 ratchet loads unchanged and is rewritten only when the
   ratchet genuinely tightens.
+  Hardened against an adversarial hunt that found seven ways a finding disappears
+  *without being fixed* — each of which wrote a permanent false claim into the
+  committed file. A resolution is now recorded only when the scan ran the **same
+  ruleset** (persisted as a hash, so `--ignore-tag` or a config change no longer
+  reads as a fix), **completed** (a parse failure proves nothing), and left **no
+  surviving copy** of the key. Insufficient evidence declines to write history and
+  says so. The cap no longer evicts the resolution it just recorded, and
+  `ratchet init` carries the fix record forward instead of erasing it.
 
 ### Diagnostics — test-suite quality (§173)
 
