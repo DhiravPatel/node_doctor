@@ -1086,7 +1086,9 @@ const runRatchet = async (args: ParsedArgs, version: string): Promise<number> =>
     );
     return 2;
   }
-  const cmp = compareToRatchet(report, ratchet);
+  // The CLI owns the clock (§161): the comparison itself stays pure, and the
+  // date is what makes a regression message actionable ("fixed on 2026-03-11").
+  const cmp = compareToRatchet(report, ratchet, { now: new Date().toISOString().slice(0, 10) });
 
   if (args.json) {
     process.stdout.write(
@@ -1098,6 +1100,17 @@ const runRatchet = async (args: ParsedArgs, version: string): Promise<number> =>
       `\n  Ratchet: ${cmp.passed ? "PASS" : "FAIL"}  ·  score ${ratchet.score} → ${report.score.score} (${cmp.scoreDelta >= 0 ? "+" : ""}${cmp.scoreDelta})\n`,
     );
     if (cmp.resolved > 0) process.stdout.write(`  ✓ ${cmp.resolved} accepted finding(s) resolved\n`);
+    if (cmp.regressed.length > 0) {
+      process.stdout.write(
+        `  ⟲ ${cmp.regressed.length} finding(s) REGRESSED — previously fixed, and back:\n`,
+      );
+      for (const r of cmp.regressed) {
+        const when = r.previouslyResolvedAt ? ` (fixed ${r.previouslyResolvedAt})` : "";
+        process.stdout.write(
+          `      ${r.finding.diagnostic} · ${r.finding.normalizedFilePath ?? ""}:${r.finding.line}${when}\n`,
+        );
+      }
+    }
     if (cmp.introduced.length > 0) {
       process.stdout.write(`  ✖ ${cmp.introduced.length} NEW finding(s) beyond the accepted baseline:\n`);
       process.stdout.write(

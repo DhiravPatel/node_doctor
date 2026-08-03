@@ -6,11 +6,13 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  MAX_RESOLVED_HISTORY,
   RATCHET_FILENAME,
   RATCHET_SCHEMA_VERSION,
   buildRatchet,
   compareToRatchet,
   readRatchet,
+  recordResolutions,
   writeRatchet,
 } from "../../src/core/ratchet.ts";
 import { scanProject, SCHEMA_VERSION } from "../../src/core/scan.ts";
@@ -276,6 +278,7 @@ describe("ratchet — compareToRatchet", () => {
       score: 70,
       counts: { error: 3, warn: 0 },
       accepted: ["z", "a", "m"],
+      resolvedHistory: [],
     });
     assert.deepEqual(cmp.introduced, []);
     assert.equal(cmp.resolved, 1);
@@ -372,7 +375,7 @@ describe("ratchet — persistence", () => {
 
       // ...and the untouched baseline still loads, so the guard is not just refusing everything.
       await writeFile(path, JSON.stringify(base), "utf8");
-      assert.deepEqual(await readRatchet(path), base);
+      assert.deepEqual(await readRatchet(path), { ...base, resolvedHistory: [] });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -439,7 +442,8 @@ describe("ratchet — persistence", () => {
           "  },",
           '  "accepted": [',
           '    "k"',
-          "  ]",
+          "  ],",
+          '  "resolvedHistory": []',
           "}",
           "",
         ].join("\n"),
@@ -493,5 +497,183 @@ describe("ratchet — persistence", () => {
 
   test("RATCHET_FILENAME is the committed sidecar name", () => {
     assert.equal(RATCHET_FILENAME, ".node-doctor-ratchet.json");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §161 — Fix-Regression Detection (boomerang bugs)
+// ---------------------------------------------------------------------------
+
+describe("§161 fix-regression — the fix → return lifecycle", () => {
+  test("a finding fixed and then reintroduced is reported as REGRESSED", () => {
+    // 1. Baseline accepts two findings.
+    const base = buildRatchet(report([finding("a"), finding("b")], 80));
+
+    // 2. `b` gets fixed — the ratchet tightens and records the resolution.
+    const fixed = compareToRatchet(report([finding("a")], 90), base, { now: "2026-03-11" });
+    assert.equal(fixed.passed, true);
+    assert.deepEqual(fixed.resolvedKeys, ["b"]);
+    const tightened = fixed.tightened!;
+    assert.deepEqual(
+      tightened.resolvedHistory.map((e) => [e.key, e.resolvedAt]),
+      [["b", "2026-03-11"]],
+    );
+    assert.deepEqual(tightened.accepted, ["a"], "b is no longer accepted debt");
+
+    // 3. `b` comes back. It is introduced debt AND a regression.
+    const back = compareToRatchet(report([finding("a"), finding("b")], 80), tightened);
+    assert.equal(back.passed, false);
+    assert.equal(back.introduced.length, 1);
+    assert.equal(back.regressed.length, 1);
+    assert.equal(back.regressed[0]!.finding.evidenceKey, "b");
+    assert.equal(back.regressed[0]!.previouslyResolvedAt, "2026-03-11");
+  });
+
+  test("a NEW finding never seen before is introduced but NOT a regression", () => {
+    const base: Parameters<typeof compareToRatchet>[1] = {
+      ...buildRatchet(report([finding("a")], 90)),
+      resolvedHistory: [{ key: "b", resolvedAt: "2026-03-11", toolVersion: "1.0.0" }],
+    };
+    const cmp = compareToRatchet(report([finding("a"), finding("zzz")], 70), base);
+    assert.equal(cmp.introduced.length, 1);
+    assert.deepEqual(cmp.regressed, [], "zzz was never fixed, so it cannot have regressed");
+  });
+
+  test("still-accepted debt is not a regression even if its key is in history", () => {
+    // Defensive: a key both accepted and in history must be absolved by the
+    // accepted pool first — never reported as a boomerang.
+    const base: Parameters<typeof compareToRatchet>[1] = {
+      ...buildRatchet(report([finding("a")], 90)),
+      resolvedHistory: [{ key: "a", resolvedAt: "2026-01-01", toolVersion: "1.0.0" }],
+    };
+    const cmp = compareToRatchet(report([finding("a")], 90), base);
+    assert.deepEqual(cmp.introduced, []);
+    assert.deepEqual(cmp.regressed, []);
+    assert.equal(cmp.passed, true);
+  });
+
+  test("history survives repeated tightening and accumulates", () => {
+    let r = buildRatchet(report([finding("a"), finding("b"), finding("c")], 60));
+    r = compareToRatchet(report([finding("a"), finding("b")], 70), r, { now: "2026-01-01" }).tightened!;
+    r = compareToRatchet(report([finding("a")], 80), r, { now: "2026-02-02" }).tightened!;
+    assert.deepEqual(
+      r.resolvedHistory.map((e) => e.key),
+      ["b", "c"],
+      "both resolutions are remembered, sorted by key",
+    );
+  });
+
+  test("a regression is reported per distinct finding, deterministically", () => {
+    const base: Parameters<typeof compareToRatchet>[1] = {
+      ...buildRatchet(report([], 100)),
+      resolvedHistory: [
+        { key: "x", resolvedAt: "2026-01-01", toolVersion: "1.0.0" },
+        { key: "y", resolvedAt: "2026-02-02", toolVersion: "1.0.0" },
+      ],
+    };
+    const cmp = compareToRatchet(report([finding("x"), finding("y")], 50), base);
+    assert.deepEqual(cmp.regressed.map((r) => r.finding.evidenceKey), ["x", "y"]);
+    const again = compareToRatchet(report([finding("x"), finding("y")], 50), base);
+    assert.equal(JSON.stringify(cmp.regressed), JSON.stringify(again.regressed));
+  });
+});
+
+describe("§161 fix-regression — purity, schema and bounds", () => {
+  test("compareToRatchet stays pure: no clock, no mutation, repeatable", () => {
+    const base = buildRatchet(report([finding("a"), finding("b")], 80));
+    const snapshot = JSON.stringify(base);
+    const one = compareToRatchet(report([finding("a")], 90), base);
+    const two = compareToRatchet(report([finding("a")], 90), base);
+    assert.equal(JSON.stringify(one), JSON.stringify(two), "same inputs, same output");
+    assert.equal(JSON.stringify(base), snapshot, "the stored ratchet is untouched");
+    // With no clock supplied the resolution is undated, never lost.
+    assert.deepEqual(one.tightened!.resolvedHistory.map((e) => e.resolvedAt), [""]);
+  });
+
+  test("a v1 ratchet file (no resolvedHistory) still loads", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "nd-ratchet-v1-"));
+    try {
+      const path = join(dir, RATCHET_FILENAME);
+      await writeFile(
+        path,
+        JSON.stringify({
+          schemaVersion: 1,
+          toolVersion: "0.9.0",
+          score: 70,
+          counts: { error: 1, warn: 0 },
+          accepted: ["a"],
+        }),
+      );
+      const loaded = await readRatchet(path);
+      assert.ok(loaded, "a v1 file is valid, not corrupt");
+      assert.deepEqual(loaded!.resolvedHistory, [], "upgraded in memory with an empty history");
+      assert.equal(loaded!.schemaVersion, RATCHET_SCHEMA_VERSION);
+      assert.deepEqual(loaded!.accepted, ["a"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a malformed history rejects the file rather than fabricating a regression", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "nd-ratchet-bad-"));
+    try {
+      const path = join(dir, RATCHET_FILENAME);
+      await writeFile(
+        path,
+        JSON.stringify({
+          schemaVersion: 2,
+          toolVersion: "1.0.0",
+          score: 70,
+          counts: { error: 1, warn: 0 },
+          accepted: ["a"],
+          resolvedHistory: [{ key: 42, resolvedAt: "2026-01-01", toolVersion: "1.0.0" }],
+        }),
+      );
+      assert.equal(await readRatchet(path), null, "a bad entry must not be half-trusted");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a written ratchet round-trips byte-identically with history", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "nd-ratchet-rt-"));
+    try {
+      const path = join(dir, RATCHET_FILENAME);
+      const r = {
+        ...buildRatchet(report([finding("a")], 90)),
+        resolvedHistory: [
+          { key: "z", resolvedAt: "2026-02-02", toolVersion: "1.0.0" },
+          { key: "b", resolvedAt: "2026-01-01", toolVersion: "1.0.0" },
+        ],
+      };
+      await writeRatchet(path, r);
+      const first = await readFile(path, "utf8");
+      await writeRatchet(path, (await readRatchet(path))!);
+      assert.equal(await readFile(path, "utf8"), first, "committed file must not churn");
+      assert.match(first, /"key": "b"[\s\S]*"key": "z"/, "history sorted by key");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("history is capped, dropping the OLDEST entries first", () => {
+    const old = Array.from({ length: MAX_RESOLVED_HISTORY }, (_, i) => ({
+      key: `old-${String(i).padStart(4, "0")}`,
+      resolvedAt: "2020-01-01",
+      toolVersion: "1.0.0",
+    }));
+    const merged = recordResolutions(old, ["fresh"], "2026-06-01");
+    assert.equal(merged.length, MAX_RESOLVED_HISTORY, "capped");
+    assert.ok(merged.some((e) => e.key === "fresh"), "the newest entry survives");
+  });
+
+  test("re-resolving a key updates its date rather than duplicating it", () => {
+    const merged = recordResolutions(
+      [{ key: "a", resolvedAt: "2026-01-01", toolVersion: "1.0.0" }],
+      ["a"],
+      "2026-05-05",
+    );
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0]!.resolvedAt, "2026-05-05");
   });
 });

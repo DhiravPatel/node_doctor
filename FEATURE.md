@@ -1495,3 +1495,208 @@ Twenty-eight more features do not make the product better; **three of them, buil
 Then, in a second wave: **§135 retry amplification** and **§152 async context propagation**, because both are pure call-graph reasoning on infrastructure you already have, and both catch outages nothing else catches. **§132 latency budgets** and **§143 data access maps** are the two that most change how people *use* the tool — they turn it from a linter into a system-reasoning instrument.
 
 The rest is a menu. The discipline from the base catalog still governs: a false positive in §140 or §146 would be worse than never shipping them, and the invariants — deterministic offline core, local score, precision-first, AI-as-optional-layer — hold across §131–§158 without exception.
+
+---
+
+# node.doctor — Features (Horizon / §159–§184)
+
+A fifth extension. Everything here is **net-new** against §1–§158 — checked against all four prior halves so nothing restates an existing rule or command. Same maturity legend (**Core** / **Detected** / **Planned** / **Vision**), the same **⚙️ Now / 🔧 Needs depth / 🛰 Needs infra** buildability tags, and the same invariants (deterministic + offline core, local score, precision-first, AI-as-optional-layer).
+
+> **What "new" means at 158 sections.** The catalog already owns injection, event-loop, the data-access graph, the queue graph, the export/route surfaces, the AI-security pack, and the agent loop. The whitespace left is in **six directions the analysis has not pointed yet**: the *code-review dimension* (git-history and diff-shape reasoning), the *human/process dimension* (what the code implies about how the team operates), the *negative-space dimension* (what is conspicuously **absent** rather than present), the *temporal dimension* (how a property is trending, not just its current value), the *test-and-contract dimension* (analyzing the tests as first-class code), and the *cross-artifact dimension* (code vs. everything around it — docs, comments, types, config, i18n). Each is a lens, not a rule pack.
+>
+> **New parts:** XXXVIII Review & Change-Shape Intelligence (§159–§163) · XXXIX Negative-Space & Absence Detection (§164–§168) · XL Temporal & Trend Analysis (§169–§172) · XLI Test-Suite & Contract Analysis (§173–§177) · XLII Cross-Artifact Consistency (§178–§181) · XLIII Operational & Human-Factor Signals (§182–§184).
+
+---
+
+# Part XXXVIII — Review & Change-Shape Intelligence
+
+*Every prior part analyzes a snapshot. This part analyzes the **diff** — the shape of a change and the history behind a line — which is the dimension a human reviewer actually operates in and no static snapshot can see. It reuses the baseline-delta machinery (§87) but reasons about the change itself rather than the findings it introduced.*
+
+## 159. Suspicious-Change-Shape Detection ★★ Flagship
+**Status: Planned** · ⚙️ Now
+
+Some diffs are risky by their *shape*, independent of the code. A one-line change to an auth middleware. A migration file edited in the same commit as unrelated feature work. A `.env.example` key removed. A security-relevant regex loosened (an anchor deleted, a character class widened). A permission check turned from `===` to `includes`. A dependency version un-pinned.
+
+Match the **diff hunk** against a catalog of shapes that warrant a second look and raise the change's review priority — the human equivalent of "this line is fine but this *edit* deserves eyes." Distinct from §90 (which scores the PR's aggregate risk); this flags the *specific hunk* and says why. Pure diff analysis over data CI already has.
+
+## 160. Line-Age & Churn-Weighted Risk ★ Differentiator
+**Status: Planned** · ⚙️ Now (git log only)
+
+A bug in a line written three years ago and never touched is different from a bug in a line rewritten four times last month. Pull `git blame` and commit frequency per file, and **weight findings by churn**: high-churn code near a finding is where regressions cluster, and a finding in a hotspot that many hands have edited is likelier to be real and likelier to matter. Also surfaces "refactor magnets" — files whose churn is so high they are begging to be split. Needs only the git log, which is on disk.
+
+## 161. Fix-Regression Detection (Boomerang Bugs) ★★ Flagship
+**Status: Core** (`node-doctor ratchet check`) · ⚙️ Now
+
+**Shipped.** The infra it was waiting on already existed: the ratchet (§87) persists position-independent finding identities (`evidenceKey`) in a committed sidecar and already detected when accepted debt disappeared. Schema v2 adds `resolvedHistory` — every finding this project has been observed to fix, with the date — so a finding that returns is reported as a **regression**, not merely as new debt:
+
+```
+⟲ 1 finding(s) REGRESSED — previously fixed, and back:
+    no-sql-template-interpolation · src/a.js:2 (fixed 2026-03-11)
+```
+
+Precision: identity is evidence-based, so a line shift, a reformat, or moving the code to another file never resurrects a finding; a key that is still *accepted* debt is absolved by the multiset pool before the regression check, so live debt is never mislabelled a boomerang; and a malformed history rejects the whole ratchet file rather than fabricating a claim. `compareToRatchet` stays a **pure function** — the CLI owns the clock — so the comparison is deterministic and testable. A v1 ratchet loads unchanged (empty history) and is only rewritten when the ratchet genuinely tightens, so upgrading never churns the committed diff. History is capped at 500 entries, newest-first.
+
+The most demoralizing bug is the one you already fixed. Track finding identities (§104) across the project's history and detect when a finding **reappears at a location where it was previously resolved** — the fix was reverted, lost in a merge, or reintroduced by a copy-paste. "You fixed this SQL injection in March; it's back." No tool closes this loop, and it is the single most trust-building signal an analyzer can send.
+
+## 162. Commit-Coupling & Hidden-Dependency Detection ★ Differentiator
+**Status: Vision** · 🛰 Needs infra (history mining)
+
+Two files that are *always changed together* have a dependency the import graph cannot see — a shared assumption, a parallel data structure, a config-and-code pair. Mine commit history for files that co-change far more often than chance, then flag a PR that touches one without the other: "94% of changes to `pricing.ts` also touch `pricing.test.ts` — this PR doesn't." Catches the logical coupling that structural analysis misses entirely.
+
+## 163. Blast-Radius-Aware Review Routing ★
+**Status: Planned** · ⚙️ Now
+
+Combine the blast-radius graph (§120) with ownership (§89): a change to a low-fan-in leaf gets a light touch; a change to a hub module (§33) that 40 routes depend on gets flagged for senior review and notifies every affected owner. Turns "who should review this?" from a guess into a graph query.
+
+---
+
+# Part XXXIX — Negative-Space & Absence Detection
+
+*Every rule so far fires on something that **is** in the code. This part fires on what is conspicuously **missing** — the far harder and far rarer capability, because absence has no AST node to match. The engine's cross-file reachability makes a specific, precise version possible: "this pattern is present N times and absent once" is a real, low-false-positive signal.*
+
+## 164. Peer-Consistency Anomaly Detection ★★ Flagship
+**Status: Planned** · 🔧 Needs depth (pattern clustering)
+
+The most powerful absence signal: **19 of 20 sibling handlers do X; the 20th doesn't.** Nineteen route handlers wrap their body in `asyncHandler`; one is bare. Every repository method filters by `tenantId`; one forgot. Every mutation invalidates its cache; one skips it. Cluster structurally-similar code (same directory, same shape, same role) and flag the **outlier** against its own peers — the codebase becomes its own rule set. This is learned-from-the-project linting with zero configuration, and it catches the exact class of bug that a fixed ruleset never anticipates because the "rule" is local to this codebase.
+
+## 165. Missing-Symmetry Detection ★ Differentiator
+**Status: Planned** · ⚙️ Now
+
+Operations that come in pairs, where one half is present and the other absent: `acquire` without `release`, `subscribe` without `unsubscribe`, `open` without `close`, `lock` without `unlock`, `startSpan` without `end`, `beginTransaction` without a matching commit/rollback on every path, `setInterval` captured but the clear-handle dropped, an event listener added in a constructor with no teardown. Extends the memory-leak family (§13) into a general symmetry checker keyed on known-paired verbs.
+
+## 166. Unreachable-Guarantee Detection ★
+**Status: Planned** · ⚙️ Now
+
+Protective code that can never run: a `finally` after a `return` in every `try`/`catch` path, a fallback branch made dead by an earlier total match (the sibling of §58), a retry after a `throw`, a default parameter shadowed by a caller that always passes the argument, a validation step downstream of an early `return` that always precedes it. Safety code that gives false comfort because it is structurally unreachable.
+
+## 167. Absent-Boundary Detection ★ Differentiator
+**Status: Planned** · 🔧 Needs depth
+
+Trust boundaries that *should* exist and don't: a public route reachable (through the call graph) from a function that reads `req.body` with no validation call anywhere on the path; an external input that reaches a sink with no sanitization boundary crossed; a service method callable from both an authenticated and an unauthenticated route with no internal re-check. The dual of §70's attack-surface map — not "what is exposed" but "what is exposed *without the boundary it needs*", proven over the reachability graph.
+
+## 168. Convention-Absence & Onboarding-Gap Detection ★
+**Status: Vision** · 🛰 Needs infra
+
+The project-level absences a new engineer trips on: no error-handling middleware registered anywhere, no graceful-shutdown handler, no request-ID middleware despite structured logging, no health endpoint, no rate limiting on any auth route, no `.env.example` despite 40 `process.env` reads. "Your codebase does X everywhere but never does the Y that X implies."
+
+---
+
+# Part XL — Temporal & Trend Analysis
+
+*Every metric in the catalog is a point-in-time value. This part makes it a **derivative** — the direction and velocity of a property across history, which is often more actionable than the value. A complexity of 40 is a number; a complexity that went 12 → 40 over six weeks is a story. All of these need persisted history, so they are honestly Vision until that state exists.*
+
+## 169. Metric-Velocity & Rot-Rate Tracking ★ Differentiator
+**Status: Vision** · 🛰 Needs infra
+
+Track every score and metric over time and report the **rate of change**, not the level: health score trending down 2 points a week, a module whose complexity is climbing steeply, a security-finding count that just inflected upward, test-file count falling behind source-file count. The leading indicator that lets a team intervene before a module becomes unmaintainable rather than after.
+
+## 170. Debt-Interest Accrual ★
+**Status: Vision** · 🛰 Needs infra
+
+Technical debt has a carrying cost: a hotspot with high complexity *and* high churn *and* low test coverage is compounding — every change is slower and riskier than the last. Combine the churn (§160), complexity (§35), and coverage (§130) axes over time into a per-module "interest rate," and rank debt by what it is actively costing rather than by raw size. Answers "which debt do we pay down first" with evidence.
+
+## 171. Finding-Half-Life & Fix-Latency Analytics ★
+**Status: Vision** · 🛰 Needs infra
+
+How long findings *survive* by rule and severity: security errors fixed in a day, performance warnings that linger for months, a specific rule whose findings are always dismissed (a signal the rule is miscalibrated — feeding §92). The dismiss-rate and fix-latency per rule is also the raw material for auto-tuning severity to how the team actually behaves.
+
+## 172. Seasonal & Release-Correlated Risk ★
+**Status: Vision** · 🛰 Needs infra
+
+Correlate finding-introduction with time and process: a spike in risky changes right before releases, quality dips during on-call weeks, modules that degrade fastest under deadline pressure. Process insight drawn from the same history, useful for engineering leadership rather than the individual PR.
+
+---
+
+# Part XLI — Test-Suite & Contract Analysis
+
+*The catalog analyzes production code exhaustively and treats tests only as coverage (§23, §130). But tests are code, and a bad test is worse than no test — it is false confidence that ships. This part turns the analysis inward onto the test suite itself, statically, with no need to run it.*
+
+## 173. Assertion-Free & Vacuous Test Detection ★★ Flagship
+**Status: Detected** (`no-assertion-free-test`, opt-in) · ⚙️ Now
+
+**Shipped.** A test with no assertion passes forever and proves only that the code *runs* — while still counting toward coverage, which makes the coverage number actively misleading. `no-assertion-free-test` (Maintainability/warn/high) flags a test case that exercises imported production code and never asserts.
+
+**The precision story is the feature.** The assertion recognizer is deliberately generous across dialects (jest/vitest `expect`, `node:assert`, chai `should` — including on a call result where no static member path exists, ava `t.is`, supertest `.expect(200)`). The hard part is DELEGATION: suites factor assertions into helpers. A first design matched helper *names* and produced **674 false positives on this project's own 99 test files**, because real helpers are named for the domain, not the act (`cron.fires(src)`, `ws.silent(src)`). The shipped design uses **provenance** instead — a callee that is local to the file, reached through a local binding, or imported from a helper-ish module may assert one frame down and buys silence; only imported production code counts as "exercised". That took the same corpus from 674 findings to **zero**, while still catching a genuinely vacuous test. Skipped/todo cases, empty placeholders, `expect.assertions(n)`, and rejection assertions are all silent.
+
+A test with no assertion passes forever and proves nothing — it inflates coverage while verifying that the code merely *runs*. Statically flag: test bodies (`it`/`test`) with zero `expect`/`assert`/`should` calls, an `await` of the code under test with no assertion on the result, an assertion on a mock's return value (testing the mock, not the code), a `try/catch` that swallows the failure the test should surface, and a `.toBeDefined()`-only assertion on a rich object (technically-passing, substantively-empty). The highest-value test-quality signal, entirely syntactic, and it directly undercuts the coverage number's false comfort.
+
+## 174. Flaky-Test Pattern Detection ★ Differentiator
+**Status: Planned** · ⚙️ Now
+
+The patterns that make a test non-deterministic, caught before it starts intermittently failing CI: a real `Date.now()`/`new Date()` asserted against a fixed value, a hard-coded `setTimeout` sleep instead of awaiting a condition, a test depending on another test's mutation of shared state, an assertion on iteration order of an unordered collection, a real network/filesystem call in a unit test, `Math.random()` in a fixture. Flaky tests erode trust in the whole suite; this catches the shapes that cause it.
+
+## 175. Test-Reality Drift ★ Differentiator
+**Status: Planned** · 🔧 Needs depth
+
+A mock that has silently diverged from the thing it mocks: a mocked function whose signature no longer matches the real export (via the export surface, §155), a stubbed API response shape that no longer matches the client's actual return type, a hand-rolled fake of a module whose real interface gained a required method. The test passes against a fiction. Reuses the type source (§57) and export analysis to compare the mock against reality.
+
+## 176. Over-Mocking & Tautology Detection ★
+**Status: Planned** · ⚙️ Now
+
+A test that mocks so much of the system that it only exercises the mocks: every collaborator stubbed, the unit under test reduced to glue, the assertions merely re-stating the mock configuration. Flags a test where the mocked surface dwarfs the real surface exercised — the "100% coverage, zero confidence" pattern that looks rigorous and verifies nothing.
+
+## 177. Missing-Negative-Path Coverage ★
+**Status: Planned** · 🔧 Needs depth
+
+Every handler has error paths; most test suites test only the happy one. Cross the branches in a function (the error returns, the thrown exceptions, the guard clauses) against what the tests actually invoke, and report handlers whose **failure modes are untested** — weighted by risk, so an untested error path in an auth or payment handler ranks first. The precise, code-aware version of "you have 80% coverage but 0% of it is the parts that break."
+
+---
+
+# Part XLII — Cross-Artifact Consistency
+
+*Every rule so far reasons within the code. This part reasons **between the code and everything around it** — the comments, the docs, the types, the config, the strings — where the two drift apart silently because nothing checks that they agree.*
+
+## 178. Comment-Code Contradiction ★★ Flagship
+**Status: Planned** · 🔧 Needs depth
+
+A comment that lies is worse than no comment — it actively misdirects the next reader (and the next agent). Statically catch the checkable subset: a JSDoc `@param`/`@returns` that no longer matches the signature, a `@deprecated` tag on a symbol still imported everywhere, a comment saying "returns null if not found" above a function that throws, a `// TODO: remove after v2` in a v5 codebase, a magic-number comment (`// 30 second timeout`) next to a value that has since changed (`5000`). The subset that is machine-verifiable is a genuine, on-thesis correctness signal — stale comments are exactly what a coding agent reads and trusts.
+
+## 179. Type-Runtime Divergence ★ Differentiator
+**Status: Planned** · 🔧 Needs depth (type source, §57)
+
+Where the type system asserts something the runtime contradicts: a function typed to return `User` that can return `undefined` on a branch, an `as` cast that launders an untrusted value into a trusted type with no validation, an `any` from a JSON parse flowing into a strictly-typed sink, an API response typed as a shape the validation never actually checks. The gap between "the types say" and "the code does" — precisely where TypeScript's soundness holes bite in a backend.
+
+## 180. Config-Code Semantic Drift ★
+**Status: Planned** · 🔧 Needs depth
+
+Beyond §124's "env var missing": config values whose *meaning* has drifted from their use. A `maxRetries: 3` in config that the code reads as milliseconds, a feature flag referenced in code with a name that no longer exists in the flag definition, a timeout in `config.json` in seconds that the code passes to an API expecting milliseconds (a 1000× bug), a CORS origin list in config that the code overrides with a hardcoded value. Config and code agreeing syntactically but disagreeing semantically.
+
+## 181. i18n & User-String Integrity ★
+**Status: Planned** · ⚙️ Now
+
+The localization drift class: a translation key referenced in code with no entry in the locale files (a blank string shipped to users), a locale entry no code references (dead translation), interpolation placeholders that mismatch between the key's definition and its use (`{name}` vs `{userName}` → a broken message), and hardcoded user-facing strings in a codebase that otherwise uses a translation function (untranslatable text that slipped the process). Cross-references code against the locale artifacts.
+
+---
+
+# Part XLIII — Operational & Human-Factor Signals
+
+*The final lens: what the code reveals about **how it will behave in production and how the team operates** — signals that are neither a security bug nor a correctness bug, but that determine whether a 3am page is survivable. Adjacent to §138/§151 but about operability and process rather than a specific failure.*
+
+## 182. Operational-Readiness Score ★ Differentiator
+**Status: Planned** · ⚙️ Now
+
+A single composite score for "can this service be run in production" — distinct from code health. Rolls up signals the catalog already computes or can: graceful shutdown present, health/readiness split correct (§138), structured logging with correlation IDs (§151), timeouts on outbound calls (§136), a circuit-breaker or retry policy on inter-service calls, resource limits declared (§25), and no `process.exit` on a request path (§11). The number an SRE would ask for before a launch review, assembled from evidence rather than a checklist someone filled in by hand.
+
+## 183. Debuggability & Incident-Support Analysis ★
+**Status: Planned** · ⚙️ Now
+
+Whether a future on-call engineer can diagnose this code under pressure: errors that lose their cause (`catch (e) { throw new Error("failed") }` — the original discarded), swallowed rejections with no log, external calls with no timing or identifier to correlate against a trace, generic error messages (`"Something went wrong"`) with no context, and log lines with no way to tie them to a request. Extends §153 from "consistent errors" to "errors a human can actually act on at 3am."
+
+## 184. Bus-Factor & Knowledge-Concentration Mapping ★
+**Status: Vision** · 🛰 Needs infra (history)
+
+Where knowledge is dangerously concentrated: modules touched by exactly one author, critical paths (auth, payments, the hub modules of §33) with a single point of human failure, and code whose only expert has gone quiet in the history. Combines blast radius (§120) with `git` authorship to surface the organizational risk — "if this person leaves, these 14 critical modules have no owner" — which is an engineering-leadership signal no code tool provides.
+
+---
+
+## Honest read: what to actually build
+
+The pattern from every prior extension holds harder here — most of this is Vision (it needs persisted history or an AI layer), and the discipline is to ship only the precise slice. Of §159–§184, the three I would build first, all **⚙️ Now** and all genuinely category-defining:
+
+1. **§164 Peer-Consistency Anomaly Detection** — the single most valuable idea in this document. "19 of 20 siblings do X, one doesn't" is *learned-from-the-codebase linting with zero config*, and it catches the tenant-scope-forgotten / auth-wrapper-missing class that a fixed ruleset structurally cannot anticipate. It also strengthens the packs held back on precision (§114 multi-tenancy, §117 idempotency) by deriving the rule from the project instead of guessing it. The engineering is real (structural clustering) but the payoff is a capability no competitor has.
+2. **§173 Assertion-Free Test Detection** — entirely syntactic, false-positive-free, and it directly attacks the lie the coverage number tells. A test with no `expect` is provable and common; flagging it is cheap and the trust dividend is large.
+3. **§161 Fix-Regression Detection** — needs finding history, so it is Vision, but it is the most trust-building signal an analyzer can send ("you fixed this in March; it's back"), and it is a near-free extension of the stable finding identities (§104) you already compute the moment any history is persisted. Worth building the persistence layer *for*.
+
+Then, in a second wave: **§159 suspicious-change-shape** and **§160 churn-weighting**, because both are pure git-log reasoning on data CI already has and both make the tool sharper on exactly the changes that matter. **§178 comment-code contradiction** is the most on-thesis of the cross-artifact set — stale comments are what agents read and believe — and its machine-verifiable subset is precise enough to ship.
+
+The rest is a menu, and the same rule governs it that has governed all 184: a false positive in §164 or §173 would be worse than not shipping them, and the invariants — deterministic offline core, local score, precision-first, AI-as-optional-layer — hold across §159–§184 without exception.

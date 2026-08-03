@@ -1,12 +1,12 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 133,
+  "total": 134,
   "defaultOn": 95,
-  "optIn": 38,
+  "optIn": 39,
   "byCategory": {
     "Performance": 12,
     "Security": 60,
-    "Maintainability": 10,
+    "Maintainability": 11,
     "Reliability": 35,
     "Bugs": 16
   },
@@ -479,6 +479,22 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Apply a global `ValidationPipe` (`app.useGlobalPipes(new ValidationPipe())`) and type the parameter with a DTO class (`@Body() dto: CreateUserDto`) so class-validator diagnostics run before the handler."
+    },
+    {
+      "id": "no-assertion-free-test",
+      "title": "Test has no assertion",
+      "category": "Maintainability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "coverage",
+        "maintainability",
+        "testing"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Assert something about the result. A test with no assertion passes forever and proves only that the code did not throw — while still counting toward coverage, which makes the coverage number actively misleading. If the test exists to prove a call does not throw, say so explicitly (`await expect(fn()).resolves.toBeDefined()`); if it is a placeholder, mark it `it.todo(...)`."
     },
     {
       "id": "no-async-array-callback",

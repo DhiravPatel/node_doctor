@@ -11,6 +11,30 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Fix-regression detection — boomerang bugs (§161)
+
+- **`node-doctor ratchet check` now reports REGRESSIONS.** The ratchet's committed
+  sidecar gains `resolvedHistory` (schema v2): every finding this project has been
+  observed to fix, with the date. A finding that comes back — reverted, lost in a
+  merge, reintroduced by a copy-paste — is reported as *"previously fixed, and
+  back"* rather than as anonymous new debt. Identity is evidence-based, so a line
+  shift or a moved file never resurrects a finding; still-accepted debt is
+  absolved before the regression check; a malformed history rejects the file
+  rather than fabricating a claim. `compareToRatchet` remains a pure function (the
+  CLI owns the clock). A v1 ratchet loads unchanged and is rewritten only when the
+  ratchet genuinely tightens.
+
+### Diagnostics — test-suite quality (§173)
+
+- **`no-assertion-free-test`** (Maintainability, §173, opt-in) — a test that
+  exercises production code and never asserts. It passes forever, proves only that
+  nothing threw, and still counts toward coverage. Recognizes assertions across
+  jest/vitest, `node:assert`, chai `should`, ava `t.is` and supertest. Delegation
+  is resolved by **provenance**, not by name: a callee local to the file, reached
+  through a local binding, or imported from a helper module may assert out of
+  sight and is silent — the design that took this rule from 674 false positives on
+  this repo's own suite to zero.
+
 ### Diagnostics — streaming correctness (§128)
 
 - **`no-unhandled-pipe-error`** (Reliability, §128, opt-in) — a `.pipe()` whose

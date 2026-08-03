@@ -70,6 +70,7 @@ import { requireErrorHandlingMiddleware } from "../diagnostics/http/require-erro
 import { deepNesting } from "../diagnostics/maintainability/deep-nesting.ts";
 import { highCyclomaticComplexity } from "../diagnostics/maintainability/high-cyclomatic-complexity.ts";
 import { maxFunctionLength } from "../diagnostics/maintainability/max-function-length.ts";
+import { noAssertionFreeTest } from "../diagnostics/maintainability/no-assertion-free-test.ts";
 import { noCircularImports } from "../diagnostics/maintainability/no-circular-imports.ts";
 import { noConsoleLogInCommittedCode } from "../diagnostics/maintainability/no-console-log-in-committed-code.ts";
 import { noDeadAsync } from "../diagnostics/maintainability/no-dead-async.ts";
@@ -202,6 +203,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   deepNesting,
   highCyclomaticComplexity,
   maxFunctionLength,
+  noAssertionFreeTest,
   noCircularImports,
   noConsoleLogInCommittedCode,
   noDeadAsync,
