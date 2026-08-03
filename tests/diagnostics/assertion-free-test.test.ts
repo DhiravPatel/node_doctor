@@ -163,3 +163,50 @@ describe("no-assertion-free-test — silent outside a proven test case", () => {
     silent(V + `describe("group", () => { it("works", () => { expect(1).toBe(1); }); });`);
   });
 });
+
+describe("no-assertion-free-test — hunt regressions: assertion dialects", () => {
+  test("node:test's own `t.assert.*` context surface (Node 22+)", () => {
+    silent(
+      `import { test } from "node:test";\nimport { parsePort } from "../src/config.ts";\n` +
+        `test("parses", (t) => { t.assert.strictEqual(parsePort("8080"), 8080); });`,
+    );
+    silent(
+      `import { test } from "node:test";\nimport { parsePort } from "../src/config.ts";\n` +
+        `test("parses", (t) => { t.assert.ok(parsePort("80")); });`,
+    );
+  });
+
+  test("destructured node:assert helpers called bare", () => {
+    silent(
+      `import { test } from "node:test";\nimport { strictEqual } from "node:assert";\nimport { parsePort } from "../src/config.ts";\n` +
+        `test("parses", () => { strictEqual(parsePort("8080"), 8080); });`,
+    );
+    silent(
+      `import { test } from "node:test";\nimport { ok, match } from "node:assert/strict";\nimport { parsePort } from "../src/config.ts";\n` +
+        `test("parses", () => { ok(parsePort("80")); });`,
+    );
+  });
+
+  test("tape's context assertions", () => {
+    silent(
+      `import tape from "tape";\nimport { parsePort } from "../src/config.ts";\n` +
+        `tape("parses", (t) => { t.equal(parsePort("8080"), 8080); t.end(); });`,
+    );
+  });
+
+  test("a benchmark is not a test case — it asserts nothing by design", () => {
+    silent(
+      `import { bench, describe } from "vitest";\nimport { parse } from "../src/parse.ts";\n` +
+        `describe("parse", () => { bench("small", () => { parse(SMALL); }); });`,
+      "/repo/parse.bench.ts",
+    );
+  });
+
+  test("production code importing node:assert for runtime invariants is not a test", () => {
+    silent(
+      `import assert from "node:assert";\nimport { pingDatabase } from "./clients.ts";\n` +
+        `export async function health() { const r = await pingDatabase(); assert(r.ok, "db down"); return r; }`,
+      "/repo/src/health.ts",
+    );
+  });
+});

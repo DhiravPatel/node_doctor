@@ -28,6 +28,12 @@ import { getCalleeName, getStaticStringValue, staticMemberPath } from "./ast.ts"
 import { collectDescendants } from "./walk.ts";
 
 /** Packages whose import proves this file is a test. */
+/** Sources that prove a TEST RUNNER (not merely an assertion library). */
+const RUNNER_ONLY_SOURCES = new Set([
+  "node:test", "vitest", "jest", "@jest/globals", "mocha", "ava", "bun:test",
+  "tape", "@playwright/test",
+]);
+
 const RUNNER_SOURCES = new Set([
   "node:test",
   "test",
@@ -52,7 +58,7 @@ const RUNNER_SOURCES = new Set([
 const TEST_PATH = /(^|\/)(__tests__|__specs__|test|tests|spec|specs)\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
 
 /** The functions that declare a test case. */
-const TEST_DECLARATORS = new Set(["it", "test", "fit", "xit", "specify", "bench"]);
+const TEST_DECLARATORS = new Set(["it", "test", "fit", "xit", "specify"]);
 /** The functions that declare a group (not a case — a group has no assertions of its own). */
 const SUITE_DECLARATORS = new Set(["describe", "context", "suite", "fdescribe", "xdescribe"]);
 
@@ -82,6 +88,12 @@ const ASSERT_METHODS = new Set([
   "match", "doesNotMatch", "fail", "ifError", "partialDeepStrictEqual",
 ]);
 
+/** tape's context assertions: `t.equal(a, b)`, `t.plan(n)`. */
+const TAPE_METHODS = new Set([
+  "equal", "notEqual", "deepEqual", "notDeepEqual", "equals", "same", "notSame",
+  "plan", "end", "error", "ifError", "comment",
+]);
+
 /** `t.assert(...)` / `t.is(...)` — the runner-context assertion styles (ava, node:test). */
 const CONTEXT_ASSERT_METHODS = new Set([
   "assert", "is", "not", "true", "false", "truthy", "falsy", "deepEqual", "like",
@@ -105,9 +117,11 @@ export interface TestCase {
  */
 export const isTestFile = (program: AstNode, normalizedFilePath: string): boolean => {
   let importsRunner = false;
+  let importsRunnerOnly = false;
   for (const stmt of (program.body as AstNode[] | undefined) ?? []) {
     if (stmt.type === "ImportDeclaration" && typeof stmt.source?.value === "string") {
       if (RUNNER_SOURCES.has(stmt.source.value)) importsRunner = true;
+      if (RUNNER_ONLY_SOURCES.has(stmt.source.value)) importsRunnerOnly = true;
     }
   }
   if (!importsRunner) {
@@ -119,17 +133,28 @@ export const isTestFile = (program: AstNode, normalizedFilePath: string): boolea
     )) {
       const spec = getStaticStringValue(((call.arguments as AstNode[] | undefined) ?? [])[0]);
       if (spec !== null && RUNNER_SOURCES.has(spec)) importsRunner = true;
+      if (spec !== null && RUNNER_ONLY_SOURCES.has(spec)) importsRunnerOnly = true;
     }
   }
+  // An assertion-library import alone does not make a file a test: production
+  // code imports `node:assert` for runtime invariants, and a Playwright page
+  // object imports `expect`. Require real test declarations alongside it.
+  const hasTestDeclarations = (): boolean =>
+    collectDescendants(program, (n) => n.type === "CallExpression", undefined, true).some((call) => {
+      const name = declaratorName(call);
+      return name !== null && (TEST_DECLARATORS.has(name) || SUITE_DECLARATORS.has(name));
+    });
+
+  // An assertion-library import alone does not make a file a test: production
+  // code imports `node:assert` for runtime invariants, and a page object imports
+  // `expect`. Require real test declarations alongside it.
+  if (importsRunner && !importsRunnerOnly) return hasTestDeclarations();
   if (importsRunner) return true;
 
   // No import: a globals-style runner (jest/mocha/bun). Require BOTH the path
   // convention and actual test declarations, so a helper named `test` is safe.
   if (!TEST_PATH.test(normalizedFilePath)) return false;
-  return collectDescendants(program, (n) => n.type === "CallExpression", undefined, true).some((call) => {
-    const name = declaratorName(call);
-    return name !== null && (TEST_DECLARATORS.has(name) || SUITE_DECLARATORS.has(name));
-  });
+  return hasTestDeclarations();
 };
 
 /** The base name of a test declarator call, unwrapping `it.each(…)`/`test.skip`. */
@@ -199,6 +224,9 @@ export const containsAssertion = (node: AstNode | null | undefined): boolean => 
 
     // Bare `expect(...)` / `assert(...)` / `should(...)`.
     if (callee?.type === "Identifier" && ASSERTION_ROOTS.has(callee.name as string)) return true;
+    // A destructured node:assert helper called bare: `strictEqual(a, b)`,
+    // `ok(x)`, `match(s, re)` — a mainstream node:test dialect.
+    if (callee?.type === "Identifier" && ASSERT_METHODS.has(callee.name as string)) return true;
 
     if (callee?.type === "MemberExpression") {
       const path = staticMemberPath(callee);
@@ -222,6 +250,18 @@ export const containsAssertion = (node: AstNode | null | undefined): boolean => 
       if (property === "expect") return true; // supertest `.expect(200)`
       if (property && CONTEXT_ASSERT_METHODS.has(property)) {
         // `t.is(...)` — only when the receiver looks like a runner context.
+        const object = callee.object as AstNode | undefined;
+        if (object?.type === "Identifier" && /^(t|ctx|assert|a)$/.test(object.name as string)) return true;
+      }
+      // node:test's own `t.assert.strictEqual(...)` (TestContext.assert, Node 22+)
+      // and any chain whose receiver path ends in `.assert` — the object here is a
+      // nested MemberExpression, which the identifier check above cannot see.
+      if (property && ASSERT_METHODS.has(property)) {
+        const objectPath = staticMemberPath(callee.object as AstNode | undefined);
+        if (objectPath && /(^|\.)assert$/.test(objectPath)) return true;
+      }
+      // tape / node:test context: `t.equal(...)`, `t.plan(...)`, `t.end()`.
+      if (property && TAPE_METHODS.has(property)) {
         const object = callee.object as AstNode | undefined;
         if (object?.type === "Identifier" && /^(t|ctx|assert|a)$/.test(object.name as string)) return true;
       }
