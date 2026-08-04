@@ -173,7 +173,7 @@ describe("markdown reporters", () => {
     const report = {
       schemaVersion: 2,
       provenance: { toolVersion: "0.0.0", rulesetHash: "t", configHash: "t", capabilities: [] },
-      project: { name: "svc", rootDirectory: "/x", capabilities: [], analyzedFileCount: 3, totalLines: 100, complete: true, parseFailures: [] },
+      project: { name: "svc", rootDirectory: "/x", capabilities: [], analyzedFileCount: 3, totalLines: 100, complete: true, parseFailures: [], suppressedKeys: [] },
       diagnosticsRun: 1,
       diagnosticsAvailable: 1,
       findings: [finding({ evidenceKey: "E" })],

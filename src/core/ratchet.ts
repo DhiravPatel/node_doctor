@@ -262,6 +262,12 @@ export const compareToRatchet = (
   const completeScan = report.project.complete;
   const canRecordResolutions = comparableRuleset && completeScan;
 
+  // A finding silenced by an inline `node-doctor-disable` directive is absent
+  // from `findings` for exactly the same reason a fixed one is — but it was not
+  // repaired, it was acknowledged. Recording it as fixed would report a false
+  // regression the day someone removes the directive.
+  const suppressedNow = new Set(report.project.suppressedKeys ?? []);
+
   const scoreDelta = report.score.score - ratchet.score;
   const passed = introduced.length === 0 && scoreDelta >= 0;
 
@@ -278,7 +284,7 @@ export const compareToRatchet = (
             ratchet.resolvedHistory,
             // Dedupe (N copies resolved is one fact), and record only keys with
             // no surviving copy in the current scan.
-            [...new Set(resolvedKeys)].filter((k) => !presentKeys.has(k)),
+            [...new Set(resolvedKeys)].filter((k) => !presentKeys.has(k) && !suppressedNow.has(k)),
             options.now ?? "",
           ),
         }

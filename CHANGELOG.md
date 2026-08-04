@@ -28,8 +28,13 @@ while staying offline-first and deterministic.
   committed file. A resolution is now recorded only when the scan ran the **same
   ruleset** (persisted as a hash, so `--ignore-tag` or a config change no longer
   reads as a fix), **completed** (a parse failure proves nothing), and left **no
-  surviving copy** of the key. Insufficient evidence declines to write history and
-  says so. The cap no longer evicts the resolution it just recorded, and
+  surviving copy** of the key, and **was not suppressed** — an inline
+  `node-doctor-disable` directive removes a finding from the report exactly as a
+  fix does, so `ScanReport.project.suppressedKeys` now carries what the directives
+  silenced (the scan cache is versioned to v2 to carry it too) and the ratchet
+  excludes those keys. Suppressing a finding is acknowledging debt, not paying it,
+  and removing the directive later must not read as a regression. Insufficient
+  evidence declines to write history and says so. The cap no longer evicts the resolution it just recorded, and
   `ratchet init` carries the fix record forward instead of erasing it.
 
 ### Diagnostics — test-suite quality (§173)

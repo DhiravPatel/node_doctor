@@ -108,6 +108,8 @@ export interface ScanReport {
     totalLines: number;
     complete: boolean;
     parseFailures: ParseFailure[];
+    /** Evidence keys silenced by inline `node-doctor-disable` directives. */
+    suppressedKeys: string[];
   };
   diagnosticsRun: number;
   diagnosticsAvailable: number;
@@ -213,12 +215,21 @@ interface AnalyzeOptions {
   onRuleError?: (ruleId: string, err: unknown) => void;
   /** Cache hit: parse for facts but reuse these pending findings (skip diagnostics). */
   cachedPending?: PendingFinding[];
+  /** §161 — suppressed evidence keys from the cache entry, when this is a hit. */
+  cachedSuppressedKeys?: string[];
   /** When false, inline disable directives are ignored (audit mode). */
   respectInlineDisables?: boolean;
 }
 
 interface AnalyzeResult {
   pending: PendingFinding[];
+  /**
+   * §161 — evidence keys of findings an inline directive suppressed here. A
+   * suppressed finding disappears from `findings` exactly like a fixed one, so
+   * without this the ratchet records it as "fixed" and later reports a false
+   * regression when the directive is removed.
+   */
+  suppressedKeys: string[];
   moduleFacts: ModuleFacts;
   parseFailed: boolean;
   errors: string[];
@@ -240,6 +251,9 @@ const analyzeFile = (opts: AnalyzeOptions): AnalyzeResult => {
   if (opts.cachedPending) {
     return {
       pending: opts.cachedPending,
+      // Content-addressed: an unchanged file has unchanged directives, so the
+      // cached suppression set is still exactly right.
+      suppressedKeys: opts.cachedSuppressedKeys ?? [],
       moduleFacts: collectModuleFacts(filePath, normalizedFilePath, program, scope, handlers),
       parseFailed: parsed.parseFailed,
       errors: parsed.errors,
@@ -337,6 +351,7 @@ const analyzeFile = (opts: AnalyzeOptions): AnalyzeResult => {
   // so suppressed issues surface — nothing is filtered out and no reason-less
   // meta-finding is raised.
   let finalPending: PendingFinding[];
+  const suppressedKeys: string[] = [];
   if (opts.respectInlineDisables === false) {
     finalPending = pending.slice();
   } else {
@@ -345,6 +360,11 @@ const analyzeFile = (opts: AnalyzeOptions): AnalyzeResult => {
     const { kept, reasonMissing } = applySuppressions(wrapped, directives);
     const keptIndices = new Set(kept.map((k) => k.index));
     finalPending = pending.filter((_, i) => keptIndices.has(i));
+    // Record what the directives silenced, keyed exactly as `finalize` will key
+    // the surviving findings, so the ratchet can match them.
+    for (const [i, p] of pending.entries()) {
+      if (!keptIndices.has(i)) suppressedKeys.push(makeEvidenceKey(p.ruleId, p.message, p.evidenceText ?? ""));
+    }
 
     // Near-miss hints: a finding that fired despite an almost-right disable comment.
     if (directives.length > 0) {
@@ -383,6 +403,7 @@ const analyzeFile = (opts: AnalyzeOptions): AnalyzeResult => {
 
   return {
     pending: relaxedPending,
+    suppressedKeys,
     moduleFacts,
     parseFailed: parsed.parseFailed,
     errors: parsed.errors,
@@ -576,6 +597,7 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
   const moduleFactsList: ModuleFacts[] = [];
   let totalLines = 0;
   let analyzedFileCount = 0;
+  const suppressedKeys = new Set<string>();
 
   // Content-hash cache setup.
   const cacheDir = options.cacheDir ?? join(rootDirectory, CACHE_DIR_NAME);
@@ -598,6 +620,8 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
     filePath: string;
     normalizedFilePath: string;
     pending: PendingFinding[];
+    /** §161 — evidence keys silenced by inline directives in this file. */
+    suppressedKeys: string[];
     moduleFacts?: ModuleFacts;
     parseFailureMessage?: string;
     totalLines: number;
@@ -616,6 +640,7 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
         filePath,
         normalizedFilePath,
         pending: [],
+        suppressedKeys: [],
         totalLines: 0,
         parseFailureMessage: err instanceof Error ? err.message : "unreadable file",
       };
@@ -631,6 +656,7 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
         filePath,
         normalizedFilePath,
         pending: hit!.pending as PendingFinding[],
+        suppressedKeys: hit!.suppressedKeys ?? [],
         totalLines: hit!.totalLines,
         parseFailureMessage: hit!.parseFailed ? (hit!.errors[0] ?? "parse error") : undefined,
         cacheEntry: hit!,
@@ -650,12 +676,14 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
       respectInlineDisables: options.respectInlineDisables,
       // Cache hit but the project pass needs the AST: reuse diagnostic results, still parse.
       cachedPending: isHit ? (hit!.pending as PendingFinding[]) : undefined,
+      cachedSuppressedKeys: isHit ? (hit!.suppressedKeys ?? []) : undefined,
     });
 
     return {
       filePath,
       normalizedFilePath,
       pending: result.pending,
+      suppressedKeys: result.suppressedKeys,
       moduleFacts: result.moduleFacts,
       totalLines: result.totalLines,
       parseFailureMessage: result.parseFailed ? (result.errors[0] ?? "parse error") : undefined,
@@ -664,6 +692,7 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
             hash,
             probe,
             pending: result.pending,
+            suppressedKeys: result.suppressedKeys,
             totalLines: result.totalLines,
             parseFailed: result.parseFailed,
             errors: result.errors,
@@ -696,6 +725,7 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
     analyzedFileCount += 1;
     totalLines += r.totalLines;
     pending.push(...r.pending);
+    for (const key of r.suppressedKeys) suppressedKeys.add(key);
     if (r.moduleFacts) moduleFactsList.push(r.moduleFacts);
     if (r.parseFailureMessage !== undefined) {
       recordParseFailure(r.filePath, r.normalizedFilePath, r.parseFailureMessage);
@@ -810,6 +840,10 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
       analyzedFileCount,
       totalLines,
       complete: parseFailures.length === 0 && !timedOut,
+      // §161 — findings an inline directive silenced. They are absent from
+      // `findings` exactly like a fixed finding, so the ratchet needs them to
+      // avoid recording a suppression as a repair.
+      suppressedKeys: [...suppressedKeys].sort(),
       parseFailures: parseFailures.sort((a, b) =>
         a.normalizedFilePath < b.normalizedFilePath ? -1 : a.normalizedFilePath > b.normalizedFilePath ? 1 : 0,
       ),

@@ -60,6 +60,7 @@ const report = (findings: Finding[], score: number): ScanReport => ({
     totalLines: 100,
     complete: true,
     parseFailures: [],
+    suppressedKeys: [],
   },
   diagnosticsRun: 1,
   diagnosticsAvailable: 1,
@@ -692,7 +693,7 @@ describe("§161 fix-regression — purity, schema and bounds", () => {
 const reportWith = (
   findings: Finding[],
   score: number,
-  over: { rulesetHash?: string; complete?: boolean } = {},
+  over: { rulesetHash?: string; complete?: boolean; suppressedKeys?: string[] } = {},
 ): ScanReport => {
   const base = report(findings, score);
   return {
@@ -704,6 +705,7 @@ const reportWith = (
       parseFailures: over.complete === false
         ? [{ filePath: "/repo/src/a.js", normalizedFilePath: "src/a.js", message: "Expected `}` but found `EOF`" }]
         : [],
+      suppressedKeys: over.suppressedKeys ?? [],
     },
   };
 };
@@ -782,5 +784,45 @@ describe("§161 — a finding must be PROVEN fixed before it enters history", ()
     const v1 = { ...buildRatchet(report([finding("a")], 70)), rulesetHash: "" };
     const cmp = compareToRatchet(report([], 100), v1, { now: "2026-03-11" });
     assert.equal(cmp.recordedResolutions, true, "unknown ruleset must not punish an upgraded file");
+  });
+});
+
+describe("§161 — a SUPPRESSED finding is acknowledged debt, never a repair", () => {
+  test("a finding silenced by an inline directive is not recorded as fixed", () => {
+    const base = buildRatchet(report([finding("a")], 0));
+    // The directive removes it from `findings` exactly as a fix would — the only
+    // thing that tells them apart is the suppression record on the report.
+    const cmp = compareToRatchet(reportWith([], 100, { suppressedKeys: ["a"] }), base, {
+      now: "2026-03-11",
+    });
+    assert.equal(cmp.resolved, 1, "it is absent from findings");
+    assert.equal(cmp.recordedResolutions, true, "the scan itself is comparable and complete");
+    assert.deepEqual(
+      cmp.tightened!.resolvedHistory,
+      [],
+      "but a suppression is an acknowledgement, not a repair",
+    );
+  });
+
+  test("and so removing the directive later is NOT reported as a regression", () => {
+    const base = buildRatchet(report([finding("a")], 0));
+    const suppressed = compareToRatchet(reportWith([], 100, { suppressedKeys: ["a"] }), base, {
+      now: "2026-03-11",
+    });
+    // The directive is removed; the finding comes back.
+    const back = compareToRatchet(report([finding("a")], 0), suppressed.tightened!);
+    assert.deepEqual(back.regressed, [], "nothing was ever fixed, so nothing regressed");
+  });
+
+  test("a genuine fix alongside a suppression still records only the fix", () => {
+    const base = buildRatchet(report([finding("fixed"), finding("hushed")], 40));
+    const cmp = compareToRatchet(reportWith([], 100, { suppressedKeys: ["hushed"] }), base, {
+      now: "2026-03-11",
+    });
+    assert.deepEqual(
+      cmp.tightened!.resolvedHistory.map((e) => e.key),
+      ["fixed"],
+      "the repaired one is remembered; the silenced one is not",
+    );
   });
 });

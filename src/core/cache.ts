@@ -16,13 +16,18 @@ import type { Diagnostic, Severity } from "./types.ts";
 
 export const CACHE_DIR_NAME = ".node-doctor-cache";
 const CACHE_FILE = "cache.json";
-const CACHE_VERSION = 1;
+// v2 adds `suppressedKeys` (§161): the ratchet must know which findings vanished
+// because they were SUPPRESSED rather than fixed, and a cached file has to carry
+// that fact too. Bumping the version discards v1 entries cleanly.
+const CACHE_VERSION = 2;
 
 /** A cached per-file analysis (file-scope only). */
 export interface CacheEntry {
   hash: string;
   probe: string;
   pending: unknown[];
+  /** Evidence keys of findings an inline directive suppressed in this file. */
+  suppressedKeys: string[];
   totalLines: number;
   parseFailed: boolean;
   errors: string[];
