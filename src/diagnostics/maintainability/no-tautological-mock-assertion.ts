@@ -31,6 +31,13 @@ import { isTestFile, collectTestCases } from "../../core/test-file.ts";
  * something, and that is not this rule's business. Also silent on behavioural
  * assertions about the mock (`toHaveBeenCalledWith`), which verify how OUR code
  * used the collaborator and are a legitimate, valuable test.
+ *
+ * Hardened against an adversarial hunt, which showed the binding itself must be
+ * proven: only a NAMESPACED factory counts (`vi.fn`, `jest.fn`, `sinon.stub`),
+ * because a bare `stub()`/`fn()` is just as likely a fixture builder — or, in a
+ * mocking library's own suite, the production code under test. And only a `const`
+ * that is never reassigned counts, since a mock swapped for the real
+ * implementation between suites makes the same assertion a genuine test.
  */
 
 /** Ways a mock's return value is configured. */
@@ -45,8 +52,15 @@ const MOCK_CONFIGURATORS = new Set([
   "resolves",
 ]);
 
-/** Factories that create a mock function. */
-const MOCK_FACTORY = /^(vi|jest|sinon|mock)\.(fn|mock|stub|spy)$|^(fn|stub|spy|createMock)$/;
+/**
+ * Factories that create a mock function — NAMESPACED ONLY.
+ *
+ * A bare `fn()` / `stub()` / `spy()` is not proof of a mock: it is also a fixture
+ * builder (`stub("user").returns(…)`), and in a mocking library's own test suite
+ * those names ARE the production code under test. Requiring the namespace is what
+ * keeps this rule from firing on the projects most likely to use those words.
+ */
+const MOCK_FACTORY = /^(vi|jest|sinon|jasmine|td)\.(fn|mock|stub|spy|createStubInstance)$/;
 
 /** Matchers that assert VALUE equality (the tautological ones). */
 const VALUE_MATCHERS = new Set([
@@ -70,6 +84,20 @@ export const noTautologicalMockAssertion = defineDiagnostic({
       // Bindings that hold a mock configured with a fixed return value in this
       // file: `const getUser = vi.fn().mockReturnValue({ id: 1 })`.
       const configuredMocks = new Set<string>();
+      // A binding that is REASSIGNED later cannot be reasoned about: a mock swapped
+      // for the real implementation between suites (`render = realRender`) would
+      // make the assertion a genuine test by the time it runs.
+      const reassigned = new Set<string>();
+      for (const assign of collectDescendants(
+        program,
+        (n) => n.type === "AssignmentExpression",
+        undefined,
+        true,
+      )) {
+        const left = assign.left as AstNode | undefined;
+        if (left?.type === "Identifier") reassigned.add(left.name as string);
+      }
+
       for (const decl of collectDescendants(
         program,
         (n) => n.type === "VariableDeclarator",
@@ -78,6 +106,7 @@ export const noTautologicalMockAssertion = defineDiagnostic({
       )) {
         const id = decl.id as AstNode | undefined;
         if (id?.type !== "Identifier") continue;
+        if (reassigned.has(id.name as string)) continue;
         const init = decl.init as AstNode | undefined;
         if (!init) continue;
         // Walk the chain looking for BOTH a mock factory root and a configurator.
@@ -109,7 +138,10 @@ export const noTautologicalMockAssertion = defineDiagnostic({
           }
           break;
         }
-        if (sawFactory && sawConfigurator) configuredMocks.add(id.name as string);
+        // `const` only: a `let` holding a mock is the reassignable shape above.
+        const declaration = (decl as { parent?: AstNode }).parent;
+        const isConst = declaration?.type === "VariableDeclaration" && declaration.kind === "const";
+        if (sawFactory && sawConfigurator && isConst) configuredMocks.add(id.name as string);
       }
       if (configuredMocks.size === 0) return;
 

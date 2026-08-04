@@ -61,6 +61,25 @@ while staying offline-first and deterministic.
   configured, with a value matcher. Silent when real code wraps the value, on
   behavioural assertions like `toHaveBeenCalledWith`, and on unconfigured spies.
 
+### Test-quality rules hardened against an adversarial hunt
+
+A 33-agent hunt against §173/§174/§176 confirmed 28 false positives, all now
+closed and pinned. The dominant class was existential for a Node-focused tool:
+**modern `node:test` style was flagged as vacuous on every test**, because the
+assertion recognizer could not see `t.assert.strictEqual(...)` (the receiver is a
+nested member expression) or a destructured `import { strictEqual } from
+"node:assert"` called bare. Also fixed: tape's `t.equal`, `bench()` benchmarks
+being treated as test cases (a benchmark asserts nothing by design), and —
+worst — **production code importing `node:assert` for runtime invariants being
+analyzed as a test file**. An assertion-library import now only marks a test when
+real test declarations accompany it.
+
+The §174/§176 fixes all follow one principle: the shape alone is never the bug,
+it needs the shape *plus* proof it is actually wrong. A sleep must be the
+awaited-Promise idiom; a clock read must be a direct assertion operand, not
+wrapped in a predicate; `Math.random` is silent when stubbed; and a mock must
+come from a namespaced factory in a never-reassigned `const`.
+
 ### Diagnostics — streaming correctness (§128)
 
 - **`no-unhandled-pipe-error`** (Reliability, §128, opt-in) — a `.pipe()` whose

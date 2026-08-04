@@ -150,3 +150,82 @@ describe("no-tautological-mock-assertion — silent", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Hunt regressions — each of these previously fired on correct, deterministic
+// test code. The lesson is the same in every case: the shape alone is not the
+// bug; the bug needs the shape PLUS proof that it is actually racing.
+// ---------------------------------------------------------------------------
+
+describe("no-flaky-test-pattern — hunt regressions", () => {
+  test("a clock read wrapped in a PREDICATE is deterministic", () => {
+    // The assertion is about a property that holds at any instant, not about
+    // the instant itself.
+    flaky.silent(V + `it("not expired", () => { expect(isExpired(Date.now())).toBe(false); });`);
+    flaky.silent(V + `it("valid date", () => { expect(isValidDate(new Date())).toBe(true); });`);
+  });
+
+  test("a setTimeout whose handle is returned or cleared is scheduling, not sleeping", () => {
+    flaky.silent(
+      V + `it("handle", () => { const h = setTimeout(cleanup, 5000); expect(h).toBeDefined(); clearTimeout(h); });`,
+    );
+    flaky.silent(
+      V + `it("async", () => { const spy = vi.fn(); const id = setTimeout(() => spy(), 100); expect(spy).not.toHaveBeenCalled(); clearTimeout(id); });`,
+    );
+  });
+
+  test("Math.random stubbed by hand or by a spy is deterministic", () => {
+    flaky.silent(
+      V + `it("stubbed", () => { const o = Math.random; Math.random = () => 0.5; expect(pickShard()).toBe(2); Math.random = o; });`,
+    );
+    flaky.silent(
+      V + `beforeEach(() => vi.spyOn(Math, "random").mockReturnValue(0.5));
+it("spied", () => { expect(pickShard()).toBe(2); });`,
+    );
+  });
+
+  test("the genuine sleep still fires (the guards must not disarm the rule)", () => {
+    flaky.fires(V + `it("sleeps", async () => { await new Promise((r) => setTimeout(r, 500)); expect(1).toBe(1); });`);
+  });
+});
+
+describe("no-tautological-mock-assertion — hunt regressions", () => {
+  test("a bare `stub()`/`fn()` is not proof of a mock — it may be a fixture builder", () => {
+    tauto.silent(
+      V + `const stub = (kind) => ({ returns: (v) => ({ kind, v }) });
+const rec = stub("user").returns({ id: 1 });
+it("x", () => { expect(rec.v).toEqual({ id: 1 }); });`,
+    );
+  });
+
+  test("a mocking library's OWN suite, where fn/stub are the code under test", () => {
+    tauto.silent(
+      `import { it, expect } from "vitest";
+import { fn } from "../src/mock.ts";
+const m = fn().returns(7);
+it("returns the configured value", () => { expect(m()).toBe(7); });`,
+    );
+  });
+
+  test("a REASSIGNED binding may hold the real implementation by the time it runs", () => {
+    tauto.silent(
+      V + `let render = vi.fn().mockReturnValue("<p>stub</p>");
+render = renderMarkdown;
+it("x", () => { expect(render("x")).toBe("<p>stub</p>"); });`,
+    );
+  });
+
+  test("a mock used to make output deterministic, with REAL code asserted", () => {
+    tauto.silent(
+      V + `const md5 = vi.fn().mockReturnValue("abc123");
+it("x", () => { expect(buildRecord("k", md5())).toEqual({ k: "abc123" }); });`,
+    );
+  });
+
+  test("the genuine tautology still fires", () => {
+    tauto.fires(
+      V + `const getUser = vi.fn().mockReturnValue({ id: 1 });
+it("x", () => { expect(getUser()).toEqual({ id: 1 }); });`,
+    );
+  });
+});

@@ -44,6 +44,14 @@ import { isTestFile, collectTestCases } from "../../core/test-file.ts";
  * shapes are deterministic.
  */
 
+/** `expect(x).toBe(y)` → the `.toBe(y)` call node, given the `expect(x)` node. */
+const matcherCallOf = (expectCall: AstNode): AstNode | null => {
+  const parent = (expectCall as { parent?: AstNode }).parent;
+  if (parent?.type !== "MemberExpression") return null;
+  const grand = (parent as { parent?: AstNode }).parent;
+  return grand?.type === "CallExpression" ? grand : null;
+};
+
 /** Calls that put the test's clock under deterministic control. */
 const CLOCK_CONTROL = /\b(useFakeTimers|setSystemTime|install|tick|advanceTimersBy|runAllTimers|mockdate|MockDate)\b/;
 
@@ -67,6 +75,11 @@ export const noFlakyTestPattern = defineDiagnostic({
       // Clock control is usually installed in a `beforeEach`, i.e. outside the
       // case — so this is a FILE-level question, not a per-case one.
       const clockIsControlled = CLOCK_CONTROL.test(ctx.sourceText);
+      // `vi.spyOn(Math, "random")`, `jest.spyOn(Math, 'random')`, or a direct
+      // `Math.random = () => 0.5` makes every later use deterministic.
+      const randomIsStubbed =
+        /spyOn\s*\(\s*Math\s*,\s*["']random["']\s*\)/.test(ctx.sourceText) ||
+        /Math\s*\.\s*random\s*=/.test(ctx.sourceText);
 
       for (const testCase of collectTestCases(program)) {
         if (testCase.skipped || !testCase.fn) continue;
@@ -84,15 +97,21 @@ export const noFlakyTestPattern = defineDiagnostic({
             const args = (call.arguments as AstNode[] | undefined) ?? [];
             const delay = args[1];
             if (delay?.type !== "Literal" || typeof delay.value !== "number" || delay.value <= 0) continue;
-            // A sleep resolves a promise and does nothing else; a `setTimeout`
-            // that schedules real work is not what this rule is about.
-            const callback = args[0];
-            const isSleep =
-              !callback ||
-              callback.type === "Identifier" || // setTimeout(resolve, 500)
-              ((callback.type === "ArrowFunctionExpression" || callback.type === "FunctionExpression") &&
-                collectDescendants(callback, (n) => n.type === "CallExpression", undefined, true).length <= 1);
-            if (!isSleep) continue;
+            // A sleep is the AWAITED-PROMISE idiom — `await new Promise((r) =>
+            // setTimeout(r, 500))`. A bare `setTimeout` whose handle is returned,
+            // cleared, or asserted on is scheduling, not sleeping, and blocks
+            // nothing; requiring the wrapper is what separates the two.
+            let wrapper: AstNode | undefined = (call as { parent?: AstNode }).parent;
+            let insideAwaitedPromise = false;
+            for (let hop = 0; wrapper && hop < 6; hop++) {
+              if (wrapper.type === "NewExpression" && getCalleeName(wrapper.callee as AstNode) === "Promise") {
+                const outer = (wrapper as { parent?: AstNode }).parent;
+                insideAwaitedPromise = outer?.type === "AwaitExpression" || outer?.type === "ReturnStatement";
+                break;
+              }
+              wrapper = (wrapper as { parent?: AstNode }).parent;
+            }
+            if (!insideAwaitedPromise) continue;
             ctx.report(
               call,
               `This test${label} sleeps for a fixed ${delay.value}ms instead of waiting for the condition it needs. On a slower CI machine the wait is too short and the test fails intermittently — which teaches the team to re-run CI rather than read it.`,
@@ -118,16 +137,22 @@ export const noFlakyTestPattern = defineDiagnostic({
             // the matcher call that follows it (`expect(a).toBe(Date.now())`).
             const parent = (call as { parent?: AstNode }).parent;
             const scope = parent?.type === "MemberExpression" ? ((parent as { parent?: AstNode }).parent ?? call) : call;
-            for (const clock of collectDescendants(
-              scope as AstNode,
-              (n) =>
-                (n.type === "CallExpression" && staticMemberPath(n.callee as AstNode) === "Date.now") ||
-                (n.type === "NewExpression" &&
-                  getCalleeName(n.callee as AstNode) === "Date" &&
-                  ((n.arguments as AstNode[] | undefined) ?? []).length === 0),
-              undefined,
-              true,
-            )) {
+            const isClockRead = (n: AstNode): boolean =>
+              (n.type === "CallExpression" && staticMemberPath(n.callee as AstNode) === "Date.now") ||
+              (n.type === "NewExpression" &&
+                getCalleeName(n.callee as AstNode) === "Date" &&
+                ((n.arguments as AstNode[] | undefined) ?? []).length === 0);
+            // Only a clock read passed DIRECTLY to the assertion or its matcher
+            // races. Wrapped in a predicate — `assert(isValidDate(new Date()))`,
+            // `expect(isExpired(Date.now())).toBe(false)` — the assertion is
+            // about a property that holds at any instant, which is deterministic.
+            const directOperands: AstNode[] = [];
+            for (const holder of [call, matcherCallOf(call)]) {
+              for (const arg of ((holder?.arguments as AstNode[] | undefined) ?? [])) {
+                if (arg && isClockRead(arg)) directOperands.push(arg);
+              }
+            }
+            for (const clock of directOperands) {
               ctx.report(
                 clock,
                 `This test${label} asserts against the live clock. The value moves between the code running and the assertion running, so the test fails whenever that gap crosses a millisecond boundary. Freeze time instead (\`vi.useFakeTimers()\` / \`jest.useFakeTimers()\`).`,
@@ -139,7 +164,9 @@ export const noFlakyTestPattern = defineDiagnostic({
           }
         }
 
-        // (3) Math.random() — unreproducible by definition.
+        // (3) Math.random() — unreproducible by definition, unless the file has
+        //     taken control of it (a spy, or a hand-rolled `Math.random = …`).
+        if (randomIsStubbed) continue;
         for (const call of collectDescendants(
           body,
           (n) => n.type === "CallExpression" && staticMemberPath(n.callee as AstNode) === "Math.random",
