@@ -98,6 +98,24 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Engine hardening
+
+- **CODEOWNERS files with CRLF line endings no longer invent owners.** JavaScript's
+  `.` does not match `\r`, so the comment-stripping `#.*$` could not anchor on a
+  Windows-authored line — the comment survived and every `@handle` mentioned
+  inside it (`@core # was @legacy, do not ping them`) was resolved as a real
+  owner, routing findings and review requests to people deliberately named as
+  *not* responsible. Lines are now split on both endings.
+
+- **A file nested past the parser's stack limit no longer kills the scan.** A
+  stack overflow inside the native parser is a SIGSEGV: the process dies with no
+  output, no partial report, and no `try`/`catch` that can intercept it — one
+  machine-generated file took the whole run with it. Depth is now measured on the
+  raw text before the parser sees it, and such a file is reported as an ordinary
+  parse failure (named, with its reason, and `complete: false`) while the rest of
+  the project is analyzed normally. The pre-scan skips strings, template literals
+  and comments so brackets that are not structure cannot trip it.
+
 ### Diagnostics — debuggability (§183)
 
 - **`no-error-cause-discarded`** (Reliability, §183, opt-in) — a catch that binds
@@ -114,13 +132,21 @@ come from a namespaced factory in a never-reassigned `const`.
 - **`node-doctor review <files…> | --diff <base>`** (alias `routing`) — turns
   "who should review this?" from a guess into a graph query. Joins the import
   graph (§120) with CODEOWNERS (§89) and hub detection (§33) to report the blast
-  radius, the routes at risk, the reviewers — owners of the change **and of
-  everything downstream**, so people whose code it can break actually see it —
-  and a review level (light / standard / senior). The level is derived from
-  counted facts (reach ≥ 5 → standard; reach ≥ 25, ≥ 10 route-bearing
-  dependents, or any hub module → senior) and every threshold that fired is
-  printed, so escalations are auditable. Adds no findings. A changed file the
-  graph cannot see is reported as *unknown* reach, never as safe.
+  radius, the handler-bearing files downstream, the reviewers — owners of the
+  change **and of everything downstream**, so people whose code it can break
+  actually see it — and a review level (light / standard / senior). The level is
+  derived from counted facts (reach ≥ 5 → standard; reach ≥ 25 or any hub module
+  → senior) and every threshold that fired is printed, so escalations are
+  auditable. Adds no findings. A changed file the graph cannot see is reported as
+  *unknown* reach, never as safe.
+  A follow-up hunt caught the one soft input: request-handler detection matches
+  the `(req, res)` **shape**, so a middleware factory counts as readily as a
+  route, and ten of them used to force a *senior* escalation — a claim on a
+  person's time made on a guess. Handler-bearing files now raise a light review
+  to standard and never escalate further on their own; reach and hub status,
+  both exact graph facts, remain the senior triggers. The field is renamed
+  `handlerBearingFiles` to say what it counts (`routesAtRisk` is kept as a
+  deprecated alias so existing JSON consumers keep working).
 
 ### Churn-weighted risk — `node-doctor churn` (§160)
 
@@ -139,6 +165,12 @@ come from a namespaced factory in a never-reassigned `const`.
   commits-ago, not days, so output is deterministic. Docs, lockfiles and
   generated artifacts are excluded from magnets (they churn by design). With no
   git or no history, scores are 0 and the original order is preserved exactly.
+  Also fixed: `git log` prints repository-root-relative paths while findings are
+  scan-root-relative, so pointing the tool at a subdirectory
+  (`node-doctor churn packages/api`) joined nothing — every weight silently
+  became 0 while the report still called itself available. Paths are now rebased
+  via `git rev-parse --show-prefix`, and history outside the scanned directory is
+  excluded rather than mis-attributed.
 
 ### Architecture analysis — `node-doctor architecture` (§33)
 

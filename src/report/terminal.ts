@@ -274,19 +274,21 @@ export const renderImpact = (
     return lines.join("\n");
   }
 
+  // "handler-shaped", not "routes": the detection matches the `(req, res)` shape,
+  // which a middleware factory has too. Naming the signal honestly costs a word.
   const routes = report.routeBearingFiles.length;
   lines.push(
     `  ${p.bold(String(report.reachedCount))} file(s) transitively depend on this change` +
-      (routes > 0 ? `, including ${p.bold(String(routes))} that register routes:` : ":"),
+      (routes > 0 ? `, including ${p.bold(String(routes))} with request-handler code:` : ":"),
   );
   lines.push("");
   for (const d of report.dependents) {
-    const marker = d.hasHandlers ? p.yellow("[route]") : "       ";
+    const marker = d.hasHandlers ? p.yellow("[handler]") : "         ";
     lines.push(`  ${marker} ${p.dim(`d${d.depth}`)} ${d.normalizedFilePath}`);
   }
   lines.push("");
   if (routes > 0) {
-    lines.push(p.dim(`  Review the ${routes} route-bearing file(s) first — their responses can change.`));
+    lines.push(p.dim(`  Review the ${routes} handler-bearing file(s) first — their responses can change.`));
     lines.push("");
   }
   return lines.join("\n");
@@ -489,11 +491,11 @@ export const renderReviewRouting = (
   lines.push("");
 
   lines.push(
-    `  ${p.bold("Blast radius")}  ${routing.reachedCount} file(s) reachable · ${routing.routesAtRisk.length} route-bearing`,
+    `  ${p.bold("Blast radius")}  ${routing.reachedCount} file(s) reachable · ${routing.handlerBearingFiles.length} with handler-shaped code`,
   );
-  for (const f of routing.routesAtRisk.slice(0, 8)) lines.push(`      ${p.dim("→")} ${p.cyan(f)}`);
-  if (routing.routesAtRisk.length > 8) {
-    lines.push(p.dim(`      … ${routing.routesAtRisk.length - 8} more`));
+  for (const f of routing.handlerBearingFiles.slice(0, 8)) lines.push(`      ${p.dim("→")} ${p.cyan(f)}`);
+  if (routing.handlerBearingFiles.length > 8) {
+    lines.push(p.dim(`      … ${routing.handlerBearingFiles.length - 8} more`));
   }
   lines.push("");
 

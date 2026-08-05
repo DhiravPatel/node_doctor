@@ -180,6 +180,18 @@ export const buildChurnReport = async (
   // contains. `actions/checkout` produces one by default.
   const shallow = (await gitStdout(rootDirectory, ["rev-parse", "--is-shallow-repository"]))?.trim() === "true";
 
+  // `git log --name-only` prints paths relative to the REPOSITORY ROOT, while
+  // findings are relative to the SCAN ROOT. Scanning a subdirectory
+  // (`node-doctor churn packages/api`) therefore joins nothing unless the keys
+  // are rebased onto the scan root — and a silently empty join looks exactly
+  // like "this code never changes".
+  //
+  // `--show-prefix` is git's own answer to "where am I inside this repo?" —
+  // asking git avoids computing it from paths, which on macOS would compare a
+  // `/var/…` cwd against a `/private/var/…` toplevel and rebase everything to
+  // nothing. It prints a trailing-slashed path, or empty at the repository root.
+  const prefix = ((await gitStdout(rootDirectory, ["rev-parse", "--show-prefix"])) ?? "").trim();
+
   const stdout = await gitStdout(rootDirectory, [
     "log",
     `--max-count=${window}`,
@@ -203,8 +215,16 @@ export const buildChurnReport = async (
       author = rawLine.slice(1).trim();
       continue;
     }
-    const file = rawLine.trim();
-    if (file === "") continue;
+    const raw = rawLine.trim();
+    if (raw === "") continue;
+    // Rebase onto the scan root, and drop anything outside it: a sibling
+    // package's churn is not this scan's business.
+    let file = raw;
+    if (prefix !== "") {
+      if (!raw.startsWith(prefix)) continue;
+      file = raw.slice(prefix.length);
+      if (file === "") continue;
+    }
     let entry = churn.get(file);
     if (!entry) {
       entry = { commits: 0, authors: new Set(), lastIndex: commitIndex };

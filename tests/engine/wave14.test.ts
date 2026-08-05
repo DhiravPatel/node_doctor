@@ -332,6 +332,23 @@ describe("CODEOWNERS", () => {
     assert.deepEqual(parseCodeowners("* @team # because reasons")[0]!.owners, ["@team"]);
   });
 
+  // A CODEOWNERS file authored on Windows arrives with CRLF endings. JavaScript's
+  // `.` does not match `\r`, so a comment-stripping `#.*$` cannot reach the end of
+  // such a line — the comment survived, and every `@handle` mentioned inside it
+  // became a real owner. Splitting on both endings is the fix.
+  test("CRLF line endings do not smuggle commented-out handles in as owners", () => {
+    const rules = parseCodeowners("* @fallback\r\nsrc/** @core # was @legacy, do not ping them\r\n");
+    assert.deepEqual(rules[1]!.owners, ["@core"], "the handle inside the comment is not an owner");
+    assert.deepEqual(ownersFor("src/a.ts", rules), ["@core"]);
+    assert.deepEqual(ownersFor("README.md", rules), ["@fallback"], "the CRLF pattern itself still matches");
+  });
+
+  test("a CRLF file with a full-line comment parses like its LF twin", () => {
+    const crlf = parseCodeowners("# owners\r\n\r\nsrc/db/** @data\r\n");
+    const lf = parseCodeowners("# owners\n\nsrc/db/** @data\n");
+    assert.deepEqual(crlf, lf);
+  });
+
   test("a leading slash anchors to the repo root", () => {
     const anchored = parseCodeowners("/build/ @team");
     assert.deepEqual(ownersFor("build/out.js", anchored), ["@team"]);

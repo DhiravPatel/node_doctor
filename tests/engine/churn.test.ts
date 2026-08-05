@@ -116,6 +116,64 @@ describe("buildChurnReport — reads history", () => {
   });
 });
 
+describe("buildChurnReport — scanning a subdirectory of the repo", () => {
+  // `git log --name-only` always prints paths from the repository ROOT, while
+  // findings carry paths relative to the SCAN root. Point the scan at a
+  // subdirectory and the two key spaces stop overlapping: every lookup misses,
+  // every churn weight silently becomes 0, and the whole feature turns into a
+  // no-op that still reports itself as available.
+  test("paths are rebased onto the scan root, not left repo-relative", async () => {
+    const dir = await makeRepo([
+      { "packages/api/src/hot.ts": "1", "docs/readme.md": "a" },
+      { "packages/api/src/hot.ts": "2" },
+      { "packages/api/src/cold.ts": "1" },
+    ]);
+    try {
+      const r = await buildChurnReport(join(dir, "packages/api"));
+      assert.equal(r.available, true);
+      assert.deepEqual(
+        r.files.map((f) => f.normalizedFilePath).sort(),
+        ["src/cold.ts", "src/hot.ts"],
+        "keys are relative to the scanned directory",
+      );
+
+      // The property that actually matters: weighting now finds the file.
+      const out = weightByChurn([finding("src/cold.ts"), finding("src/hot.ts")], r);
+      assert.equal(out[0]!.finding.normalizedFilePath, "src/hot.ts");
+      assert.ok(out[0]!.churn > 0, "a file with real history is not weighted as unknown");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("history outside the scanned subdirectory is excluded, not mis-keyed", async () => {
+    const dir = await makeRepo([
+      { "packages/api/a.ts": "1", "packages/web/b.ts": "1" },
+      { "packages/web/b.ts": "2" },
+    ]);
+    try {
+      const r = await buildChurnReport(join(dir, "packages/api"));
+      assert.deepEqual(r.files.map((f) => f.normalizedFilePath), ["a.ts"]);
+      assert.ok(
+        !r.files.some((f) => f.normalizedFilePath.includes("b.ts")),
+        "another package's churn is not attributed to this one",
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("scanning the repository root still yields root-relative keys", async () => {
+    const dir = await makeRepo([{ "src/a.ts": "1" }, { "src/a.ts": "2" }]);
+    try {
+      const r = await buildChurnReport(dir);
+      assert.deepEqual(r.files.map((f) => f.normalizedFilePath), ["src/a.ts"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("buildChurnReport — degrades rather than refusing", () => {
   test("a directory that is not a repository reports unavailable, not an error", async () => {
     const dir = await mkdtemp(join(tmpdir(), "nd-churn-bare-"));

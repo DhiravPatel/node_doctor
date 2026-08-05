@@ -2,9 +2,12 @@
  * §163 — Blast-Radius-Aware Review Routing.
  *
  * The claim this makes is a review LEVEL, so the tests pin that it is a function
- * of counted graph facts (reach, route-bearing dependents, hub status) and that
+ * of counted graph facts (reach, handler-bearing dependents, hub status) and that
  * every escalation is explained. The other property that matters: a file the
  * graph cannot see is reported as *unknown* reach, never as safe.
+ *
+ * One escalation is deliberately NOT available: handler-bearing dependents are
+ * matched by SHAPE, so they can never reach senior on their own (see below).
  */
 
 import { describe, test } from "node:test";
@@ -65,14 +68,74 @@ describe("buildReviewRouting — level follows reach", () => {
     }
   });
 
-  test("route-bearing dependents are surfaced as the routes at risk", async () => {
+  test("handler-bearing dependents are surfaced", async () => {
     const dir = await makeProject(PROJECT);
     try {
       const r = await buildReviewRouting(dir, [join(dir, "src/hub.js")]);
       assert.ok(
-        r.routesAtRisk.includes("src/routes/api.js"),
+        r.handlerBearingFiles.includes("src/routes/api.js"),
         "a change to the hub can break this route, so its owner must see it",
       );
+      assert.deepEqual(r.routesAtRisk, r.handlerBearingFiles, "the old field name still resolves");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("buildReviewRouting — a shape-matched signal cannot escalate to senior alone", () => {
+  // `collectRequestHandlers` recognizes the `(req, res)` SHAPE, which a
+  // middleware factory has as surely as a route does. Counting those and calling
+  // ten of them a senior review escalates on a guess, and "senior review" is a
+  // claim about someone's time. Reach and hub status are exact; they escalate.
+  const middleware = (i: number) =>
+    `import { core } from "./mid.js";
+` +
+    `export const wrap${i} = () => (req, res, next) => next(core);
+`;
+
+  /** core ← mid ← 12 handler-shaped modules. No single file has hub fan-in. */
+  const INDIRECT: Record<string, string> = {
+    "src/core.js": `export const core = 1;`,
+    "src/mid.js": `import { core } from "./core.js";
+export { core };`,
+  };
+  for (let i = 0; i < 12; i++) INDIRECT[`src/mw${i}.js`] = middleware(i);
+
+  test("twelve handler-shaped dependents, modest reach, no hub → standard, not senior", async () => {
+    const dir = await makeProject(INDIRECT);
+    try {
+      const r = await buildReviewRouting(dir, [join(dir, "src/core.js")]);
+      assert.ok(r.handlerBearingFiles.length >= 10, "the signal is present in quantity");
+      assert.deepEqual(r.hubsTouched, [], "no changed file has hub fan-in");
+      assert.ok(r.reachedCount < 25, "reach alone does not reach the senior threshold");
+      assert.equal(r.level, "standard", "a shape match is worth attention, not a senior reviewer");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the rationale says the signal is shape-matched rather than counted routes", async () => {
+    const dir = await makeProject(INDIRECT);
+    try {
+      const r = await buildReviewRouting(dir, [join(dir, "src/core.js")]);
+      assert.ok(
+        r.rationale.some((x) => x.includes("handler-shaped")),
+        "a reader can see what was actually measured",
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("reach still escalates to senior on its own", async () => {
+    const wide: Record<string, string> = { "src/core.js": `export const core = 1;` };
+    for (let i = 0; i < 30; i++) wide[`src/n${i}.js`] = `import { core } from "./core.js";\nexport const n${i} = core;`;
+    const dir = await makeProject(wide);
+    try {
+      const r = await buildReviewRouting(dir, [join(dir, "src/core.js")]);
+      assert.equal(r.level, "senior");
+      assert.ok(r.rationale.some((x) => x.includes("reaches")));
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

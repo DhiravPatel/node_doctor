@@ -75,7 +75,10 @@ const patternToRegExp = (pattern: string): RegExp => {
 /** Parse CODEOWNERS text into rules, in file order. */
 export const parseCodeowners = (text: string): OwnerRule[] => {
   const rules: OwnerRule[] = [];
-  for (const raw of text.split("\n")) {
+  // Split on CRLF *and* LF: JavaScript's `.` does not match `\r`, so on a
+  // Windows-authored file `#.*$` fails to anchor and the comment survives —
+  // pulling any `@handle` inside it in as a real owner.
+  for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/#.*$/, "").trim();
     if (line.length === 0) continue;
     const parts = line.split(/\s+/);

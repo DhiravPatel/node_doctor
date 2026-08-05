@@ -45,7 +45,16 @@ export interface ReviewRouting {
   unresolved: string[];
   /** Distinct files a change to `changed` can reach. */
   reachedCount: number;
-  /** Dependents that register request handlers — the routes actually at risk. */
+  /**
+   * Dependents containing request-handler-shaped functions. Named for what it
+   * actually measures: `collectRequestHandlers` recognizes the `(req, res)`
+   * SHAPE, which is broader than "registers a route" — a middleware factory or
+   * a handler-shaped callback counts. It is a good attention signal and a poor
+   * census, so it informs the level but never drives a senior escalation alone.
+   */
+  handlerBearingFiles: string[];
+  /** @deprecated Use `handlerBearingFiles` — kept so existing JSON consumers
+   *  do not break. Same value, honest name. */
   routesAtRisk: string[];
   /** Changed files that are hub modules (very high fan-in). */
   hubsTouched: string[];
@@ -61,7 +70,14 @@ export interface ReviewRouting {
 /** Reach at which a change stops being routine. Stated in the output. */
 const STANDARD_REACH = 5;
 const SENIOR_REACH = 25;
-const SENIOR_ROUTES = 10;
+/**
+ * Handler-bearing dependents alone no longer escalate to senior: the underlying
+ * detection matches a SHAPE, so a large count can be middleware factories rather
+ * than routes. Reach and hub status — both exact graph facts — remain the
+ * escalation triggers; handler files raise a light review to standard, which is
+ * the level this signal can actually support.
+ */
+const STANDARD_HANDLER_FILES = 1;
 
 export const buildReviewRouting = async (
   rootDirectory: string,
@@ -86,7 +102,7 @@ export const buildReviewRouting = async (
   }
 
   const hubsTouched = impact.changed.filter((f) => hubPaths.has(f)).sort();
-  const routesAtRisk = [...impact.routeBearingFiles].sort();
+  const handlerBearingFiles = [...impact.routeBearingFiles].sort();
 
   // The level is a function of counted facts; every input to it is reported.
   const rationale: string[] = [];
@@ -100,12 +116,12 @@ export const buildReviewRouting = async (
   } else {
     rationale.push(`reaches ${impact.reachedCount} file(s)`);
   }
-  if (routesAtRisk.length >= SENIOR_ROUTES) {
-    level = "senior";
-    rationale.push(`${routesAtRisk.length} route-bearing files affected (≥ ${SENIOR_ROUTES})`);
-  } else if (routesAtRisk.length > 0) {
+  if (handlerBearingFiles.length >= STANDARD_HANDLER_FILES) {
     if (level === "light") level = "standard";
-    rationale.push(`${routesAtRisk.length} route-bearing file(s) affected`);
+    rationale.push(
+      `${handlerBearingFiles.length} file(s) with request-handler-shaped code affected` +
+        " (shape-matched, so this raises the level but never escalates to senior on its own)",
+    );
   }
   if (hubsTouched.length > 0) {
     level = "senior";
@@ -120,7 +136,8 @@ export const buildReviewRouting = async (
     changed: impact.changed,
     unresolved: impact.unresolved,
     reachedCount: impact.reachedCount,
-    routesAtRisk,
+    handlerBearingFiles,
+    routesAtRisk: handlerBearingFiles,
     hubsTouched,
     reviewers: [...reviewers].sort(),
     directOwners: [...directOwners].sort(),
