@@ -467,6 +467,61 @@ const opMarkers = (ops: readonly string[], p: Palette): string => {
     .join("");
 };
 
+export const renderChurn = (
+  churn: import("../core/churn.ts").ChurnReport,
+  ranked: Array<{ churn: number; finding: { diagnostic: string; normalizedFilePath?: string; line: number; severity: string } }>,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  if (!churn.available) {
+    lines.push(`  ${p.yellow("●")} Churn unavailable — ${churn.unavailableReason}.`);
+    lines.push(p.dim("    Findings are shown in the analyzer's own order."));
+    lines.push("");
+  } else {
+    lines.push(
+      `  ${p.bold("Churn hotspots")}  ${p.dim(`${churn.summary.commitsScanned} commit(s) · ${churn.summary.filesTracked} file(s)`)}`,
+    );
+    lines.push("");
+    for (const f of churn.files.slice(0, 10)) {
+      lines.push(
+        `      ${p.bold(String(f.score).padStart(3))}  ${p.cyan(f.normalizedFilePath)}  ${p.dim(`${f.commits} commit(s), ${f.authors} author(s)`)}`,
+      );
+    }
+    lines.push("");
+    if (churn.refactorMagnets.length > 0) {
+      lines.push(`  ${p.bold("Refactor magnets")}  ${p.dim("(source churning far above this project's baseline)")}`);
+      for (const f of churn.refactorMagnets) {
+        lines.push(`      ${p.yellow("↻")} ${p.cyan(f.normalizedFilePath)}  ${p.dim(`score ${f.score}`)}`);
+      }
+      lines.push("");
+    }
+  }
+
+  const withChurn = ranked.filter((r) => r.churn > 0);
+  if (ranked.length === 0) {
+    lines.push(p.dim("  No findings to rank."));
+  } else {
+    lines.push(
+      `  ${p.bold("Findings by churn")}  ${p.dim(`${ranked.length} finding(s), ${withChurn.length} in changed files`)}`,
+    );
+    for (const r of ranked.slice(0, 15)) {
+      const mark = r.finding.severity === "error" ? p.red("✖") : p.yellow("●");
+      lines.push(
+        `      ${mark} ${p.dim(String(r.churn).padStart(3))}  ${r.finding.diagnostic}  ${p.cyan(`${r.finding.normalizedFilePath ?? ""}:${r.finding.line}`)}`,
+      );
+    }
+    lines.push("");
+    lines.push(
+      p.dim("  Churn re-orders findings; it never adds or removes one. A finding in code"),
+    );
+    lines.push(p.dim("  many hands edited recently is where regressions cluster."));
+  }
+  lines.push("");
+  return lines.join("\n");
+};
+
 export const renderArchitecture = (
   report: import("../core/architecture.ts").ArchitectureReport,
   options: { color?: boolean } = {},

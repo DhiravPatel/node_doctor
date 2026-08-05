@@ -24,7 +24,7 @@ import { installGitHook } from "../install/git-hook.ts";
 import { scanProject } from "../core/scan.ts";
 import type { ScanReport } from "../core/scan.ts";
 import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
-import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver, renderOpenApi, renderArchitecture } from "../report/terminal.ts";
+import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver, renderOpenApi, renderArchitecture, renderChurn } from "../report/terminal.ts";
 import { scanAgentContext, applyContextHygiene } from "../core/agent-context.ts";
 import { isWorkspaceRoot, scanWorkspaces, workspaceFindings, discoverWorkspaces } from "../core/workspaces.ts";
 import { toJson, toJsonError } from "../report/json.ts";
@@ -57,6 +57,7 @@ import { buildQueueTopology } from "../core/queue-topology.ts";
 import { buildApiSemverReport, type ApiSemverReport } from "../core/api-semver.ts";
 import { buildOpenApiDocument } from "../core/openapi.ts";
 import { buildArchitectureReport } from "../core/architecture.ts";
+import { buildChurnReport, weightByChurn } from "../core/churn.ts";
 import { buildImpactGraph, computeImpact } from "../core/impact.ts";
 import { collectAttackPaths } from "../core/attack-paths.ts";
 import { loadCodeowners, groupByOwner, scorePrRisk } from "../core/ownership.ts";
@@ -300,7 +301,7 @@ Usage:
   node-doctor modernize [dir]            Score how far the code is from current practice
   node-doctor observability [dir]        Score per-route observability ("could you debug this at 3am?")
   node-doctor data-map [dir]             Map which routes touch which DB entities, and how (read/write/delete)
-  node-doctor schema-drift [dir]         Prisma schema vs code: unknown-field drift + dead models\n  node-doctor queues [dir]               Queue/topic topology: publishers, consumers, orphans, dead consumers\n  node-doctor semver [--baseline <f>]    Package-export surface; diff a baseline and lint version bumps\n  node-doctor openapi [dir]              Generate an OpenAPI 3.1 spec from the actual routes\n  node-doctor architecture [dir]         Import cycles, layer violations, hub modules
+  node-doctor schema-drift [dir]         Prisma schema vs code: unknown-field drift + dead models\n  node-doctor queues [dir]               Queue/topic topology: publishers, consumers, orphans, dead consumers\n  node-doctor semver [--baseline <f>]    Package-export surface; diff a baseline and lint version bumps\n  node-doctor openapi [dir]              Generate an OpenAPI 3.1 spec from the actual routes\n  node-doctor architecture [dir]         Import cycles, layer violations, hub modules\n  node-doctor churn [dir]                Churn hotspots from git; re-ranks findings by where risk concentrates
   node-doctor context [dir] [--write]    Find files an AI agent must not read; --write fences them off
   node-doctor deslop [directory]         Dead-code scan (unused files/exports/deps)
   node-doctor explain <diagnostic-id>          Explain a diagnostic and its fix
@@ -1541,6 +1542,34 @@ const runArchitecture = async (args: ParsedArgs): Promise<number> => {
   return report.summary.cycles > 0 ? 1 : 0;
 };
 
+const runChurn = async (args: ParsedArgs): Promise<number> => {
+  const { dir, config } = await resolveScanTarget(args);
+  const churn = await buildChurnReport(dir);
+
+  // Findings are re-ranked, never filtered: churn changes the ORDER risk is
+  // presented in, and can never add or remove a claim (§160).
+  const report = await scanProject({
+    rootDirectory: dir,
+    config,
+    ignoredTags: new Set(args.ignoreTags),
+    cache: args.cache,
+    parallel: args.parallel,
+    secrets: args.secrets,
+  });
+  const ranked = weightByChurn(report.findings, churn);
+
+  if (args.json) {
+    const payload = {
+      ...churn,
+      rankedFindings: ranked.map((r) => ({ churn: r.churn, finding: r.finding })),
+    };
+    process.stdout.write((args.jsonCompact ? JSON.stringify(payload) : JSON.stringify(payload, null, 2)) + "\n");
+    return 0;
+  }
+  process.stdout.write(renderChurn(churn, ranked, { color: useColor(args) }));
+  return 0;
+};
+
 const runFix = async (args: ParsedArgs, version: string): Promise<number> => {
   const dir = resolve(args.positionals[0] ?? ".");
   const only = await resolveOnly(args, dir);
@@ -1636,6 +1665,8 @@ export const main = async (argv: string[]): Promise<number> => {
         return await runOpenApi(args);
       case "architecture":
         return await runArchitecture(args);
+      case "churn":
+        return await runChurn(args);
       case "data-map":
         return await runDataMap(args);
       case "lsp":

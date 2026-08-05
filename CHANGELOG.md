@@ -98,6 +98,20 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Churn-weighted risk — `node-doctor churn` (§160)
+
+- **`node-doctor churn`** (alias `hotspots`) — git history answers what the
+  snapshot cannot: which findings sit in code that many hands have edited
+  recently, which is where regressions cluster. Reports churn hotspots, flags
+  **refactor magnets** (source churning far above the project baseline), and
+  re-ranks findings by the churn of their file. **Structurally incapable of a
+  false positive**: it adds no findings and removes none — the ranking is a
+  permutation of the analyzer's own output. Scores normalize volume, author
+  spread and recency against the project's own distribution; recency is in
+  commits-ago, not days, so output is deterministic. Docs, lockfiles and
+  generated artifacts are excluded from magnets (they churn by design). With no
+  git or no history, scores are 0 and the original order is preserved exactly.
+
 ### Architecture analysis — `node-doctor architecture` (§33)
 
 - **`node-doctor architecture`** (aliases `arch`/`layers`) — import cycles, layer

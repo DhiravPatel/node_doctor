@@ -1520,7 +1520,13 @@ Some diffs are risky by their *shape*, independent of the code. A one-line chang
 Match the **diff hunk** against a catalog of shapes that warrant a second look and raise the change's review priority — the human equivalent of "this line is fine but this *edit* deserves eyes." Distinct from §90 (which scores the PR's aggregate risk); this flags the *specific hunk* and says why. Pure diff analysis over data CI already has.
 
 ## 160. Line-Age & Churn-Weighted Risk ★ Differentiator
-**Status: Planned** · ⚙️ Now (git log only)
+**Status: Core** (`node-doctor churn`, alias `hotspots`) · ⚙️ Now
+
+**Shipped as a command.** Static analysis only ever sees the current snapshot, so a bug in a line written three years ago and never touched reads identically to one in a line rewritten four times last month. Git knows the difference and the log is already on disk. `churn` reads it and adds two things the snapshot cannot: **findings re-ranked by where change concentrates** (churn is where regressions cluster, and where someone is actively working), and **refactor magnets** — source files whose change rate sits far above the project's own baseline.
+
+**It cannot produce a false positive, by construction.** It never creates a finding and never suppresses one; `weightByChurn` returns a *permutation* of its input, so the worst failure mode is a less-useful ordering, never a wrong claim. That property is why it shipped first of the git-history features.
+
+Scoring normalizes volume, author spread and recency against the project's own distribution — an absolute "10 commits is a lot" means nothing across repositories of different ages. Recency is measured in **commits-ago rather than days**, so the same repository at the same commit scores identically forever and the output stays deterministic. Magnets exclude what churns *by design* (docs, lockfiles, generated artifacts like the rule registry or the config schema): "you should split CHANGELOG.md" would be pure noise. With no git, no repository, or no history, every score is 0 and the ranking degrades to the analyzer's own order — refusing to run outside a checkout would be worse than quietly knowing less.
 
 A bug in a line written three years ago and never touched is different from a bug in a line rewritten four times last month. Pull `git blame` and commit frequency per file, and **weight findings by churn**: high-churn code near a finding is where regressions cluster, and a finding in a hotspot that many hands have edited is likelier to be real and likelier to matter. Also surfaces "refactor magnets" — files whose churn is so high they are begging to be split. Needs only the git log, which is on disk.
 

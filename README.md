@@ -271,6 +271,7 @@ node-doctor queues [directory]                  queue/topic topology: publishers
 node-doctor semver [--baseline <f>]             package-export surface; lint version bumps against it
 node-doctor openapi [directory]                 generate an OpenAPI 3.1 spec from the actual routes
 node-doctor architecture [directory]            import cycles, layer violations, hub modules
+node-doctor churn [directory]                   git churn hotspots; re-ranks findings by risk concentration
 node-doctor paths [directory]                   source→sink attack paths (exploitability proof)
 node-doctor context [dir] [--write]             find files an AI agent must not read; --write fences them off
 node-doctor sbom [--framework spdx]             CycloneDX / SPDX bill of materials
