@@ -129,6 +129,10 @@ export type { ArchitectureReport, ImportCycle, LayerViolation, HubModule } from 
 // (and therefore regression) actually concentrates. Adds no claims.
 export { buildChurnReport, weightByChurn, DEFAULT_COMMIT_WINDOW } from "./core/churn.ts";
 export type { ChurnReport, FileChurn, ChurnWeighted } from "./core/churn.ts";
+// §163 — Blast-radius-aware review routing: who should review a change, and how
+// hard, derived from the import graph + CODEOWNERS rather than guessed.
+export { buildReviewRouting } from "./core/review-routing.ts";
+export type { ReviewRouting, ReviewLevel } from "./core/review-routing.ts";
 // §77 — OpenAPI Generation From Code: a spec derived from the actual routes, so
 // it cannot drift from the code that serves it.
 export { buildOpenApiDocument } from "./core/openapi.ts";

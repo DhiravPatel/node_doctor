@@ -98,6 +98,19 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Blast-radius review routing — `node-doctor review` (§163)
+
+- **`node-doctor review <files…> | --diff <base>`** (alias `routing`) — turns
+  "who should review this?" from a guess into a graph query. Joins the import
+  graph (§120) with CODEOWNERS (§89) and hub detection (§33) to report the blast
+  radius, the routes at risk, the reviewers — owners of the change **and of
+  everything downstream**, so people whose code it can break actually see it —
+  and a review level (light / standard / senior). The level is derived from
+  counted facts (reach ≥ 5 → standard; reach ≥ 25, ≥ 10 route-bearing
+  dependents, or any hub module → senior) and every threshold that fired is
+  printed, so escalations are auditable. Adds no findings. A changed file the
+  graph cannot see is reported as *unknown* reach, never as safe.
+
 ### Churn-weighted risk — `node-doctor churn` (§160)
 
 - **`node-doctor churn`** (alias `hotspots`) — git history answers what the

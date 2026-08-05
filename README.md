@@ -272,6 +272,7 @@ node-doctor semver [--baseline <f>]             package-export surface; lint ver
 node-doctor openapi [directory]                 generate an OpenAPI 3.1 spec from the actual routes
 node-doctor architecture [directory]            import cycles, layer violations, hub modules
 node-doctor churn [directory]                   git churn hotspots; re-ranks findings by risk concentration
+node-doctor review <files…> | --diff [base]     who should review this, and how hard, from the blast radius
 node-doctor paths [directory]                   source→sink attack paths (exploitability proof)
 node-doctor context [dir] [--write]             find files an AI agent must not read; --write fences them off
 node-doctor sbom [--framework spdx]             CycloneDX / SPDX bill of materials

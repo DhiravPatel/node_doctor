@@ -32,6 +32,7 @@ export type Command =
   | "openapi"
   | "architecture"
   | "churn"
+  | "review"
   | "version";
 
 // "rules" is accepted as a legacy alias for "diagnostics"; "observe" for
@@ -50,6 +51,7 @@ const COMMAND_ALIASES: Record<string, Command> = {
   arch: "architecture",
   layers: "architecture",
   hotspots: "churn",
+  routing: "review",
 };
 
 const COMMANDS = new Set<string>([
@@ -92,6 +94,8 @@ const COMMANDS = new Set<string>([
   "layers",
   "churn",
   "hotspots",
+  "review",
+  "routing",
   "version",
   "rules",
 ]);

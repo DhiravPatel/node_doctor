@@ -1550,7 +1550,13 @@ The most demoralizing bug is the one you already fixed. Track finding identities
 Two files that are *always changed together* have a dependency the import graph cannot see — a shared assumption, a parallel data structure, a config-and-code pair. Mine commit history for files that co-change far more often than chance, then flag a PR that touches one without the other: "94% of changes to `pricing.ts` also touch `pricing.test.ts` — this PR doesn't." Catches the logical coupling that structural analysis misses entirely.
 
 ## 163. Blast-Radius-Aware Review Routing ★
-**Status: Planned** · ⚙️ Now
+**Status: Core** (`node-doctor review`, alias `routing`) · ⚙️ Now
+
+**Shipped as a command.** "Who should review this?" is normally a guess, and the guess errs the same way every time: a one-line change to a leaf draws the same reviewers as a one-line change to the module forty routes depend on. The import graph already knows which is which and CODEOWNERS already knows who owns what — `review` joins them.
+
+For a change set (explicit paths, or `--diff <base>` / `--staged`, resolved exactly as `impact` does) it reports the **blast radius** (§120: transitive dependents and the route-bearing files among them), the **reviewers** — owners of the changed files *and* of everything downstream, so the people whose code this can break actually see the PR — any **hub module** touched (§33), and a **review level** (light / standard / senior).
+
+**The level is a function of counted facts, never taste**: reach ≥ 5 makes it standard, reach ≥ 25 or ≥ 10 route-bearing dependents or any hub module makes it senior. Every threshold that fired is printed alongside the verdict, so an escalation can be audited rather than trusted. Like §160 it emits no findings and suppresses none — it routes attention. And a changed file the graph does not contain is reported as **unknown reach, never zero**: "I could not see this change" and "this change is safe" must never render the same.
 
 Combine the blast-radius graph (§120) with ownership (§89): a change to a low-fan-in leaf gets a light touch; a change to a hub module (§33) that 40 routes depend on gets flagged for senior review and notifies every affected owner. Turns "who should review this?" from a guess into a graph query.
 

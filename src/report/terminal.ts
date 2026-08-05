@@ -467,6 +467,67 @@ const opMarkers = (ops: readonly string[], p: Palette): string => {
     .join("");
 };
 
+export const renderReviewRouting = (
+  routing: import("../core/review-routing.ts").ReviewRouting,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  const badge =
+    routing.level === "senior"
+      ? p.red("SENIOR REVIEW")
+      : routing.level === "standard"
+        ? p.yellow("STANDARD REVIEW")
+        : p.green("LIGHT REVIEW");
+  lines.push(`  ${p.bold("Review routing")}  ${badge}`);
+  lines.push("");
+
+  lines.push(`  ${p.bold("Changed")}  ${p.dim(`${routing.changed.length} file(s)`)}`);
+  for (const f of routing.changed.slice(0, 10)) lines.push(`      ${p.cyan(f)}`);
+  if (routing.changed.length > 10) lines.push(p.dim(`      … ${routing.changed.length - 10} more`));
+  lines.push("");
+
+  lines.push(
+    `  ${p.bold("Blast radius")}  ${routing.reachedCount} file(s) reachable · ${routing.routesAtRisk.length} route-bearing`,
+  );
+  for (const f of routing.routesAtRisk.slice(0, 8)) lines.push(`      ${p.dim("→")} ${p.cyan(f)}`);
+  if (routing.routesAtRisk.length > 8) {
+    lines.push(p.dim(`      … ${routing.routesAtRisk.length - 8} more`));
+  }
+  lines.push("");
+
+  if (routing.hubsTouched.length > 0) {
+    lines.push(`  ${p.red("Hub modules touched")}  ${p.dim("(every change here has wide reach)")}`);
+    for (const f of routing.hubsTouched) lines.push(`      ${p.red("↻")} ${p.cyan(f)}`);
+    lines.push("");
+  }
+
+  if (routing.reviewers.length > 0) {
+    lines.push(`  ${p.bold("Reviewers")}  ${p.dim("(owners of the change AND of what it can reach)")}`);
+    for (const o of routing.reviewers) {
+      const direct = routing.directOwners.includes(o) ? p.dim("  (owns a changed file)") : "";
+      lines.push(`      ${o}${direct}`);
+    }
+    lines.push("");
+  } else {
+    lines.push(p.dim("  No CODEOWNERS rules matched — add a CODEOWNERS file to route reviews."));
+    lines.push("");
+  }
+
+  lines.push(`  ${p.bold("Why")}`);
+  for (const reason of routing.rationale) lines.push(p.dim(`      · ${reason}`));
+  if (routing.unresolved.length > 0) {
+    lines.push("");
+    lines.push(
+      p.yellow(`  ● ${routing.unresolved.length} changed file(s) are not in the import graph — their reach is unknown, not zero:`),
+    );
+    for (const f of routing.unresolved.slice(0, 5)) lines.push(p.dim(`      ${f}`));
+  }
+  lines.push("");
+  return lines.join("\n");
+};
+
 export const renderChurn = (
   churn: import("../core/churn.ts").ChurnReport,
   ranked: Array<{ churn: number; finding: { diagnostic: string; normalizedFilePath?: string; line: number; severity: string } }>,
