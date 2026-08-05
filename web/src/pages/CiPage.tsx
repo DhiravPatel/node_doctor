@@ -14,10 +14,10 @@ jobs:
         with: { node-version: 20 }
       - run: |
           git checkout --detach origin/\${{ github.base_ref }}
-          npx node-doctor@latest . --json-out /tmp/base.json --blocking none
+          npx @dhiravpatel/node-doctor@latest . --json-out /tmp/base.json --blocking none
           git checkout --detach \${{ github.sha }}
-          npx node-doctor@latest . --json-out /tmp/head.json --blocking none
-          npx node-doctor@latest delta \\
+          npx @dhiravpatel/node-doctor@latest . --json-out /tmp/head.json --blocking none
+          npx @dhiravpatel/node-doctor@latest delta \\
             --baseline /tmp/base.json --current /tmp/head.json \\
             --blocking error`;
 
@@ -35,10 +35,10 @@ const GITLAB = `node-doctor:
   script:
     - git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
     - git checkout FETCH_HEAD
-    - npx node-doctor@latest . --json-out base.json --blocking none
+    - npx @dhiravpatel/node-doctor@latest . --json-out base.json --blocking none
     - git checkout $CI_COMMIT_SHA
-    - npx node-doctor@latest . --json-out head.json --blocking none
-    - npx node-doctor@latest delta --baseline base.json --current head.json --blocking error
+    - npx @dhiravpatel/node-doctor@latest . --json-out head.json --blocking none
+    - npx @dhiravpatel/node-doctor@latest delta --baseline base.json --current head.json --blocking error
   diagnostics:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"`;
 

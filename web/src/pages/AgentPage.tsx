@@ -19,7 +19,7 @@ const TOOLS = [
   ["node_doctor_deslop", "Find unused files, exports, and dependencies."],
 ];
 
-const FIX_MENU = `$ npx node-doctor@latest fix .
+const FIX_MENU = `$ npx @dhiravpatel/node-doctor@latest fix .
 
   38 findings · 21/100 critical
 
@@ -67,7 +67,7 @@ export function AgentPage() {
             <Reveal>
               <div className="card">
                 <div className="kicker">install the skill</div>
-                <CopyCommand text="npx node-doctor@latest install" />
+                <CopyCommand text="npx @dhiravpatel/node-doctor@latest install" />
                 <p>
                   Writes a thin, locally-bundled skill file into each client. No runtime remote fetch —
                   offline-first.
@@ -84,7 +84,7 @@ export function AgentPage() {
             <Reveal delay={80}>
               <div className="card">
                 <div className="kicker">or run as an MCP server</div>
-                <CopyCommand text="npx node-doctor@latest mcp" />
+                <CopyCommand text="npx @dhiravpatel/node-doctor@latest mcp" />
                 <p>Register it once and any MCP client can call node.doctor as a native tool:</p>
                 <pre className="code">{MCP_CONFIG}</pre>
               </div>
@@ -119,7 +119,7 @@ export function AgentPage() {
             <Reveal>
               <div className="card">
                 <div className="kicker">one command, then pick an agent</div>
-                <CopyCommand text="npx node-doctor@latest fix ." />
+                <CopyCommand text="npx @dhiravpatel/node-doctor@latest fix ." />
                 <pre className="code">{FIX_MENU}</pre>
                 <p style={{ marginBottom: 0 }}>
                   On a non-interactive shell — or with <code>--print</code> — it prints the prompt instead of
@@ -138,7 +138,7 @@ export function AgentPage() {
                     <b style={{ color: "var(--ink)" }}>Never suppress to pass.</b> A false positive is a bug to
                     report, not silence.
                   </li>
-                  <li>Verify against the real tool — re-run <code>npx node-doctor@latest .</code> and confirm the score rose.</li>
+                  <li>Verify against the real tool — re-run <code>npx @dhiravpatel/node-doctor@latest .</code> and confirm the score rose.</li>
                   <li>Explain each fix in plain language, so you learn why it mattered.</li>
                 </ul>
               </div>

@@ -1,8 +1,9 @@
 import { Link } from "../router.tsx";
 
-const GITHUB = "https://github.com/your-org/node-doctor";
+const GITHUB = "https://github.com/DhiravPatel/node_doctor";
 
 const NAV = [
+  { to: "/install", label: "Install" },
   { to: "/diagnostics", label: "Diagnostics" },
   { to: "/ci", label: "CI" },
   { to: "/agent", label: "Agent skill" },

@@ -8,8 +8,8 @@ import { PROBLEMS, COMPARISON } from "../data/site.ts";
 import rulesData from "../data/diagnostics.json";
 import { IconAsync, IconBolt, IconSpread, IconInject, IconArrow } from "../components/Icons.tsx";
 
-const GITHUB = "https://github.com/your-org/node-doctor";
-const INSTALL = "npx node-doctor@latest .";
+const GITHUB = "https://github.com/DhiravPatel/node_doctor";
+const INSTALL = "npx @dhiravpatel/node-doctor@latest .";
 
 const FRAMEWORKS = [
   "Express", "Fastify", "Nest", "Hono", "Koa", "Adonis", "Prisma", "Drizzle",
