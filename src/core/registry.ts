@@ -30,8 +30,10 @@ import { requireFetchTimeout } from "../diagnostics/async/require-fetch-timeout.
 // bugs
 import { noBigintPrecisionLoss } from "../diagnostics/bugs/no-bigint-precision-loss.ts";
 import { noConstantCondition } from "../diagnostics/bugs/no-constant-condition.ts";
+import { noFloatingPromiseInTry } from "../diagnostics/bugs/no-floating-promise-in-try.ts";
 import { noShadowedRoute } from "../diagnostics/bugs/no-shadowed-route.ts";
 import { noThrowLiteral } from "../diagnostics/bugs/no-throw-literal.ts";
+import { noUnreachableCleanupAfterExit } from "../diagnostics/bugs/no-unreachable-cleanup-after-exit.ts";
 import { noUnreachableCode } from "../diagnostics/bugs/no-unreachable-code.ts";
 import { noUnstableOffsetPagination } from "../diagnostics/bugs/no-unstable-offset-pagination.ts";
 // config
@@ -102,6 +104,7 @@ import { noThrowInFinally } from "../diagnostics/reliability/no-throw-in-finally
 import { noUnboundedModuleCache } from "../diagnostics/reliability/no-unbounded-module-cache.ts";
 import { noUnclearedModuleInterval } from "../diagnostics/reliability/no-uncleared-module-interval.ts";
 import { noUnhandledPipeError } from "../diagnostics/reliability/no-unhandled-pipe-error.ts";
+import { noUnreleasedResource } from "../diagnostics/reliability/no-unreleased-resource.ts";
 import { requireSigtermHandler } from "../diagnostics/reliability/require-sigterm-handler.ts";
 // security
 import { jwtMissingExpiration } from "../diagnostics/security/jwt-missing-expiration.ts";
@@ -166,8 +169,10 @@ export const DIAGNOSTICS: Diagnostic[] = [
   // bugs
   noBigintPrecisionLoss,
   noConstantCondition,
+  noFloatingPromiseInTry,
   noShadowedRoute,
   noThrowLiteral,
+  noUnreachableCleanupAfterExit,
   noUnreachableCode,
   noUnstableOffsetPagination,
   // config
@@ -238,6 +243,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noUnboundedModuleCache,
   noUnclearedModuleInterval,
   noUnhandledPipeError,
+  noUnreleasedResource,
   requireSigtermHandler,
   // security
   jwtMissingExpiration,

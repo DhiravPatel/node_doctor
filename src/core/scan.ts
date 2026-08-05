@@ -484,6 +484,15 @@ export interface ScanProjectOptions {
   configPath?: string;
   /** Collect diagnostic-execution errors here (verbose reporting). */
   onRuleError?: (ruleId: string, err: unknown) => void;
+  /**
+   * Called with the ids of diagnostics actually SELECTED to run, after config,
+   * capability gating, opt-in status and tag filters have all been applied.
+   * Called once for the AST phase and once for the whole-tree text phase — a
+   * consumer should union the two. A report that aggregates rule results needs
+   * this: "the rule found nothing" and "the rule never ran" are different
+   * answers, and only the selector knows which one happened.
+   */
+  onDiagnosticsSelected?: (ruleIds: readonly string[]) => void;
   /** Enable the content-hash cache (reuse unchanged files between runs). */
   cache?: boolean;
   /** Cache directory (default: `<root>/.node-doctor-cache`). */
@@ -582,6 +591,8 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
     ignoredTags,
     options.typeSource !== undefined,
   );
+  options.onDiagnosticsSelected?.(diagnostics.map((d) => d.id));
+
   const fileDiagnostics = diagnostics.filter((r) => (r.scope ?? "file") === "file");
   const projectDiagnostics = diagnostics.filter((r) => r.scope === "project");
 
@@ -804,6 +815,10 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
       ? []
       : selectTextDiagnostics(ALL_TEXT_DIAGNOSTICS, config, ignoredTags, project.capabilities);
   const textDiagnosticsRun = activeText.length;
+  // The hook reports the text phase too: a consumer asking "did the k8s
+  // resource-limits rule run?" must not be told "no" because that rule happens
+  // to be a text diagnostic rather than an AST one.
+  options.onDiagnosticsSelected?.(activeText.map((d) => d.id));
   {
     if (activeText.length > 0) {
       textFindings = await runTextScan(rootDirectory, {

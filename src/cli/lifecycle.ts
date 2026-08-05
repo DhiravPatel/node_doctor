@@ -19,6 +19,24 @@ export const hardenProcess = (): void => {
   if (hardened) return;
   hardened = true;
 
+  // Windows consoles often default to a legacy code page (e.g. 437/1252) that
+  // mangles the box-drawing and glyph characters in the terminal report. Switch
+  // the active console to UTF-8 (65001) BEFORE anything is written.
+  // Best-effort; ignored if unavailable.
+  //
+  // This lived at the bottom of `exitAfterFlush`, below its `process.exit()`,
+  // where it had never once executed — found by `no-unreachable-cleanup-after-
+  // exit` (§166) running over this repository, which is the class of dead code
+  // `no-unreachable-code` structurally cannot see because the terminator is a
+  // call rather than a `return`.
+  if (process.platform === "win32") {
+    try {
+      spawnSync("chcp", ["65001"], { stdio: "ignore", shell: true });
+    } catch {
+      /* non-fatal: output may render with replacement characters */
+    }
+  }
+
   // Exit cleanly (0) when the reader closes the pipe early, e.g. `… | head`.
   const onStreamError = (err: NodeJS.ErrnoException): void => {
     if (err && err.code === "EPIPE") {
@@ -57,15 +75,4 @@ export const exitAfterFlush = async (code: number): Promise<never> => {
     /* a closed pipe (EPIPE) is already handled above — never block the exit */
   }
   process.exit(code);
-
-  // Windows consoles often default to a legacy code page (e.g. 437/1252) that
-  // mangles the box-drawing and glyph characters in the terminal report. Switch
-  // the active console to UTF-8 (65001). Best-effort; ignored if unavailable.
-  if (process.platform === "win32") {
-    try {
-      spawnSync("chcp", ["65001"], { stdio: "ignore", shell: true });
-    } catch {
-      /* non-fatal: output may render with replacement characters */
-    }
-  }
 };

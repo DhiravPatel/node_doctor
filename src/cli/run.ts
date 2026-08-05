@@ -24,7 +24,7 @@ import { installGitHook } from "../install/git-hook.ts";
 import { scanProject } from "../core/scan.ts";
 import type { ScanReport } from "../core/scan.ts";
 import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
-import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver, renderOpenApi, renderArchitecture, renderChurn, renderReviewRouting } from "../report/terminal.ts";
+import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver, renderOpenApi, renderArchitecture, renderChurn, renderReviewRouting, renderReadiness } from "../report/terminal.ts";
 import { scanAgentContext, applyContextHygiene } from "../core/agent-context.ts";
 import { isWorkspaceRoot, scanWorkspaces, workspaceFindings, discoverWorkspaces } from "../core/workspaces.ts";
 import { toJson, toJsonError } from "../report/json.ts";
@@ -59,6 +59,7 @@ import { buildOpenApiDocument } from "../core/openapi.ts";
 import { buildArchitectureReport } from "../core/architecture.ts";
 import { buildChurnReport, weightByChurn } from "../core/churn.ts";
 import { buildReviewRouting } from "../core/review-routing.ts";
+import { buildReadinessReport, collectReadinessEvidence } from "../core/readiness.ts";
 import { buildImpactGraph, computeImpact } from "../core/impact.ts";
 import { collectAttackPaths } from "../core/attack-paths.ts";
 import { loadCodeowners, groupByOwner, scorePrRisk } from "../core/ownership.ts";
@@ -303,6 +304,7 @@ Usage:
   node-doctor observability [dir]        Score per-route observability ("could you debug this at 3am?")
   node-doctor data-map [dir]             Map which routes touch which DB entities, and how (read/write/delete)
   node-doctor schema-drift [dir]         Prisma schema vs code: unknown-field drift + dead models\n  node-doctor queues [dir]               Queue/topic topology: publishers, consumers, orphans, dead consumers\n  node-doctor semver [--baseline <f>]    Package-export surface; diff a baseline and lint version bumps\n  node-doctor openapi [dir]              Generate an OpenAPI 3.1 spec from the actual routes\n  node-doctor architecture [dir]         Import cycles, layer violations, hub modules\n  node-doctor churn [dir]                Churn hotspots from git; re-ranks findings by where risk concentrates\n  node-doctor review <files…>|--diff     Who should review this, and how hard, from the blast radius
+  node-doctor readiness [dir]            Can this ship? Shutdown, probes, timeouts, limits — from evidence
   node-doctor context [dir] [--write]    Find files an AI agent must not read; --write fences them off
   node-doctor deslop [directory]         Dead-code scan (unused files/exports/deps)
   node-doctor explain <diagnostic-id>          Explain a diagnostic and its fix
@@ -1608,6 +1610,80 @@ const runReview = async (args: ParsedArgs): Promise<number> => {
   return 0;
 };
 
+/**
+ * §182 — operational readiness. Three passes over the tree, each answering a
+ * different question the others cannot: the scan supplies the GAP evidence
+ * (which rules fired), observability supplies the per-route checks, and the
+ * evidence collector supplies APPLICABILITY (does this project bind a port, does
+ * it ship manifests) — which no finding can establish, because a rule that finds
+ * nothing and a rule with nothing to look at are indistinguishable from findings
+ * alone. That distinction is the whole point of the report, so it is worth the
+ * extra pass.
+ */
+const runReadiness = async (args: ParsedArgs): Promise<number> => {
+  const { dir, config } = await resolveScanTarget(args);
+
+  // A path that is not a directory would otherwise produce a full page of
+  // confident negatives about a repository nobody ever read.
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) {
+    process.stderr.write(`node-doctor readiness: "${args.positionals[0] ?? "."}" is not a directory\n`);
+    return 2;
+  }
+
+  // The dimensions are fed by opt-in diagnostics. Turn them on for this report
+  // — but never override an explicit `"off"`: a user who disabled a rule has
+  // said something, and the dimension then reports itself as UNPROVEN rather
+  // than quietly passing.
+  const READINESS_RULES = [
+    "require-sigterm-handler",
+    "no-liveness-check-with-dependency",
+    "no-inverted-timeout-budget",
+    "no-infinite-retry-without-backoff",
+    "no-retry-amplification",
+    "k8s-missing-resource-limits",
+  ];
+  const diagnostics: Record<string, string> = { ...(config.diagnostics ?? {}) };
+  for (const id of READINESS_RULES) diagnostics[id] ??= "warn";
+  const readinessConfig = { ...config, diagnostics } as typeof config;
+
+  const selectedRules = new Set<string>();
+  const report = await scanProject({
+    rootDirectory: dir,
+    config: readinessConfig,
+    ignoredTags: new Set(args.ignoreTags),
+    cache: args.cache,
+    parallel: args.parallel,
+    // Called once per phase (AST, then whole-tree text) — union them, or the
+    // text-only rules would read as "never ran".
+    onDiagnosticsSelected: (ids) => {
+      for (const id of ids) selectedRules.add(id);
+    },
+  });
+
+  const [observability, evidence] = await Promise.all([
+    buildObservabilityReport(dir, { config }),
+    collectReadinessEvidence(dir, { config }),
+  ]);
+
+  const out = buildReadinessReport({
+    findings: report.findings,
+    rulesRun: selectedRules,
+    observability,
+    evidence,
+    complete: report.project.complete,
+    parseFailures: report.project.parseFailures.length,
+  });
+
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(out) : JSON.stringify(out, null, 2)) + "\n");
+    return 0;
+  }
+  process.stdout.write(renderReadiness(out, { color: useColor(args) }));
+  // Advisory by design: this rolls up opt-in heuristics, and a heuristic must
+  // never fail somebody's build on its own.
+  return 0;
+};
+
 const runFix = async (args: ParsedArgs, version: string): Promise<number> => {
   const dir = resolve(args.positionals[0] ?? ".");
   const only = await resolveOnly(args, dir);
@@ -1705,6 +1781,8 @@ export const main = async (argv: string[]): Promise<number> => {
         return await runArchitecture(args);
       case "churn":
         return await runChurn(args);
+      case "readiness":
+        return await runReadiness(args);
       case "review":
         return await runReview(args);
       case "data-map":

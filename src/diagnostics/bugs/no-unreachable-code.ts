@@ -56,8 +56,13 @@ const ERASED_TS_STATEMENTS = new Set([
 /**
  * Is this statement exempt from the unreachable check — because it hoists, is
  * erased, or is not executable code at all?
+ *
+ * Exported for `no-unreachable-cleanup-after-exit`, which reports the same class
+ * of dead statement after a call-shaped terminator. Every exemption here was
+ * paid for by a false positive; the two rules share one copy so they can never
+ * drift apart.
  */
-const isHoistedOrErased = (stmt: AstNode | null | undefined): boolean => {
+export const isHoistedOrErased = (stmt: AstNode | null | undefined): boolean => {
   if (!stmt) return true;
   // Ambient TypeScript: `declare const x`, `declare class C`, `declare let y`.
   // These carry no runtime form at all, so "unreachable" is meaningless for

@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 137,
+  "total": 140,
   "defaultOn": 95,
-  "optIn": 42,
+  "optIn": 45,
   "byCategory": {
     "Performance": 12,
     "Security": 60,
     "Maintainability": 13,
-    "Reliability": 36,
-    "Bugs": 16
+    "Reliability": 37,
+    "Bugs": 18
   },
   "categoryWeights": {
     "Security": 2,
@@ -879,6 +879,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Await the call, or make the fire-and-forget explicit. `await save(user)` when the caller depends on it; `void save(user)` plus a `.catch()` when it genuinely runs in the background. An unhandled rejection terminates the process on modern Node."
+    },
+    {
+      "id": "no-floating-promise-in-try",
+      "title": "try/catch cannot catch this discarded async call",
+      "category": "Bugs",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "async",
+        "control-flow",
+        "error-handling"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "`await` the call so the catch can actually see the rejection, or handle it where it happens with `.catch(…)`. An async function signals failure by rejecting its promise, never by throwing — so a try/catch around a discarded call catches nothing and the rejection becomes an unhandledRejection, which terminates the process by default."
     },
     {
       "id": "no-function-constructor-with-input",
@@ -1846,6 +1862,22 @@
       "recommendation": "Pin the dependency to an exact or registry semver range (e.g. `^1.2.3`, `~1.2.0`, `1.2.3`) so the install is reproducible from package.json + lockfile and every version resolves through the registry."
     },
     {
+      "id": "no-unreachable-cleanup-after-exit",
+      "title": "Cleanup after process.exit() never runs",
+      "category": "Bugs",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "control-flow",
+        "lifecycle",
+        "reliability"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Move the cleanup above the exit and await it: `server.close(); await db.end(); await logger.flush(); process.exit(0);`. `process.exit()` terminates immediately without waiting for pending I/O, so anything written below it never runs — and the things written below it are usually the drain, the flush and the close."
+    },
+    {
       "id": "no-unreachable-code",
       "title": "Unreachable code after a control-flow exit",
       "category": "Bugs",
@@ -1858,6 +1890,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Delete the dead statements, or move them above the return/throw/break/continue if they were meant to run. Control flow leaves the statement list at the terminator, so nothing after it executes (hoisted `function` and `var` declarations excepted)."
+    },
+    {
+      "id": "no-unreleased-resource",
+      "title": "Acquired resource is never released",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "lifecycle",
+        "reliability",
+        "resource-leak"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Release it in a `finally` so the error path cannot skip it: `const client = await pool.connect(); try { … } finally { client.release(); }`. A resource that is only released on the happy path is released until the first exception, and then never again."
     },
     {
       "id": "no-unsafe-deserialization",

@@ -133,6 +133,18 @@ export type { ChurnReport, FileChurn, ChurnWeighted } from "./core/churn.ts";
 // hard, derived from the import graph + CODEOWNERS rather than guessed.
 export { buildReviewRouting } from "./core/review-routing.ts";
 export type { ReviewRouting, ReviewLevel } from "./core/review-routing.ts";
+// §182 — Operational readiness: "can this be run in production", rolled up from
+// signals already computed. Every dimension separates "no gap found" from "no
+// evidence either way", so the score can never launder a blind spot as a pass.
+export { buildReadinessReport, collectReadinessEvidence } from "./core/readiness.ts";
+export type {
+  ReadinessReport,
+  ReadinessDimension,
+  ReadinessEvidence,
+  ReadinessInput,
+  ReadinessStatus,
+  ReadinessLabel,
+} from "./core/readiness.ts";
 // §77 — OpenAPI Generation From Code: a spec derived from the actual routes, so
 // it cannot drift from the code that serves it.
 export { buildOpenApiDocument } from "./core/openapi.ts";

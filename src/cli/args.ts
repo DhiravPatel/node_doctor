@@ -33,6 +33,7 @@ export type Command =
   | "architecture"
   | "churn"
   | "review"
+  | "readiness"
   | "version";
 
 // "rules" is accepted as a legacy alias for "diagnostics"; "observe" for
@@ -52,6 +53,8 @@ const COMMAND_ALIASES: Record<string, Command> = {
   layers: "architecture",
   hotspots: "churn",
   routing: "review",
+  ops: "readiness",
+  "launch-review": "readiness",
 };
 
 const COMMANDS = new Set<string>([
@@ -96,6 +99,9 @@ const COMMANDS = new Set<string>([
   "hotspots",
   "review",
   "routing",
+  "readiness",
+  "ops",
+  "launch-review",
   "version",
   "rules",
 ]);

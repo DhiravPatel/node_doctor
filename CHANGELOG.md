@@ -98,6 +98,147 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Operational readiness — `node-doctor readiness` (§182)
+
+- **`node-doctor readiness [dir]`** (aliases `ops`, `launch-review`) — "can this be
+  run in production", which is not the question the health score answers. Nine
+  dimensions (graceful shutdown, health/readiness probes, request correlation,
+  failure logging, outbound timeouts, route error handling, no hard exit on a
+  request path, container resource limits, retry/timeout policy) rolled up from
+  diagnostics and reports that already ship. **It adds no new detection**; what is
+  new is the aggregation and the honesty model around it.
+  That model is the whole design. A checklist where "no finding" means "pass" is a
+  lie: `require-sigterm-handler` only fires in a file that binds a port, so a repo
+  with no server produces zero findings, and rendering that as *graceful shutdown:
+  PASS* tells an SRE the opposite of the truth. Each dimension therefore carries
+  four verdicts — **ready**, **gap**, **not applicable**, **not proven** — and only
+  the first two touch the score. The other two are excluded from the denominator
+  and printed with their reason, applicability is established independently of any
+  finding (a pass that looks for the port binding, the signal handler and the
+  manifests directly), and a repository where nothing could be assessed scores
+  **`null`, not 100**. A rule the user disabled makes its dimension *not proven*
+  rather than silently passing — `scanProject` gained an `onDiagnosticsSelected`
+  hook so the report can tell "found nothing" from "never ran".
+  Deliberately not the health score's arithmetic: that is a per-kLOC density model,
+  and a five-line service and a 500-kLOC service with no SIGTERM handler are equally
+  unshippable. Passed-over-applicable instead, with the same 75/50 label thresholds.
+  Always exits 0 — it rolls up opt-in heuristics, and a heuristic must not fail
+  somebody's build on its own.
+  An adversarial hunt then found ten ways the first version broke its own honesty
+  rule, each fixed: §151 returns `na` for a check it could not evaluate, and those
+  were folded into "ready" — an Express app with zero logging, zero error handling
+  and zero timeouts scored **100/100**, so a dimension now needs at least one route
+  to actually PASS. Evidence was read from test files and fixtures, so a SIGTERM
+  handler in a supertest file made a handler-less server "ready" — evidence now
+  skips non-production paths and requires the handler and the port binding **in the
+  same file**, and the engine's own gap finding outranks positive evidence found
+  elsewhere. The gap finding is in turn corroborated against a port-shaped
+  `.listen(...)`, so a worker whose only `listen` is an in-process bus
+  subscription is no longer told its server cannot drain. Probe routes come from
+  the route extractor rather than the observability table, because that table
+  omits handlers written `(_req, res)` — which produced the categorical claim "no
+  probe endpoint" for a repo that had one. `/live` and `/status` moved from the
+  probe vocabulary to an *ambiguous* tier (a video app's `/live/:channel` scored
+  100/100 on that alone). A dimension whose proving rule was disabled no longer
+  flips gap→ready. Unparseable files turn "we found no server" into *not proven*.
+  The `onDiagnosticsSelected` hook now fires for the whole-tree text phase too, or
+  the k8s resource-limits dimension reported "did not run" even when the rule ran
+  **and fired**. And a path that is not a directory exits 2 instead of printing a
+  page of confident negatives about a repository nobody read.
+
+### Diagnostics — resource lifecycle (§165)
+
+- **`no-unreleased-resource`** (Reliability, §165, opt-in) — a pooled Postgres
+  client checked out and never returned, a Mongo session never ended, an
+  OpenTelemetry span never closed, a mutex permit never given back. The pg case is
+  the canonical silent outage: ten error paths skip `release()`, and the eleventh
+  request — and every one after it — waits forever for a connection that is not
+  coming back. Nothing crashes and nothing logs.
+  **Not the paired-verb checker the plan called for.** A table of verbs
+  (`acquire`/`release`, `open`/`close`) is a false-positive machine: `close` is
+  files, modals, dropdowns and RxJS subjects; `end` is `res.end()` on every Express
+  route; `connect` is React-Redux; `release` is semver. A verb is a word, not a
+  contract. Every firing is instead anchored to a **documented library contract,
+  proven by binding from the import down** — the package is imported in this file
+  under whatever alias, the receiver is bound from that import, the acquire is the
+  contract's method on that receiver, and the release appears nowhere in the
+  binding's lifetime. Silent on escape (any use other than `binding.<prop>` means
+  the release may happen out of sight — a whitelist, not an enumeration), silent at
+  module scope, and silent on *any* mention of the release anywhere: proving it runs
+  on every path needs a control-flow graph this engine does not have, while proving
+  it is absent needs nothing but syntax. Zero findings across this project's 410
+  source and test files.
+  An adversarial hunt found the first version doing exactly what its own header
+  forbade: it kept a flat name→contract map, so one `const pool = new Pool()`
+  anywhere in a file made **every** `pool` in that file a pg pool — a parameter of
+  another type, a `for (const pool of pools)` loop variable, a local in an
+  unrelated function — each producing a message naming a library the code did not
+  use. The receiver, the factory and the acquired value are now each resolved to a
+  `Binding` and compared by reference, which also stops a lazy `require("pg")`
+  inside one function from binding the name file-wide. Four more fixes from the
+  same hunt: the lifetime region is the enclosing **function** rather than the
+  nearest block (a `var` acquired in a `try` and released in the matching
+  `finally` was reported as a leak — the rule firing on the exact fix it
+  recommends); `using` / `await using` dispose by language rule and are silent;
+  the `Semaphore` contract was **removed** because its `acquire()` resolves to a
+  `[value, releaser]` tuple, so the `release()` the message prescribed would throw;
+  and per-region reference indexing replaced a per-declarator rescan that took 35
+  seconds on a 180 KB file (now 246 ms).
+
+### Diagnostics — unreachable guarantees (§166)
+
+- **`no-floating-promise-in-try`** (Bugs, §166, opt-in) — a `try`/`catch` that
+  structurally cannot catch what it appears to guard. An `async` function never
+  throws; it returns a promise and signals failure by rejecting it. So
+  `try { sendReceipt(order); } catch (err) { … }` is not error handling — the call
+  returns immediately, the `try` completes normally, and the later rejection finds
+  no handler on the stack, so Node raises `unhandledRejection`, which terminates the
+  process by default. The worst kind of defect: it *looks* handled.
+  Precision: the callee must be a plain identifier resolving through the scope chain
+  **in this file** to a declaration marked `async` — a `const` or a function
+  declaration, never a parameter, an import, a method call, or a `let` that may hold
+  something else by the time the line runs. The result must be discarded (awaited,
+  returned, assigned, `void`-ed and `.catch`-chained are all deliberate), and the
+  statement must sit in the `try` block with no function boundary between. The
+  message names the specific call rather than calling the catch dead — the `try` may
+  be protecting its other statements perfectly well.
+  Three hunt fixes: the name must be declared **exactly once** in the file, because
+  the scope resolver models no block scopes and defines first-wins, and a
+  block-scoped `const send = async …` made the rule flag a call that invoked a
+  synchronous `send` from another scope; a callee whose entire body is one
+  `try`/`catch` that swallows everything **cannot reject**, so claiming its
+  rejection escapes would be false; and the message no longer says the `try`
+  "completes before it settles" (untrue when the block awaits afterwards) — the
+  accurate claim is that the failure is never *propagated into* the try.
+
+- **`no-unreachable-cleanup-after-exit`** (Bugs, §166, opt-in) — statements after
+  `process.exit()`, which never run. `no-unreachable-code`'s terminator table is
+  keyed on statement *type*, so it structurally cannot express a call-shaped
+  terminator, and extending it would shift a default-on rule's findings and evidence
+  keys for every existing user. The dead statements here are almost always the
+  cleanup — `server.close()`, `await db.end()`, `logger.flush()` — so the cost is
+  truncated responses on every deploy and logs that stop just before every incident.
+  Reuses `no-unreachable-code`'s hoisting and TypeScript-erasure exemptions verbatim
+  from the same exported helper, so the two cannot drift apart.
+  **It found a real one in node.doctor itself on its first run:** the Windows UTF-8
+  console fix sat below `process.exit()` in `exitAfterFlush` and had never once
+  executed. Moved to `hardenProcess()`, where it runs before anything is written.
+  Six hunt fixes, each a case where the statements below the call do run: a local
+  or dependency-injected binding named `process` is not the global; a file that
+  reassigns `process.exit` has stubbed it, and test files are skipped outright for
+  the same reason; a `return`/`throw` above the exit means the exit itself never
+  runs and `no-unreachable-code` owns the tail; `break`/`continue` after an exit
+  are dead but are not cleanup, so "move it above the exit" is wrong advice; the
+  message quotes the call that is actually written (`abort`, not `exit`); and class
+  `static {}` blocks are now scanned.
+
+- The four sub-cases §166 also named were **dropped rather than shipped soft**: "a
+  `finally` after a `return`" is semantically backwards, "a retry after a `throw`"
+  is already `no-unreachable-code`, and "a validation downstream of an early return"
+  and "a default parameter always supplied by callers" need every-path reachability
+  and whole-program call-site enumeration respectively — proofs this engine does not
+  have. Shipping any of them would have meant guessing.
+
 ### Engine hardening
 
 - **CODEOWNERS files with CRLF line endings no longer invent owners.** JavaScript's

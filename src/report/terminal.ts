@@ -530,6 +530,81 @@ export const renderReviewRouting = (
   return lines.join("\n");
 };
 
+/**
+ * §182 — the operational-readiness report.
+ *
+ * The layout leads with the number, but it is deliberately impossible to read
+ * the number without also reading how much was actually assessed: the "not
+ * proven" and "not applicable" counts sit on the same line as the score, and
+ * every dimension prints the reason for its verdict. An unscored report says so
+ * in words rather than showing a hopeful 100.
+ */
+export const renderReadiness = (
+  report: import("../core/readiness.ts").ReadinessReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  const { score, label, summary } = report;
+  if (score === null) {
+    lines.push(`  ${p.bold("Operational readiness")}  ${p.yellow("not scored")}`);
+    lines.push(
+      p.dim("    No dimension could be assessed here — that is not the same as being ready."),
+    );
+  } else {
+    const color = label === "ready" ? p.green : label === "needs work" ? p.yellow : p.red;
+    lines.push(
+      `  ${p.bold("Operational readiness")}  ${bar(score, p)}  ${p.bold(`${score}/100`)}  ${color(label)}`,
+    );
+    lines.push(
+      p.dim(
+        `    ${summary.ready} ready · ${summary.gaps} gap(s) · scored over ${summary.ready + summary.gaps} of ${report.dimensions.length} dimensions`,
+      ),
+    );
+  }
+  if (summary.notProven > 0 || summary.notApplicable > 0) {
+    lines.push(
+      p.dim(
+        `    ${summary.notProven} not proven · ${summary.notApplicable} not applicable — neither counted for nor against`,
+      ),
+    );
+  }
+  lines.push("");
+
+  for (const d of report.dimensions) {
+    const mark =
+      d.status === "ready"
+        ? p.green("✔")
+        : d.status === "gap"
+          ? p.red("✖")
+          : d.status === "not-proven"
+            ? p.yellow("?")
+            : p.dim("·");
+    const tag =
+      d.status === "not-proven"
+        ? p.yellow(" [not proven]")
+        : d.status === "not-applicable"
+          ? p.dim(" [n/a]")
+          : "";
+    lines.push(`  ${mark} ${p.bold(d.title)}${tag}`);
+    lines.push(`      ${p.dim(d.detail)}`);
+    for (const e of d.evidence) lines.push(`      ${p.dim("→")} ${p.cyan(e)}`);
+    lines.push("");
+  }
+
+  if (!summary.complete || summary.parseFailures > 0) {
+    lines.push(
+      p.yellow(
+        `  ⚠ ${summary.parseFailures} file(s) could not be parsed — this score is incomplete.`,
+      ),
+    );
+    lines.push("");
+  }
+
+  return lines.join("\n");
+};
+
 export const renderChurn = (
   churn: import("../core/churn.ts").ChurnReport,
   ranked: Array<{ churn: number; finding: { diagnostic: string; normalizedFilePath?: string; line: number; severity: string } }>,
