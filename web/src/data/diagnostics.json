@@ -1,13 +1,13 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 136,
+  "total": 137,
   "defaultOn": 95,
-  "optIn": 41,
+  "optIn": 42,
   "byCategory": {
     "Performance": 12,
     "Security": 60,
     "Maintainability": 13,
-    "Reliability": 35,
+    "Reliability": 36,
     "Bugs": 16
   },
   "categoryWeights": {
@@ -759,6 +759,22 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Remove or merge the duplicate route — the later registration shadows the earlier one. Keep one handler per (method, path)."
+    },
+    {
+      "id": "no-error-cause-discarded",
+      "title": "Catch throws a new error and discards the original",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "debuggability",
+        "observability",
+        "reliability"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Attach the original as the cause: `throw new Error(\"failed to load user\", { cause: err })`. Without it the stack starts at your re-throw and the real failure — the connection reset, the parse error — is gone, leaving whoever is on call at 3am with a message and no thread to pull."
     },
     {
       "id": "no-error-leak-to-client",

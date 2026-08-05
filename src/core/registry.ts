@@ -88,6 +88,7 @@ import { noSequentialIndependentAwaits } from "../diagnostics/performance/no-seq
 import { noCacheWithoutTtl } from "../diagnostics/reliability/no-cache-without-ttl.ts";
 import { noCrossRequestStateMutation } from "../diagnostics/reliability/no-cross-request-state-mutation.ts";
 import { noDroppedAbortSignal } from "../diagnostics/reliability/no-dropped-abort-signal.ts";
+import { noErrorCauseDiscarded } from "../diagnostics/reliability/no-error-cause-discarded.ts";
 import { noInfiniteRetryWithoutBackoff } from "../diagnostics/reliability/no-infinite-retry-without-backoff.ts";
 import { noInvalidCronExpression } from "../diagnostics/reliability/no-invalid-cron-expression.ts";
 import { noInvertedTimeoutBudget } from "../diagnostics/reliability/no-inverted-timeout-budget.ts";
@@ -223,6 +224,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noCacheWithoutTtl,
   noCrossRequestStateMutation,
   noDroppedAbortSignal,
+  noErrorCauseDiscarded,
   noInfiniteRetryWithoutBackoff,
   noInvalidCronExpression,
   noInvertedTimeoutBudget,

@@ -98,6 +98,17 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Diagnostics — debuggability (§183)
+
+- **`no-error-cause-discarded`** (Reliability, §183, opt-in) — a catch that binds
+  its error and then throws a new one without it, destroying the stack and type
+  of the real failure. The log ends up saying "failed to load user" with no
+  thread to pull at 3am. Silent whenever the author kept the evidence in any
+  form: `{ cause: err }`, the error in any constructor position, interpolated
+  into the message, or simply logged before the re-throw — and on a bare
+  `catch {}`, which never had a cause to lose. Zero findings across this
+  project's own 339 files.
+
 ### Blast-radius review routing — `node-doctor review` (§163)
 
 - **`node-doctor review <files…> | --diff <base>`** (alias `routing`) — turns
