@@ -130,7 +130,11 @@ come from a namespaced factory in a never-reassigned `const`.
   **refactor magnets** (source churning far above the project baseline), and
   re-ranks findings by the churn of their file. **Structurally incapable of a
   false positive**: it adds no findings and removes none — the ranking is a
-  permutation of the analyzer's own output. Scores normalize volume, author
+  permutation of the analyzer's own output. (The *magnet* list needed a fix an
+  adversarial hunt found: in a shallow checkout — the `actions/checkout` default
+  — every file has one commit, ties at score 100, and the whole tree was named a
+  hotspot. Magnets now require an unshallow repo with ≥ 10 commits scanned and
+  ≥ 3 commits in the file; a thin history suppresses the claim and says why.) Scores normalize volume, author
   spread and recency against the project's own distribution; recency is in
   commits-ago, not days, so output is deterministic. Docs, lockfiles and
   generated artifacts are excluded from magnets (they churn by design). With no

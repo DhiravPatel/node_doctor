@@ -82,7 +82,7 @@ describe("buildChurnReport — reads history", () => {
 
   test("docs, lockfiles and generated artifacts are never refactor magnets", async () => {
     // These churn by design; calling them "begging to be split" is pure noise.
-    const commits = Array.from({ length: 8 }, (_, i) => ({
+    const commits = Array.from({ length: 14 }, (_, i) => ({
       "CHANGELOG.md": `entry ${i}`,
       "package-lock.json": `{"v":${i}}`,
       "src/core/registry.ts": `export const N = ${i};`,
@@ -100,7 +100,9 @@ describe("buildChurnReport — reads history", () => {
   });
 
   test("a genuinely churning source file IS a magnet", async () => {
-    const commits = Array.from({ length: 8 }, (_, i) => ({ "src/god.ts": `export const N = ${i};` }));
+    // Above the evidence floor: magnets need real history behind them (see the
+    // shallow-clone regression below for why).
+    const commits = Array.from({ length: 14 }, (_, i) => ({ "src/god.ts": `export const N = ${i};` }));
     const dir = await makeRepo(commits);
     try {
       const r = await buildChurnReport(dir);
@@ -206,6 +208,77 @@ describe("buildChurnReport — determinism", () => {
       const a = await buildChurnReport(dir);
       const b = await buildChurnReport(dir);
       assert.equal(JSON.stringify(a), JSON.stringify(b), "no clock is read; recency is commits-ago");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("§160 — a thin or shallow history must not fabricate magnets", () => {
+  test("a shallow clone (the `actions/checkout` default) reports NO magnets", async () => {
+    const origin = await makeRepo(
+      Array.from({ length: 20 }, (_, i) => ({
+        "src/hot.ts": `export const N = ${i};`,
+        [`src/stable${i % 5}.ts`]: `export const S = 1;`,
+      })),
+    );
+    const shallow = await mkdtemp(join(tmpdir(), "nd-churn-shallow-"));
+    try {
+      await run("git", ["clone", "--depth", "1", "-q", `file://${origin}`, shallow]);
+      const r = await buildChurnReport(shallow);
+      assert.equal(r.available, true, "the ranking is still usable");
+      assert.equal(r.historyTruncated, true, "…but the history is known to be truncated");
+      assert.deepEqual(
+        r.refactorMagnets,
+        [],
+        "with one commit every file ties at score 100 — naming them all magnets is fabrication",
+      );
+      assert.ok(r.unavailableReason?.includes("shallow"), "the reader is told why");
+      assert.ok(r.files.length > 0, "scores still exist for ranking");
+    } finally {
+      await rm(origin, { recursive: true, force: true });
+      await rm(shallow, { recursive: true, force: true });
+    }
+  });
+
+  test("a brand-new repo with one commit reports no magnets", async () => {
+    const dir = await makeRepo([{ "src/a.ts": "1", "src/b.ts": "1", "src/c.ts": "1" }]);
+    try {
+      const r = await buildChurnReport(dir);
+      assert.equal(r.historyTruncated, true);
+      assert.deepEqual(r.refactorMagnets, []);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a file with only a couple of commits is never a magnet, however it ranks", async () => {
+    // 12 commits of history (over the floor), but the "hot" file has only 2.
+    const commits = Array.from({ length: 12 }, (_, i) => ({ [`src/f${i}.ts`]: `export const N = ${i};` }));
+    commits.push({ "src/barely.ts": "1" }, { "src/barely.ts": "2" });
+    const dir = await makeRepo(commits);
+    try {
+      const r = await buildChurnReport(dir);
+      assert.equal(r.historyTruncated, false, "there is enough history to judge");
+      assert.ok(
+        !r.refactorMagnets.some((f) => f.normalizedFilePath === "src/barely.ts"),
+        "two commits is not design pressure, whatever the relative score says",
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("`not a git repository` is not reported as `git is missing`", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "nd-churn-nogit-"));
+    try {
+      const r = await buildChurnReport(dir);
+      assert.equal(r.available, false);
+      assert.match(
+        r.unavailableReason!,
+        /not a git repository/,
+        "git ran and said no — sending the reader to install git is the wrong fix",
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -16,11 +16,19 @@
  *   2. REFACTOR MAGNETS. Files whose change rate is so far above the project's
  *      own baseline that they are begging to be split. Reported as information.
  *
- * PRECISION MODEL. This module CANNOT produce a false positive, by construction:
- * it never creates a finding, and it never suppresses one. It only re-orders and
- * annotates what the analyzer already reported, so the worst failure mode is a
- * ranking that is less useful — never a claim that is wrong. That property is
- * why it is the first of the git-history features to ship.
+ * PRECISION MODEL. The RANKING cannot produce a false positive by construction:
+ * `weightByChurn` returns a permutation of its input, so the worst failure mode
+ * is a less useful order — never a wrong claim.
+ *
+ * The MAGNET list is a different matter, and an adversarial hunt proved it: with
+ * a shallow checkout (`actions/checkout` clones `--depth 1` by default) every
+ * file has one commit, so every file ties at score 100 and the entire source
+ * tree was named "churning far above the baseline". Relative rank carries no
+ * information without absolute evidence underneath it. A magnet therefore now
+ * requires a real history (not shallow, at least `MAGNET_MIN_COMMITS_SCANNED`
+ * commits) and real churn in that file (`MAGNET_MIN_FILE_COMMITS`); when the
+ * history is too thin the claim is suppressed and the reason is reported, while
+ * ranking keeps working.
  *
  * When git is absent, the directory is not a repository, or the log is empty,
  * every churn value is simply zero and the ranking degrades to the analyzer's
@@ -42,19 +50,33 @@ const execFileAsync = promisify(execFile);
 export const DEFAULT_COMMIT_WINDOW = 500;
 
 /** stdout of a git command, or null when git is missing or the command failed. */
-const gitStdout = async (cwd: string, args: string[]): Promise<string | null> => {
+interface GitResult {
+  stdout: string | null;
+  /** True only when git itself could not be spawned — distinct from a command
+   *  that ran and failed, which is what "not a repository" looks like. */
+  gitMissing: boolean;
+}
+
+const gitRun = async (cwd: string, args: string[]): Promise<GitResult> => {
   try {
     const { stdout } = await execFileAsync("git", args, {
       cwd,
       maxBuffer: 64 * 1024 * 1024,
       windowsHide: true,
     });
-    return stdout;
+    return { stdout, gitMissing: false };
   } catch (error) {
-    const partial = (error as { stdout?: unknown }).stdout;
-    return typeof partial === "string" && partial.length > 0 ? partial : null;
+    const err = error as { stdout?: unknown; code?: unknown };
+    const partial = typeof err.stdout === "string" && err.stdout.length > 0 ? err.stdout : null;
+    // ENOENT from the spawn means no git binary. A non-zero exit means git ran
+    // and said no — reporting that as "git is not installed" sends the reader
+    // to fix the wrong thing.
+    return { stdout: partial, gitMissing: err.code === "ENOENT" };
   }
 };
+
+const gitStdout = async (cwd: string, args: string[]): Promise<string | null> =>
+  (await gitRun(cwd, args)).stdout;
 
 export interface FileChurn {
   normalizedFilePath: string;
@@ -76,6 +98,16 @@ export interface FileChurn {
 export interface ChurnReport {
   /** True when a git history was actually read. False → every score is 0. */
   available: boolean;
+  /**
+   * True when the checkout is shallow or the window saw too few commits to
+   * distinguish a hotspot from an ordinary file. Scores and ranking remain
+   * useful; MAGNET CLAIMS ARE SUPPRESSED, because with one commit every file
+   * has identical volume and recency and would all score 100.
+   *
+   * This matters in practice: `actions/checkout` clones with `--depth 1` by
+   * default, which is exactly this case.
+   */
+  historyTruncated: boolean;
   /** Why the history could not be read, when it could not. */
   unavailableReason: string | null;
   files: FileChurn[];
@@ -89,6 +121,15 @@ export interface ChurnReport {
 
 /** A file is a magnet when its score sits this far above the project median. */
 const MAGNET_SCORE_FLOOR = 70;
+
+/**
+ * Absolute evidence a magnet claim requires, on top of the relative score.
+ * Scores are ratios against the project maximum, so in a one-commit history
+ * EVERY file ties at 100 — relative rank is meaningless without a floor of real
+ * observations underneath it.
+ */
+const MAGNET_MIN_COMMITS_SCANNED = 10;
+const MAGNET_MIN_FILE_COMMITS = 3;
 const MAX_MAGNETS = 10;
 
 /** Only source files can be "begging to be split". */
@@ -124,15 +165,20 @@ export const buildChurnReport = async (
   const window = options.window ?? DEFAULT_COMMIT_WINDOW;
   const empty = (reason: string): ChurnReport => ({
     available: false,
+    historyTruncated: false,
     unavailableReason: reason,
     files: [],
     refactorMagnets: [],
     summary: { commitsScanned: 0, filesTracked: 0 },
   });
 
-  const inRepo = await gitStdout(rootDirectory, ["rev-parse", "--is-inside-work-tree"]);
-  if (inRepo === null) return empty("git is not available on PATH");
-  if (inRepo.trim() !== "true") return empty("not a git repository");
+  const probe = await gitRun(rootDirectory, ["rev-parse", "--is-inside-work-tree"]);
+  if (probe.gitMissing) return empty("git is not available on PATH");
+  if (probe.stdout === null || probe.stdout.trim() !== "true") return empty("not a git repository");
+
+  // A shallow checkout has no history to reason about, however many files it
+  // contains. `actions/checkout` produces one by default.
+  const shallow = (await gitStdout(rootDirectory, ["rev-parse", "--is-shallow-repository"]))?.trim() === "true";
 
   const stdout = await gitStdout(rootDirectory, [
     "log",
@@ -205,10 +251,15 @@ export const buildChurnReport = async (
 
   // A magnet must be SOURCE the team actually maintains by hand. Docs, lockfiles
   // and generated artifacts churn by design and would otherwise fill the list.
-  const refactorMagnets = files
+  // With too little history, relative scores carry no information: suppress the
+  // claim rather than fabricate one. Ranking still works — it is only ordering.
+  const historyTruncated = shallow || commitsScanned < MAGNET_MIN_COMMITS_SCANNED;
+
+  const refactorMagnets = (historyTruncated ? [] : files)
     .filter(
       (f) =>
         f.score >= MAGNET_SCORE_FLOOR &&
+        f.commits >= MAGNET_MIN_FILE_COMMITS &&
         SOURCE_FILE.test(f.normalizedFilePath) &&
         !CHURN_BY_DESIGN.test(f.normalizedFilePath) &&
         !GENERATED_PATH.test(f.normalizedFilePath),
@@ -217,7 +268,12 @@ export const buildChurnReport = async (
 
   return {
     available: true,
-    unavailableReason: null,
+    historyTruncated,
+    unavailableReason: historyTruncated
+      ? shallow
+        ? "shallow checkout — refactor magnets need full history"
+        : `only ${commitsScanned} commit(s) of history — refactor magnets need at least ${MAGNET_MIN_COMMITS_SCANNED}`
+      : null,
     files,
     refactorMagnets,
     summary: { commitsScanned, filesTracked: files.length },

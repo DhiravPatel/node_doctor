@@ -416,6 +416,9 @@ const analyzeFile = (opts: AnalyzeOptions): AnalyzeResult => {
 // ---------------------------------------------------------------------------
 
 export interface LintSourceOptions {
+  /** Called when a rule throws. Without a handler the error is swallowed and the
+   *  file is reported clean — see the note in `lintSource`. */
+  onRuleError?: (ruleId: string, err: unknown) => void;
   filePath: string;
   sourceText: string;
   diagnostics?: Diagnostic[];
@@ -453,6 +456,12 @@ export const lintSource = (options: LintSourceOptions): LintSourceResult => {
     effectiveSeverity,
     runScope: "file",
     typeSource: options.typeSource,
+    // Forward rule crashes instead of dropping them. Without this a rule that
+    // throws (e.g. a stack overflow walking pathologically nested input) is
+    // swallowed by the per-node try/catch and the file is reported CLEAN — a
+    // false "nothing wrong here", which is the one output this project treats
+    // as unacceptable.
+    onRuleError: options.onRuleError,
   });
 
   const findings = sortFindings(result.pending.map(finalize));
