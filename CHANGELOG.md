@@ -98,6 +98,118 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Suspicious change shapes — `node-doctor change-shape` (§159)
+
+- **`node-doctor change-shape [--diff <base> | --staged]`** (aliases `diff-shape`,
+  `risky-edits`) — some edits deserve a second pair of eyes because of their
+  *shape*, regardless of whether the code is correct, and a reviewer cannot spot
+  them in a 400-line diff. Four shapes: a **`.env.example` key removed** (every
+  developer who clones tomorrow is missing a variable nobody told them about), a
+  **dependency un-pinned** (the build stops being reproducible and a compromised
+  release lands without a code change), a **very small edit to the auth path**
+  (the shape most changes to a security boundary actually take), and a
+  **migration edited alongside feature work** (reverting the commit takes the
+  schema change with it).
+  **It emits no findings and does not score.** The output vocabulary is a third,
+  separate one — *review priority* — because "this edit is unusual" and "this
+  code is wrong" are different claims, and conflating them would make every
+  finding in the tool mean less.
+  Shapes that cannot be decided from diff text were cut rather than approximated:
+  "this character class got wider" is regex-language containment, "the auth check
+  got weaker" needs both sides parsed (which is what §87's baseline delta already
+  does), and an N≠M hunk has no sound line pairing.
+  Built on a new `src/core/git-history.ts` — shared git plumbing plus a unified-
+  diff parser, the module §160/§163/§184 have each been open-coding.
+
+### Diagnostics — comment-code contradiction (§178)
+
+- **`jsdoc-param-mismatch`** (Maintainability, §178, opt-in) — a JSDoc block that
+  documents a `@param` the function does not have. The rename happened; the doc
+  did not. It matters more every year: a coding agent cannot tell a stale doc from
+  a current one and will generate calls that match the comment rather than the
+  signature.
+  Almost all the precision is in the *association* between a comment and the node
+  it documents. The block must sit immediately above the declaration, separated by
+  at most one newline (a module header two blank lines up is not the first
+  function's documentation), with no other comment between, and not on the same
+  line as the previous statement. Every parameter must be a plain identifier, every
+  `@param` name a bare identifier, and the function's name unique in the file —
+  a TypeScript overload set puts one JSDoc above several declarations that differ
+  in parameters. A parameter with *no* `@param` is deliberately not reported: that
+  is incomplete documentation, not a contradiction. Silent across this project's
+  own 428 files.
+  `DiagnosticContext` gains a `comments` field (public API, additive) — comments
+  are not part of the AST, so a rule comparing what a comment claims against what
+  the code does has to be handed them separately.
+  The other four §178 sub-cases were assessed and **dropped**: `@returns {null}`
+  versus "every path throws" needs path-sensitive completion analysis; the
+  magic-number comment is unfalsifiable (the same `// 30 second timeout` is correct
+  beside `30_000` under ms and beside `30` under seconds); `// TODO: remove after
+  v2` needs a project version the analysis path does not carry; `@deprecated` still
+  imported is a migration-progress signal rather than a contradiction.
+
+### Locale integrity — `node-doctor i18n` (§181)
+
+- **`node-doctor i18n [dir]`** (aliases `locales`, `l10n`) — a key referenced with
+  no entry ships a blank string, or the raw key, to a user, and nothing in the
+  build fails. A placeholder renamed in the translation but not at the call site
+  renders `Hello {{userName}}` verbatim in production. Neither is visible in a
+  review of either file alone.
+  Three proof obligations before a key is called missing: **the file must be proven
+  i18n code** (`t("x")` is the most ambiguous call shape in JavaScript — a test tap,
+  a tagged template, a Lodash chain), **the key must be static**, and **the locale
+  file must be proven a locale file** (`**/*.json` would swallow tsconfig,
+  package.json, fixtures and OpenAPI specs). Namespaces, plural and context
+  suffixes, string and object defaults all resolve first.
+  **Dead-translation detection is deliberately not shipped**, and the report says
+  so rather than returning an empty list: a key is reachable from `<Trans i18nKey>`,
+  from a `.vue`/`.svelte` template, from a prop-drilled `t`, and from `$t()` nested
+  inside another string — none of which this can see, and the action on a wrong
+  claim is to delete copy a user reads.
+  **"Hardcoded user-facing strings" is dropped and will not ship.** No static
+  property distinguishes a user-facing string from a log message, an error code, a
+  SQL fragment or a test fixture; every candidate gate misfires in both directions.
+  Whether a string is user-facing is a natural-language judgement.
+
+### Hardening from the §159/§178/§181 adversarial hunt
+
+- **`change-shape`**: the auth vocabulary flagged twelve of eighteen ordinary paths
+  — a retry *policy*, a Vue route *guard*, a *session*-storage helper, an *admin*
+  dashboard — so `policy`, `session`, `guard`, `admin`, `role`, `permit` and `can`
+  were cut; git's `@@` heading is a *guess* at the enclosing function and no longer
+  gates anything; `dependency-unpinned` fired on npm scripts, `engines` and
+  `repository` metadata, so the manifest is now read and the section is a fact;
+  un-pinning two dependencies at once is now reported (positional pairing when the
+  counts match); a key moved between template files or commented out is no longer
+  a "removal"; a migration and its own test are one change, not mixed work; and
+  untracked files are counted so a green working-tree result cannot read as
+  "everything was looked at".
+- **`git-history`**: an unresolved merge produces a combined diff whose body is not
+  unified format — it was parsed as zero hunks and reported as a clean change set,
+  and is now refused explicitly; a diff over the buffer limit was returned as a
+  *successful* truncated diff, and now fails loudly; `diff.mnemonicPrefix`,
+  `diff.noprefix` and `diff.srcPrefix` are pinned, because any of them silently
+  corrupts every path; a file with no `---`/`+++` lines keeps its path; and a bare
+  repository is reported as "not a git work tree" rather than "not a repository".
+- **`jsdoc-param-mismatch`**: `@callback`, `@typedef`, `@event` and the *named*
+  forms of `@function`/`@name`/`@method` declare a subject of their own — a
+  `@callback` typedef placed directly above its single consumer is ordinary style,
+  and its `@param` tags described the consumer's signature, which made the message
+  literally false and its recommendation ("delete the tag") destructive. Also:
+  indented nested `@param` tags describe properties, and a computed method key is
+  no longer used as the function's name.
+- **`i18n`**: `{{count}}` — the commonest i18next placeholder — was reported as
+  never supplied on every plural string, because reserved options were filtered out
+  of the *supplied* set instead of the *required* one. i18next v4 plural
+  catalogues (`item_one`/`item_other` with `t("item")` at the call site — the
+  default layout since v21) reported *missing* and reported the real plural keys
+  *unused* in the same report. A string second argument (`t(key, "Fallback")`) is a
+  default, not options. One array value discarded an entire catalogue file. Single-
+  brace `{name}` matched ordinary prose. Any `x.t(...)` was asserted to be a
+  translation. `useTranslation(ns, { keyPrefix })` reported every key in the file
+  as missing. `en` was forced as the source of truth even when it was a partial
+  translation. All fixed; unused-key detection removed entirely.
+
 ### Operational readiness — `node-doctor readiness` (§182)
 
 - **`node-doctor readiness [dir]`** (aliases `ops`, `launch-review`) — "can this be

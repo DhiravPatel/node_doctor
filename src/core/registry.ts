@@ -71,6 +71,7 @@ import { requireErrorHandlingMiddleware } from "../diagnostics/http/require-erro
 // maintainability
 import { deepNesting } from "../diagnostics/maintainability/deep-nesting.ts";
 import { highCyclomaticComplexity } from "../diagnostics/maintainability/high-cyclomatic-complexity.ts";
+import { jsdocParamMismatch } from "../diagnostics/maintainability/jsdoc-param-mismatch.ts";
 import { maxFunctionLength } from "../diagnostics/maintainability/max-function-length.ts";
 import { noAssertionFreeTest } from "../diagnostics/maintainability/no-assertion-free-test.ts";
 import { noCircularImports } from "../diagnostics/maintainability/no-circular-imports.ts";
@@ -210,6 +211,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   // maintainability
   deepNesting,
   highCyclomaticComplexity,
+  jsdocParamMismatch,
   maxFunctionLength,
   noAssertionFreeTest,
   noCircularImports,

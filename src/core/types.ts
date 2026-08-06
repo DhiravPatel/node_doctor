@@ -121,6 +121,12 @@ export interface DiagnosticContext {
   sourceText: string;
   /** The parsed ESTree Program root. */
   program: AstNode;
+  /**
+   * Comment nodes in ascending `start` order. Comments are not part of the AST,
+   * so a rule that needs to compare what a comment CLAIMS against what the code
+   * DOES has to be handed them separately.
+   */
+  comments: readonly CommentNode[];
   /** Caller-controlled binding names (intra-file taint). */
   taintedBindings: Set<string>;
   /** All active capability tokens. */
@@ -143,6 +149,16 @@ export interface DiagnosticContext {
    * promise": a typed diagnostic must stay silent rather than guess.
    */
   typeSource?: TypeSource;
+}
+
+/** A comment as the parser reports it: no `.loc`, offsets only. */
+export interface CommentNode {
+  /** "Line" for `//`, "Block" for `/* … *\/`. */
+  type: string;
+  /** The text between the delimiters, verbatim — a JSDoc block still has its `*`s. */
+  value: string;
+  start: number;
+  end: number;
 }
 
 /** A diagnostic visitor map: ESTree node type (optionally `:exit`) → handler. */

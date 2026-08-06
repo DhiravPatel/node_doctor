@@ -272,6 +272,7 @@ const analyzeFile = (opts: AnalyzeOptions): AnalyzeResult => {
     normalizedFilePath,
     sourceText,
     program,
+    comments: parsed.comments,
     taintedBindings: tainted,
     capabilities,
     hasCapability: (token) => capabilities.has(token),

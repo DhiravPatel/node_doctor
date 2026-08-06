@@ -1,12 +1,12 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 140,
+  "total": 141,
   "defaultOn": 95,
-  "optIn": 45,
+  "optIn": 46,
   "byCategory": {
     "Performance": 12,
     "Security": 60,
-    "Maintainability": 13,
+    "Maintainability": 14,
     "Reliability": 37,
     "Bugs": 18
   },
@@ -320,6 +320,21 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Reduce branching: extract sub-decisions into well-named helper functions, replace flag chains with a lookup table or polymorphism, and use guard clauses. Aim for a cyclomatic complexity at or below 15."
+    },
+    {
+      "id": "jsdoc-param-mismatch",
+      "title": "JSDoc documents a parameter the function does not have",
+      "category": "Maintainability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "hygiene",
+        "maintainability"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Rename the `@param` to match the signature, or delete it. A doc comment naming parameters that do not exist misdirects every reader — and every coding agent, which has no way to tell a stale doc from a current one and will generate calls that match the comment rather than the code."
     },
     {
       "id": "jwt-missing-expiration",

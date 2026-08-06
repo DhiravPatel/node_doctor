@@ -34,6 +34,8 @@ export type Command =
   | "churn"
   | "review"
   | "readiness"
+  | "change-shape"
+  | "i18n"
   | "version";
 
 // "rules" is accepted as a legacy alias for "diagnostics"; "observe" for
@@ -55,6 +57,10 @@ const COMMAND_ALIASES: Record<string, Command> = {
   routing: "review",
   ops: "readiness",
   "launch-review": "readiness",
+  "diff-shape": "change-shape",
+  "risky-edits": "change-shape",
+  locales: "i18n",
+  l10n: "i18n",
 };
 
 const COMMANDS = new Set<string>([
@@ -102,6 +108,12 @@ const COMMANDS = new Set<string>([
   "readiness",
   "ops",
   "launch-review",
+  "change-shape",
+  "diff-shape",
+  "risky-edits",
+  "i18n",
+  "locales",
+  "l10n",
   "version",
   "rules",
 ]);

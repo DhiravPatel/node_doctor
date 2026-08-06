@@ -145,6 +145,17 @@ export type {
   ReadinessStatus,
   ReadinessLabel,
 } from "./core/readiness.ts";
+// §159 — Suspicious change shapes: edits that deserve a second look because of
+// their shape, reported as review priority and never as a finding.
+export { buildChangeShapeReport } from "./core/change-shape.ts";
+export type { ChangeShapeReport, ChangeNote, ChangePriority, ChangeShapeOptions } from "./core/change-shape.ts";
+// Shared git plumbing: running git safely + parsing a unified diff.
+export { gitRun, gitStdout, gitContext, rebaseToScanRoot, parseUnifiedDiff, diffFilePath } from "./core/git-history.ts";
+export type { GitResult, GitUnavailable, DiffLine, DiffHunk, FileDiff } from "./core/git-history.ts";
+// §181 — i18n & user-string integrity: keys referenced with no translation,
+// placeholders that no longer match, and (only when provable) dead entries.
+export { buildI18nReport } from "./core/i18n.ts";
+export type { I18nReport, MissingKey, PlaceholderMismatch, UnusedKeyDetection } from "./core/i18n.ts";
 // §77 — OpenAPI Generation From Code: a spec derived from the actual routes, so
 // it cannot drift from the code that serves it.
 export { buildOpenApiDocument } from "./core/openapi.ts";
@@ -163,6 +174,7 @@ export { defineDiagnostic, CATEGORIES, SEVERITIES, PLUGIN } from "./core/types.t
 export type {
   Diagnostic,
   DiagnosticContext,
+  CommentNode,
   Finding,
   Category,
   Severity,

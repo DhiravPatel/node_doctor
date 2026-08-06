@@ -605,6 +605,149 @@ export const renderReadiness = (
   return lines.join("\n");
 };
 
+/**
+ * §159 — the change-shape report.
+ *
+ * Deliberately reads as a reviewer's note, not as a lint result: no score, no
+ * severity glyphs borrowed from the finding vocabulary, and every shape prints
+ * WHY it matters rather than assuming the reader already knows. An unreadable
+ * diff says so in words — it must never render like a clean one.
+ */
+/**
+ * §181 — the locale-integrity report.
+ *
+ * A suppressed unused-key list prints the REASON rather than an empty section:
+ * "we found none" and "we could not look" are different answers, and only one
+ * of them means the translations are clean.
+ */
+export const renderI18n = (
+  report: import("../core/i18n.ts").I18nReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  if (!report.localesPresent) {
+    lines.push(p.dim("  No locale files found — this project does not appear to be translated."));
+    lines.push(
+      p.dim("  (Locale files are JSON under a `locales/`, `i18n/`, `lang/` or `translations/` directory,"),
+    );
+    lines.push(p.dim("   named for a language tag, whose leaves are all strings.)"));
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  lines.push(
+    `  ${p.bold("Locale integrity")}  ${p.dim(
+      `${report.localeFiles.length} file(s) · default \`${report.defaultLocale}\` · ${report.summary.keysDefined} key(s)`,
+    )}`,
+  );
+  lines.push("");
+
+  if (report.missingKeys.length > 0) {
+    lines.push(`  ${p.red("✖")} ${p.bold("Referenced with no translation")}`);
+    for (const m of report.missingKeys.slice(0, 20)) {
+      const hint = m.suggestion ? p.dim(`  did you mean \`${m.suggestion}\`?`) : "";
+      lines.push(`      ${p.cyan(`${m.normalizedFilePath}:${m.line}`)}  \`${m.key}\`${hint}`);
+    }
+    if (report.missingKeys.length > 20) {
+      lines.push(p.dim(`      … ${report.missingKeys.length - 20} more`));
+    }
+    lines.push(p.dim("      A key with no entry renders blank — or as the key itself — to the user."));
+    lines.push("");
+  }
+
+  if (report.placeholderMismatches.length > 0) {
+    lines.push(`  ${p.red("✖")} ${p.bold("Placeholder never supplied")}`);
+    for (const m of report.placeholderMismatches.slice(0, 20)) {
+      lines.push(
+        `      ${p.cyan(`${m.normalizedFilePath}:${m.line}`)}  \`${m.key}\` needs ${m.missing
+          .map((n) => `\`${n}\``)
+          .join(", ")}`,
+      );
+      lines.push(p.dim(`          "${m.translation}"`));
+    }
+    if (report.placeholderMismatches.length > 20) {
+      lines.push(p.dim(`      … ${report.placeholderMismatches.length - 20} more`));
+    }
+    lines.push("");
+  }
+
+  lines.push(
+    p.dim(
+      "  Dead translations are deliberately not reported: a key is reachable from `<Trans i18nKey>`,",
+    ),
+  );
+  lines.push(
+    p.dim(
+      "  from a .vue/.svelte template, from a prop-drilled `t`, and from `$t()` nested inside another",
+    ),
+  );
+  lines.push(p.dim("  string — none of which this can see, and the action on a wrong claim is to delete copy."));
+  lines.push("");
+
+  if (report.summary.missing + report.summary.mismatched === 0) {
+    lines.push(p.green("  ✔ Every referenced key resolves, and every placeholder is supplied."));
+    lines.push("");
+  }
+
+  return lines.join("\n");
+};
+
+export const renderChangeShape = (
+  report: import("../core/change-shape.ts").ChangeShapeReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  if (!report.available) {
+    lines.push(`  ${p.yellow("●")} Change shapes unavailable — ${report.unavailableReason}.`);
+    lines.push(p.dim("    This is not the same as a clean diff."));
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  lines.push(
+    `  ${p.bold("Change shapes")}  ${p.dim(`${report.range} · ${report.summary.filesExamined} of ${report.summary.filesChanged} file(s) examined`)}`,
+  );
+  lines.push("");
+
+  if (report.summary.untrackedFilesNotExamined > 0) {
+    lines.push(
+      p.yellow(
+        `  ● ${report.summary.untrackedFilesNotExamined} untracked file(s) were NOT examined — a working-tree diff cannot see them.`,
+      ),
+    );
+    lines.push("");
+  }
+
+  if (report.notes.length === 0) {
+    lines.push(p.green("  ✔ No edit in this change set matched a shape worth flagging."));
+    lines.push(p.dim("    (This says nothing about whether the code is correct — run a scan for that.)"));
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  for (const note of report.notes) {
+    const mark = note.priority === "review-closely" ? p.yellow("⚠") : p.dim("·");
+    const where =
+      note.line > 0 ? p.cyan(`${note.normalizedFilePath}:${note.line}`) : p.cyan(note.normalizedFilePath);
+    lines.push(`  ${mark} ${note.message}`);
+    lines.push(`      ${where}  ${p.dim(note.shape)}`);
+    lines.push(`      ${p.dim(note.why)}`);
+    lines.push("");
+  }
+
+  lines.push(
+    p.dim(
+      `  ${report.summary.reviewClosely} to review closely · ${report.summary.notable} notable. These are shapes, not defects — they raise attention, never a verdict.`,
+    ),
+  );
+  lines.push("");
+  return lines.join("\n");
+};
+
 export const renderChurn = (
   churn: import("../core/churn.ts").ChurnReport,
   ranked: Array<{ churn: number; finding: { diagnostic: string; normalizedFilePath?: string; line: number; severity: string } }>,
