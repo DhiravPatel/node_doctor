@@ -276,6 +276,7 @@ node-doctor review <files…> | --diff [base]     who should review this, and ho
 node-doctor readiness [directory]               can this ship? shutdown, probes, timeouts, limits — from evidence
 node-doctor change-shape [--diff <base>]        edits whose SHAPE deserves a second look (auth one-liners, unpinned deps)
 node-doctor i18n [directory]                    locale integrity: missing keys, broken placeholders, dead translations
+node-doctor node-upgrade [--target N]           what breaks on a Node upgrade, and what the runtime now ships natively
 node-doctor paths [directory]                   source→sink attack paths (exploitability proof)
 node-doctor context [dir] [--write]             find files an AI agent must not read; --write fences them off
 node-doctor sbom [--framework spdx]             CycloneDX / SPDX bill of materials

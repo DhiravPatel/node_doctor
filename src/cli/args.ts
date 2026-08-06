@@ -36,6 +36,7 @@ export type Command =
   | "readiness"
   | "change-shape"
   | "i18n"
+  | "node-upgrade"
   | "version";
 
 // "rules" is accepted as a legacy alias for "diagnostics"; "observe" for
@@ -61,6 +62,8 @@ const COMMAND_ALIASES: Record<string, Command> = {
   "risky-edits": "change-shape",
   locales: "i18n",
   l10n: "i18n",
+  upgrade: "node-upgrade",
+  "node-version": "node-upgrade",
 };
 
 const COMMANDS = new Set<string>([
@@ -114,6 +117,9 @@ const COMMANDS = new Set<string>([
   "i18n",
   "locales",
   "l10n",
+  "node-upgrade",
+  "upgrade",
+  "node-version",
   "version",
   "rules",
 ]);
@@ -159,6 +165,8 @@ export interface ParsedArgs {
   blocking: "error" | "warning" | "none";
   ignoreTags: string[];
   only?: string;
+  /** (node-upgrade) the Node major to plan for. */
+  target?: string;
   diff?: string; // "" means "--diff with no base"
   staged: boolean;
   /** Run type-aware diagnostics (needs a TypeScript compiler in the project). */
@@ -230,6 +238,7 @@ const VALUE_FLAGS = new Set([
   "--tag",
   "--framework",
   "--project",
+  "--target",
 ]);
 
 const asBlocking = (value: string, errors: string[]): "error" | "warning" | "none" => {
@@ -565,6 +574,9 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
           break;
         case "--framework":
           result.framework = value;
+          break;
+        case "--target":
+          result.target = value;
           break;
         case "--project":
           if (!result.projectFilter.includes(value)) result.projectFilter.push(value);

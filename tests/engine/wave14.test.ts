@@ -56,6 +56,63 @@ describe("no-deprecated-node-api", () => {
     for (const src of cases) expectSilent("no-deprecated-node-api", src);
   });
 
+  // An audit against Node's own `doc/api/deprecations.md` found this table
+  // overstating four different ways. A fact table entry that overstates is a
+  // false positive with a version number on it, so the STATUS is now pinned.
+  test("an end-of-life API says REMOVED, and names the release that removed it", () => {
+    const [f] = expectFires(
+      "no-deprecated-node-api",
+      `import crypto from "node:crypto"; crypto.createCipher("aes-256-cbc", secret);`,
+    );
+    assert.match(f!.message, /REMOVED in Node 22/);
+    assert.match(f!.message, /DEP0106/);
+    assert.match(f!.message, /throws, it does not warn/);
+  });
+
+  test("a runtime deprecation is NOT described as removed", () => {
+    // `util.isArray` survived the Node 23 purge that took its siblings.
+    const [f] = expectFires("no-deprecated-node-api", `import util from "node:util"; util.isArray(x);`);
+    assert.match(f!.message, /runtime-deprecated since Node 22/);
+    assert.doesNotMatch(f!.message, /REMOVED/);
+  });
+
+  test("a documentation-only deprecation promises no removal", () => {
+    const [f] = expectFires("no-deprecated-node-api", `import fs from "node:fs"; fs.exists(p, cb);`);
+    assert.match(f!.message, /no removal is scheduled/);
+    assert.doesNotMatch(f!.message, /REMOVED/);
+  });
+
+  test("`new Buffer()` is not claimed to be removed — it never was", () => {
+    const [f] = expectFires("no-deprecated-node-api", `const b = new Buffer(10);`);
+    assert.match(f!.message, /DEP0005/);
+    assert.doesNotMatch(f!.message, /removed/i, "Buffer() is alive on main; saying otherwise is a false claim");
+  });
+
+  test("the newly verified end-of-life entries fire", () => {
+    for (const [src, expected] of [
+      [`import util from "node:util"; util.isString(x);`, /REMOVED in Node 23/],
+      [`import tls from "node:tls"; tls.createSecurePair(s);`, /REMOVED in Node 24/],
+      [`import timers from "node:timers"; timers.enroll(o, 5);`, /REMOVED in Node 24/],
+      [`import os from "node:os"; os.tmpDir();`, /REMOVED in Node 14/],
+      [`import mod from "node:module"; mod.createRequireFromPath(p);`, /REMOVED in Node 16/],
+      [`import nodeUtil from "node:util"; nodeUtil.isString(x);`, /REMOVED in Node 23/],
+      [`import net from "node:net"; net._setSimultaneousAccepts(true);`, /REMOVED in Node 24/],
+    ] as Array<[string, RegExp]>) {
+      const [f] = expectFires("no-deprecated-node-api", src);
+      assert.match(f!.message, expected, src);
+    }
+  });
+
+  test("the new receivers still require a real built-in binding", () => {
+    for (const src of [
+      `import tls from "./my-tls.ts"; tls.createSecurePair(s);`,
+      `const timers = makeTimers(); timers.enroll(o, 5);`,
+      `export const f = (net) => net._setSimultaneousAccepts(true);`,
+    ]) {
+      expectSilent("no-deprecated-node-api", src);
+    }
+  });
+
   test("silent when Buffer is a local class, import, or parameter", () => {
     expectSilent("no-deprecated-node-api", `class Buffer { constructor(n) { this.n = n; } }\nexport const r = (n) => new Buffer(n);`);
     expectSilent("no-deprecated-node-api", `const { Buffer } = require("./ring");\nexport const r = new Buffer(1024);`);

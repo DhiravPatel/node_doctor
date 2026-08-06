@@ -55,7 +55,7 @@ describe("JSON reporter", () => {
   test("is stable and pins the schema version", async () => {
     const report = await scanProject({ rootDirectory: agentApp });
     const json = toJson(report);
-    assert.equal(JSON.parse(json).schemaVersion, 2);
+    assert.equal(JSON.parse(json).schemaVersion, 3);
     assert.equal(toJson(report), json); // idempotent
   });
 });

@@ -88,7 +88,7 @@ describe("parseArgs — engine controls + guards", () => {
 describe("json reporter", () => {
   const fakeReport = {
     schemaVersion: 2,
-    project: { name: "x", rootDirectory: "/x", capabilities: [], analyzedFileCount: 0, totalLines: 0, complete: true, parseFailures: [] },
+    project: { name: "x", rootDirectory: "/x", capabilities: [], analyzedFileCount: 0, totalLines: 0, files: [], complete: true, parseFailures: [] },
     diagnosticsRun: 0,
     diagnosticsAvailable: 0,
     findings: [],
@@ -104,7 +104,7 @@ describe("json reporter", () => {
     assert.equal(parsed.error.message, "boom");
     assert.deepEqual(parsed.findings, []);
     assert.equal(parsed.score, null);
-    assert.equal(parsed.schemaVersion, 2);
+    assert.equal(parsed.schemaVersion, 3);
   });
 });
 

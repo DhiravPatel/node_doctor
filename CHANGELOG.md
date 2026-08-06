@@ -98,6 +98,76 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Node upgrade planning — `node-doctor node-upgrade` (§83)
+
+- **`node-doctor node-upgrade [dir] [--target <major>]`** (aliases `upgrade`,
+  `node-version`) — the two questions a team asks before bumping the runtime.
+  **What breaks:** which APIs this code calls are *gone* at the target major.
+  Delegated to `no-deprecated-node-api`, and only its `end-of-life` entries
+  count — a runtime deprecation warns, it does not break, and reporting it as a
+  break is how a team decides not to upgrade for a reason that is not real.
+  **What you can delete:** which dependencies the target runtime ships natively.
+  Every entry carries a **version window rather than a `>=`** (Node backports
+  stabilizations to the previous LTS, so `--env-file` is stable on 22.21 and
+  24.10 but *not* on 23.x), **call-site evidence** (`uuid` only if every import
+  is v4, `rimraf` only if no call passes options or a glob, `dotenv` only if
+  nothing calls `parse`), a **direct-dependency requirement** (`glob` and
+  `abort-controller` are transitive in a huge share of tooling), and a **caveat
+  that always prints** — "you can delete node-fetch" is only true with
+  "…unless you pipe `res.body`" attached. A browser or React Native target
+  suppresses the `fetch`/`AbortController` entries outright. Exits 1 on a break,
+  0 on an opportunity.
+
+### Fixed — `no-deprecated-node-api` was making wrong version claims (§83)
+
+- An audit against Node's own `doc/api/deprecations.md` found the shipped table
+  **overstating four different ways**, each of which put a false claim in front of
+  a user with a version number attached:
+  - **`new Buffer()` was described as "deprecated and removed".** It has never
+    been removed and is alive on `main`; it is application-scope deprecated
+    (DEP0005) and warns outside `node_modules`.
+  - **`crypto.createCipher` was dated "Node 10"** — its *documentation-only*
+    date. The removal was **Node 22**, which is the fact that matters.
+  - **`util.isFunction` / `util.isNullOrUndefined` were dated "Node 4"** and are
+    removed as of **Node 23**.
+  - **`url.parse` cited a deprecation Node later REVOKED** (DEP0116). The current
+    citation is DEP0169, runtime as of Node 24.
+  Every entry now carries a **status** — `end-of-life`, `runtime`, `application`,
+  or `documentation-only` — and the message says which. Only an end-of-life entry
+  may claim "this breaks when you upgrade"; a documentation-only one now states
+  that no removal is scheduled. The table grew from 13 entries to 39, all
+  verified against Node's deprecation list, and the receiver is resolved through
+  the **binding** rather than assumed from the local name, so
+  `import nodeUtil from "node:util"` is no longer silently missed.
+
+### Report data — per-module analysis without a new command (§35)
+
+- **`ScanReport.project.files`** — per-file line counts (**schema v3**, additive).
+  The scan summed them away, so a consumer could group findings by directory but
+  had no denominator: "which module is worst" was unanswerable from the report.
+- **`ArchitectureReport.modules`** — every module's fan-in *and* fan-out.
+  `hubs` deliberately cuts at a threshold and a top-10 slice, which makes it
+  unusable as a data source; both numbers were already in scope.
+- A `metrics` **command was assessed and deliberately not shipped**: every
+  per-module claim about findings is already derivable from `scan --json` plus
+  the exported weight constants, and a 33rd command that repackages existing JSON
+  is not a feature. A per-module *score* is also withheld — at 100 weighted
+  points/kLOC one Security error in a 60-line file scores 0/100, and without a
+  minimum-lines floor that is a false positive wearing a number.
+
+### Assessed and not shipped — Bun/Deno runtime diagnostics (§94)
+
+- Researched against both vendors' current compatibility pages and rejected on
+  three grounds: the `bun` capability turns on from a lockfile, and Bun's largest
+  use is as an npm client *for apps that ship on Node*, so the rule would tell the
+  majority of Bun users their runtime is broken; both compatibility tables are
+  regenerated continuously toward *closing* gaps, so a table baked into a release
+  decays into false positives (Node's deprecation list, by contrast, is
+  append-only history); and the two runtimes differ on the same module in opposite
+  directions — `cluster` and `trace_events` work on Bun and are stubs on Deno — so
+  any merged message is wrong about half the time. Detection stays Core; the
+  diagnostics stay unshipped rather than shipped stale.
+
 ### Suspicious change shapes — `node-doctor change-shape` (§159)
 
 - **`node-doctor change-shape [--diff <base> | --staged]`** (aliases `diff-shape`,

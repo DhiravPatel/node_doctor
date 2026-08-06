@@ -49,7 +49,11 @@ import { toolVersion } from "./version.ts";
 /** Every text-scan diagnostic: committed secrets + infrastructure config. */
 
 
-export const SCHEMA_VERSION = 2;
+/**
+ * 3 — `project.files` (per-file line counts) was added so a consumer can compute
+ * a per-module density. Additive: every v2 consumer still reads a v3 report.
+ */
+export const SCHEMA_VERSION = 3;
 
 /** JSON with deterministic key order — so a config hash is stable across runs. */
 const stableStringify = (value: unknown): string => {
@@ -106,6 +110,16 @@ export interface ScanReport {
     capabilities: string[];
     analyzedFileCount: number;
     totalLines: number;
+    /**
+     * Per-file line counts, in sorted path order.
+     *
+     * The project total alone makes a per-module density impossible to compute:
+     * a consumer can group findings by directory but has no denominator, so
+     * "which module is worst" cannot be answered from the report. Emitting the
+     * counts costs one line per file and keeps that analysis client-side rather
+     * than forcing a command for it.
+     */
+    files: Array<{ normalizedFilePath: string; lines: number }>;
     complete: boolean;
     parseFailures: ParseFailure[];
     /** Evidence keys silenced by inline `node-doctor-disable` directives. */
@@ -618,6 +632,7 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
   const moduleFactsList: ModuleFacts[] = [];
   let totalLines = 0;
   let analyzedFileCount = 0;
+  const fileLines: Array<{ normalizedFilePath: string; lines: number }> = [];
   const suppressedKeys = new Set<string>();
 
   // Content-hash cache setup.
@@ -745,6 +760,7 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
     if (!r) continue;
     analyzedFileCount += 1;
     totalLines += r.totalLines;
+    fileLines.push({ normalizedFilePath: r.normalizedFilePath, lines: r.totalLines });
     pending.push(...r.pending);
     for (const key of r.suppressedKeys) suppressedKeys.add(key);
     if (r.moduleFacts) moduleFactsList.push(r.moduleFacts);
@@ -863,6 +879,7 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
       rootDirectory,
       capabilities: [...project.capabilities].sort(),
       analyzedFileCount,
+      files: fileLines,
       totalLines,
       complete: parseFailures.length === 0 && !timedOut,
       // §161 — findings an inline directive silenced. They are absent from

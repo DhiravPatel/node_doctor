@@ -620,6 +620,59 @@ export const renderReadiness = (
  * "we found none" and "we could not look" are different answers, and only one
  * of them means the translations are clean.
  */
+/**
+ * §83 — the Node upgrade report.
+ *
+ * The caveat prints with every redundancy, never behind a flag or a `--verbose`.
+ * "You can delete node-fetch" is only true with "…unless you pipe `res.body`"
+ * attached, and a reader who acts on the first half alone has been misled by a
+ * true sentence.
+ */
+export const renderNodeUpgrade = (
+  report: import("../core/node-upgrade.ts").NodeUpgradeReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  const declared = report.declaredNodeMajor === null ? "not declared" : `engines.node ${report.declaredNodeMajor}`;
+  lines.push(`  ${p.bold("Node upgrade")}  ${p.dim(`target Node ${report.target} · ${declared}`)}`);
+  lines.push("");
+
+  if (report.breaks.length > 0) {
+    lines.push(`  ${p.red("✖")} ${p.bold(`${report.breaks.length} call(s) that do NOT exist on Node ${report.target}`)}`);
+    lines.push(p.dim("      These throw on the first execution after the upgrade — they do not warn."));
+    lines.push("");
+    for (const b of report.breaks.slice(0, 20)) {
+      lines.push(`      ${p.cyan(`${b.normalizedFilePath}:${b.line}`)}  \`${b.api}\`  ${p.dim(`removed in Node ${b.removedIn}`)}`);
+    }
+    if (report.breaks.length > 20) lines.push(p.dim(`      … ${report.breaks.length - 20} more`));
+    lines.push("");
+  } else {
+    lines.push(p.green(`  ✔ No removed API is called — nothing here breaks on Node ${report.target}.`));
+    lines.push("");
+  }
+
+  if (report.redundant.length > 0) {
+    lines.push(`  ${p.bold(`${report.redundant.length} dependenc(ies) Node ${report.target} makes redundant`)}`);
+    lines.push("");
+    for (const r of report.redundant) {
+      lines.push(`      ${p.yellow("→")} ${p.bold(r.package)}  ${p.dim(`replaced by ${r.builtin} · ${r.requires}`)}`);
+      lines.push(`        ${p.dim(r.caveat)}`);
+      for (const s of r.sites) lines.push(`        ${p.dim("·")} ${p.cyan(s)}`);
+      lines.push("");
+    }
+  }
+
+  if (report.notes.length > 0) {
+    lines.push(p.dim("  Not assessed:"));
+    for (const n of report.notes) lines.push(p.dim(`      · ${n}`));
+    lines.push("");
+  }
+
+  return lines.join("\n");
+};
+
 export const renderI18n = (
   report: import("../core/i18n.ts").I18nReport,
   options: { color?: boolean } = {},

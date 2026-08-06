@@ -28,7 +28,7 @@ describe("agent-fix prompt builder", () => {
     const report = {
       schemaVersion: 2,
       provenance: { toolVersion: "0.0.0", rulesetHash: "t", configHash: "t", capabilities: [] },
-      project: { name: "x", rootDirectory: "/x", capabilities: ["node"], analyzedFileCount: 1, totalLines: 10, complete: true, parseFailures: [], suppressedKeys: [] },
+      project: { name: "x", rootDirectory: "/x", capabilities: ["node"], analyzedFileCount: 1, totalLines: 10, files: [], complete: true, parseFailures: [], suppressedKeys: [] },
       diagnosticsRun: 1,
       diagnosticsAvailable: 1,
       findings: [

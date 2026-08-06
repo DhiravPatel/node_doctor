@@ -58,6 +58,7 @@ const report = (findings: Finding[], score: number): ScanReport => ({
     capabilities: ["node"],
     analyzedFileCount: 1,
     totalLines: 100,
+    files: [],
     complete: true,
     parseFailures: [],
     suppressedKeys: [],

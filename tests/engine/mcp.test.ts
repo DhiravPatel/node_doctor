@@ -35,7 +35,7 @@ describe("MCP server", () => {
     })) as any;
     assert.ok(!r.result.isError);
     assert.match(r.result.content[0].text, /100\/100 \(healthy\)/);
-    assert.match(r.result.content[0].text, /"schemaVersion": 2/);
+    assert.match(r.result.content[0].text, /"schemaVersion": 3/);
   });
 
   test("tools/call node_doctor_explain returns the diagnostic fix", async () => {

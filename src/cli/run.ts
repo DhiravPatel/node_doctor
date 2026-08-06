@@ -24,7 +24,7 @@ import { installGitHook } from "../install/git-hook.ts";
 import { scanProject } from "../core/scan.ts";
 import type { ScanReport } from "../core/scan.ts";
 import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
-import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver, renderOpenApi, renderArchitecture, renderChurn, renderReviewRouting, renderReadiness, renderChangeShape, renderI18n } from "../report/terminal.ts";
+import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver, renderOpenApi, renderArchitecture, renderChurn, renderReviewRouting, renderReadiness, renderChangeShape, renderI18n, renderNodeUpgrade } from "../report/terminal.ts";
 import { scanAgentContext, applyContextHygiene } from "../core/agent-context.ts";
 import { isWorkspaceRoot, scanWorkspaces, workspaceFindings, discoverWorkspaces } from "../core/workspaces.ts";
 import { toJson, toJsonError } from "../report/json.ts";
@@ -62,6 +62,7 @@ import { buildReviewRouting } from "../core/review-routing.ts";
 import { buildReadinessReport, collectReadinessEvidence } from "../core/readiness.ts";
 import { buildChangeShapeReport } from "../core/change-shape.ts";
 import { buildI18nReport } from "../core/i18n.ts";
+import { buildNodeUpgradeReport, UPGRADE_TARGETS } from "../core/node-upgrade.ts";
 import { buildImpactGraph, computeImpact } from "../core/impact.ts";
 import { collectAttackPaths } from "../core/attack-paths.ts";
 import { loadCodeowners, groupByOwner, scorePrRisk } from "../core/ownership.ts";
@@ -309,6 +310,7 @@ Usage:
   node-doctor readiness [dir]            Can this ship? Shutdown, probes, timeouts, limits — from evidence
   node-doctor change-shape [--diff <b>]  Edits whose SHAPE deserves a second look (auth one-liners, unpinned deps)
   node-doctor i18n [dir]                 Locale integrity: missing keys, broken placeholders, dead translations
+  node-doctor node-upgrade [--target N]  What breaks on a Node upgrade, and what the runtime now ships natively
   node-doctor context [dir] [--write]    Find files an AI agent must not read; --write fences them off
   node-doctor deslop [directory]         Dead-code scan (unused files/exports/deps)
   node-doctor explain <diagnostic-id>          Explain a diagnostic and its fix
@@ -1734,6 +1736,50 @@ const runI18n = async (args: ParsedArgs): Promise<number> => {
   return report.summary.missing + report.summary.mismatched > 0 ? 1 : 0;
 };
 
+/**
+ * §83 — what breaks on a Node upgrade, and what the target runtime now ships
+ * natively. The "breaks" half is read out of a real scan rather than guessed:
+ * only `no-deprecated-node-api` entries whose status is end-of-life count, and
+ * that table is verified against Node's own deprecation list.
+ */
+const runNodeUpgrade = async (args: ParsedArgs): Promise<number> => {
+  const { dir, config } = await resolveScanTarget(args);
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) {
+    process.stderr.write(`node-doctor node-upgrade: "${args.positionals[0] ?? "."}" is not a directory\n`);
+    return 2;
+  }
+
+  const requested = args.target === undefined ? undefined : Number(args.target);
+  if (requested !== undefined && (!Number.isInteger(requested) || requested < 14 || requested > 99)) {
+    process.stderr.write(`node-doctor node-upgrade: --target must be a Node major, e.g. ${UPGRADE_TARGETS.join(" / ")}\n`);
+    return 2;
+  }
+
+  const report = await scanProject({
+    rootDirectory: dir,
+    config,
+    ignoredTags: new Set(args.ignoreTags),
+    cache: args.cache,
+    parallel: args.parallel,
+    secrets: false,
+  });
+
+  const out = await buildNodeUpgradeReport(dir, {
+    config,
+    target: requested,
+    findings: report.findings,
+  });
+
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(out) : JSON.stringify(out, null, 2)) + "\n");
+  } else {
+    process.stdout.write(renderNodeUpgrade(out, { color: useColor(args) }));
+  }
+  // A removed API is a real break at the target version; a redundant dependency
+  // is an opportunity and never gates.
+  return out.breaks.length > 0 ? 1 : 0;
+};
+
 const runFix = async (args: ParsedArgs, version: string): Promise<number> => {
   const dir = resolve(args.positionals[0] ?? ".");
   const only = await resolveOnly(args, dir);
@@ -1831,6 +1877,8 @@ export const main = async (argv: string[]): Promise<number> => {
         return await runArchitecture(args);
       case "churn":
         return await runChurn(args);
+      case "node-upgrade":
+        return await runNodeUpgrade(args);
       case "i18n":
         return await runI18n(args);
       case "change-shape":

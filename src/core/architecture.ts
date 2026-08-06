@@ -65,10 +65,29 @@ export interface HubModule {
   dependents: number;
 }
 
+/** Per-module graph position — the inputs a metrics view needs. */
+export interface ModuleDegree {
+  file: string;
+  /** In-project modules that import this one. */
+  fanIn: number;
+  /** In-project modules this one imports. */
+  fanOut: number;
+}
+
 export interface ArchitectureReport {
   cycles: ImportCycle[];
   layerViolations: LayerViolation[];
   hubs: HubModule[];
+  /**
+   * Every module's fan-in and fan-out, sorted by fan-in descending.
+   *
+   * `hubs` answers "what is a hub" and deliberately cuts at a threshold and a
+   * top-10 slice. That cliff makes the report unusable as a data source: a
+   * consumer asking "rank my modules by coupling" gets ten rows and no way to
+   * see the rest. Both numbers are already in scope when the hubs are computed,
+   * so emitting them costs nothing and keeps a metrics view client-side.
+   */
+  modules: ModuleDegree[];
   summary: {
     modules: number;
     edges: number;
@@ -285,12 +304,24 @@ export const buildArchitectureReport = async (
     .sort((a, b) => b.dependents - a.dependents || (a.file < b.file ? -1 : 1))
     .slice(0, MAX_HUBS);
 
+  // Every module the graph knows about — a file with no imports of its own
+  // still appears if something imports it.
+  const everyModule = new Set<string>([...edges.keys(), ...dependents.keys()]);
+  const modules: ModuleDegree[] = [...everyModule]
+    .map((file) => ({
+      file,
+      fanIn: dependents.get(file) ?? 0,
+      fanOut: edges.get(file)?.size ?? 0,
+    }))
+    .sort((a, b) => b.fanIn - a.fanIn || b.fanOut - a.fanOut || (a.file < b.file ? -1 : 1));
+
   const unlayeredModules = [...edges.keys()].filter((f) => layerFor(f) === null).length;
 
   return {
     cycles,
     layerViolations: violations,
     hubs,
+    modules,
     summary: {
       modules: edges.size,
       edges: edgeCount,

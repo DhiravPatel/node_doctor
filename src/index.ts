@@ -124,7 +124,7 @@ export type { ApiSemverReport, PackageSurface, SemverChange, SemverVerdict } fro
 // §33 — Architecture Analysis: import cycles (a runtime hazard), layer
 // violations, and hub modules, all from the project import graph.
 export { buildArchitectureReport } from "./core/architecture.ts";
-export type { ArchitectureReport, ImportCycle, LayerViolation, HubModule } from "./core/architecture.ts";
+export type { ArchitectureReport, ImportCycle, LayerViolation, HubModule, ModuleDegree } from "./core/architecture.ts";
 // §160 — Churn-weighted risk: git history re-orders findings by where change
 // (and therefore regression) actually concentrates. Adds no claims.
 export { buildChurnReport, weightByChurn, DEFAULT_COMMIT_WINDOW } from "./core/churn.ts";
@@ -156,6 +156,15 @@ export type { GitResult, GitUnavailable, DiffLine, DiffHunk, FileDiff } from "./
 // placeholders that no longer match, and (only when provable) dead entries.
 export { buildI18nReport } from "./core/i18n.ts";
 export type { I18nReport, MissingKey, PlaceholderMismatch, UnusedKeyDetection } from "./core/i18n.ts";
+// §83 — Node version upgrade: which removed APIs this code calls at a target
+// major, and which dependencies that runtime makes redundant (with caveats).
+export { buildNodeUpgradeReport, UPGRADE_TARGETS } from "./core/node-upgrade.ts";
+export type {
+  NodeUpgradeReport,
+  UpgradeBreak,
+  RedundantDependency,
+  NodeUpgradeOptions,
+} from "./core/node-upgrade.ts";
 // §77 — OpenAPI Generation From Code: a spec derived from the actual routes, so
 // it cannot drift from the code that serves it.
 export { buildOpenApiDocument } from "./core/openapi.ts";

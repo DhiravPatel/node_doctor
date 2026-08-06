@@ -421,7 +421,16 @@ Prisma, Sequelize, TypeORM, Mongoose, Knex, MikroORM, Objection.js, Drizzle ORM.
 Singleton, Factory, Repository, Strategy, Observer, Decorator, Builder, Adapter — detection and (where relevant) misuse flags.
 
 ## 35. Code Metrics
-**Status: Planned** for the numeric metrics; **Vision** for the graph/technical-debt aggregations feeding dashboards.
+**Status: Core** for the data; **a `metrics` command was assessed and WILL NOT SHIP.**
+
+Every per-module claim about findings is already derivable from `scan --json`: each finding carries its path, category, severity and tags, and the scoring weights are exported constants. Findings per directory, weighted points per directory, category mix, worst files — all of it is a `jq` away, and cycles and hubs come from `architecture --json`. A command that repackages existing JSON is not a feature.
+
+**The real gap was a data gap, and it is closed.** Two emissions were missing, and without them a per-module view was impossible rather than merely inconvenient:
+
+- **`project.files`** — per-file line counts (schema v3, additive). The scan summed them away, so a consumer could group findings by directory but had no denominator; "which module is worst" was unanswerable from the report.
+- **`architecture.modules`** — every module's fan-in *and* fan-out. `hubs` deliberately cuts at a threshold and a top-10 slice, which makes it useless as a data source; both numbers were already in scope when the hubs were computed.
+
+A per-module *score* is deliberately still not offered. `calculateScore` applies to any subset unchanged, but at 100 weighted-points/kLOC one Security error in a 60-line file scores 0/100 and is labelled critical — the same finding in a large project scores 99. Without a minimum-lines floor that is a false positive wearing a number, and choosing the floor needs a measured distribution nobody has.
 
 - Lines of code (LOC).
 - Complexity (cyclomatic/cognitive).
@@ -941,9 +950,15 @@ Schema linting, persisted-query enforcement, deprecation tracking, and resolver-
 Guided, codemod-backed migrations: Express→Fastify, callback→async, CJS→ESM, JS→TS, legacy→modern ORM. Especially valuable for teams modernizing legacy backends.
 
 ## 83. Node Version Upgrade Checker
-**Status: Planned**
+**Status: Core** (`node-doctor node-upgrade`, aliases `upgrade` / `node-version`) + **Detected** (`no-deprecated-node-api`)
 
-Flag APIs deprecated or removed across Node major versions, and surface new-version opportunities (native `fetch`, `AbortSignal.timeout`, the built-in test runner). The version-gating machinery this needs is already **Core** (§1).
+**Shipped as a command, answering the two questions a team actually asks before bumping the runtime.**
+
+**What breaks?** Which APIs this code calls are *gone* at the target major — not deprecated, gone, so the first request after the deploy throws. That half is delegated entirely to `no-deprecated-node-api`, and only its `end-of-life` entries count: a runtime deprecation warns, it does not break, and reporting it as a break is how a team decides not to upgrade for a reason that is not real.
+
+**What can I delete?** Which dependencies the target runtime now ships natively. This is the dangerous half, and every entry carries three gates plus a caveat that always prints. A **version window, never a `>=`** — Node backports stabilizations to the previous LTS, so `--env-file` is stable on 22.21 and 24.10 but *not* on 23.x, and a single lower bound would clear a version where the built-in is experimental. **Call-site evidence** — `uuid` is replaceable only if every import is v4, `rimraf` only if no call passes options or a glob, `dotenv` only if nothing calls `parse`; the dependency alone is never enough, because the package almost always does more than the built-in. And a **direct dependency** — `glob` and `abort-controller` are transitively present in a huge share of tooling, and a transitive package is nobody's to delete. A browser or React Native target suppresses the `fetch`/`AbortController` entries outright.
+
+**An audit of the shipped rule against Node's own `doc/api/deprecations.md` found it overstating four different ways, and every one is fixed.** `new Buffer()` was described as "deprecated and removed" when it has never been removed and is alive on `main`. `crypto.createCipher` was dated Node 10 — its *documentation-only* date — when the removal was Node 22. `util.isFunction` was dated Node 4 and removed in Node 23. And `url.parse` cited DEP0116, which Node later **revoked**. Each entry now carries its status — `end-of-life` / `runtime` / `application` / `documentation-only` — and only an end-of-life entry may say "this breaks when you upgrade". A fact table that overstates is a false positive with a version number on it. The table also grew from 13 entries to 39, and the receiver is now resolved through the *binding* rather than assumed from the local name, so `import nodeUtil from "node:util"` is no longer silently missed.
 
 ## 84. Dependency Major-Upgrade Codemods
 **Status: Vision**
@@ -1014,9 +1029,15 @@ Org-level policies (required diagnostics, minimum score, blocked licenses) enfor
 # Part XXIV — Ecosystem & Runtime Breadth
 
 ## 94. Bun & Deno First-Class Support
-**Status: Planned** — package-manager detection (including Bun) is **Core**; runtime-specific diagnostics are not.
+**Status: Core** for detection; **runtime-compatibility diagnostics assessed and WILL NOT SHIP as scoped.**
 
-Runtime-specific detection and rules for Bun (`Bun.serve`, `bun:sqlite`) and Deno (permissions, `Deno.serve`, std imports), not just Node.
+Package-manager and runtime detection (including Bun and Deno) is Core. The obvious next step — "this Node API does not work on your runtime" — was researched against both vendors' current compatibility pages and **rejected on three grounds**, each sufficient on its own:
+
+1. **The capability token does not prove the runtime.** `bun` turns on from a lockfile or `@types/bun`, and Bun's single largest use is as a drop-in npm client *for apps that ship on Node*. A rule gated on it would tell the majority of Bun users their runtime is broken, when their runtime is Node. `deno.json` is stronger but still fails scoping — Deno supports package.json and npm specifiers, so one file at a monorepo root would poison every Node workspace beneath it.
+2. **The fact source decays in the wrong direction.** Both compatibility tables are regenerated continuously by their vendors, and always toward *closing* gaps. A table baked into a released binary keeps saying "broken on Bun" after Bun ships it. Nothing in §83 has this property: Node's deprecation list is append-only history.
+3. **The two runtimes differ on the same module in opposite directions.** `trace_events` is fully implemented on Bun and a stub on Deno; `cluster` works on Bun and is a stub on Deno; `v8` heap snapshots work on Bun and throw on Deno. Any merged "does not work on Bun/Deno" message is a false claim roughly half the time.
+
+Shipping it would need a separate `runtime:bun` / `runtime:deno` token proven from code that *cannot* run on Node — a `bun:` import, a `Bun.*`/`Deno.*` global, or a start script running a source path under the runtime — never from a lockfile. That gate is buildable; the decaying fact table underneath it is not, so this stays unshipped rather than shipped stale.
 
 ## 95. Edge Runtime Analysis
 **Status: Planned**
