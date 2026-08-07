@@ -98,6 +98,44 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Hallucinated-API detection — `node-doctor api-check` (§206)
+
+- **`node-doctor api-check [dir]`** (aliases `hallucinated`, `check-api`) — a
+  member used on a package that the package does not export. `import { readJson }
+  from "fs-extra"` when the export is `readJSON` is **not a compile error** in
+  JavaScript: the import is `undefined` and the failure is a `TypeError` on the
+  first request that reaches the line. It is the commonest way agent-written code
+  is wrong, and no existing check sees it — the type checker only if the package
+  ships types *and* the project is strict, the linter never, the test suite only
+  if that path is covered.
+  Reuses §175's export-surface comparison and §155's `complete` flag. **Abstains
+  for the whole package** the moment the surface is not fully readable — a
+  partially-read surface makes every absent name suspect — with a stated reason
+  for each: not installed (so "I did not look" never reads as "clean"), an
+  unfollowable `export *`, a runtime-built `module.exports`, a types-only entry
+  (a `.d.ts` is a claim about the runtime, not the runtime), a **dual ESM/CJS
+  package whose entries export different names**, and any computed access.
+  Aliased imports are checked under their source name, a local binding shadows
+  the namespace import it collides with, and members off a *default* import are
+  not the named-export set. Exits 1 on a finding. Zero false claims across this
+  project's 407 files.
+
+### Diagnostics — worker-thread clone boundary (§190)
+
+- **`no-unclonable-worker-message`** (Bugs, error, opt-in) — a function literal
+  in a `postMessage` payload. `postMessage` runs the structured clone algorithm,
+  which throws `DataCloneError` on a function — synchronously, at the call, on
+  whichever path carries the callback.
+  The algorithm's rules are mostly undecidable from syntax (a `Map` clones, a
+  `Proxy` throws, a class instance loses its prototype), so the rule claims only
+  the decidable case. The receiver must be a **proven worker-thread port** — a
+  binding from `new Worker(…)` imported from `node:worker_threads`, or
+  `parentPort` — because `postMessage` is also on a `BroadcastChannel`, a
+  `MessagePort`, a browser `window` and userland emitters, and the browser's has
+  a different remedy. A bare identifier in the payload is never flagged, and the
+  walk stops at any nested function's body, which is not part of the cloned
+  structure. Zero findings across this project's 430 files.
+
 ### Diagnostics — peer-consistency (§164)
 
 - **`no-peer-inconsistent-handler`** (Reliability, opt-in, `confidence: medium`) —

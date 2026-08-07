@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 143,
+  "total": 144,
   "defaultOn": 95,
-  "optIn": 48,
+  "optIn": 49,
   "byCategory": {
     "Performance": 12,
     "Security": 60,
     "Maintainability": 15,
     "Reliability": 38,
-    "Bugs": 18
+    "Bugs": 19
   },
   "categoryWeights": {
     "Security": 2,
@@ -1861,6 +1861,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Store the handle and `clearInterval(handle)` on shutdown, or call `handle.unref()` so the interval does not by itself keep the process alive."
+    },
+    {
+      "id": "no-unclonable-worker-message",
+      "title": "Function posted across the worker boundary cannot be cloned",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "async",
+        "concurrency",
+        "crash"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Remove the function from the payload and coordinate over messages instead: post the data, and reply with `worker.once(\"message\", …)`. `postMessage` runs the structured clone algorithm, which throws `DataCloneError` on a function — synchronously, at the call, on whichever path carries the callback."
     },
     {
       "id": "no-unhandled-pipe-error",

@@ -17,7 +17,7 @@ falls over the moment two requests arrive at once.
 npx @dhiravpatel/node-doctor@latest .
 ```
 
-**[node-doctor.vercel.app](https://node-doctor.vercel.app/)** — browse all 143 diagnostics
+**[node-doctor.vercel.app](https://node-doctor.vercel.app/)** — browse all 144 diagnostics
 
 </div>
 
@@ -31,7 +31,7 @@ Express handler with no error path, a `readFileSync` on the request path, an N+1
 across a loop, a `Promise.all` that opens a socket per row, injection and
 secret-handling sinks.
 
-It runs **143 diagnostics** — including a whole-tree scan for **committed secrets**
+It runs **144 diagnostics** — including a whole-tree scan for **committed secrets**
 in `.env`, config, CI, and key files — produces a transparent **0–100 health
 score** entirely on your machine (no network, no telemetry), and can push the
 same knowledge **upstream into your coding agent** as an installable skill and an
@@ -74,7 +74,7 @@ Typical output on a codebase that needs help:
 
 ## Features
 
-- **143 diagnostics** across Security, Reliability, Bugs, Performance, and
+- **144 diagnostics** across Security, Reliability, Bugs, Performance, and
   Maintainability — each with a valid + invalid test; FP-prone ones are opt-in.
 - **Whole-tree secret scan** — committed credentials in `.env`, YAML/CI configs,
   and `*.pem`/`*.key` files, gated to git-tracked files so a local `.env` is safe.
@@ -278,6 +278,7 @@ node-doctor change-shape [--diff <base>]        edits whose SHAPE deserves a sec
 node-doctor i18n [directory]                    locale integrity: missing keys, broken placeholders, dead translations
 node-doctor node-upgrade [--target N]           what breaks on a Node upgrade, and what the runtime now ships natively
 node-doctor supply-chain [directory]            what runs at install time, and what did not come from the registry
+node-doctor api-check [directory]               members called on a package that the package does not export
 node-doctor paths [directory]                   source→sink attack paths (exploitability proof)
 node-doctor context [dir] [--write]             find files an AI agent must not read; --write fences them off
 node-doctor sbom [--framework spdx]             CycloneDX / SPDX bill of materials

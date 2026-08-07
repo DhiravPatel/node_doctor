@@ -26,6 +26,7 @@ import { noMissingCatchOnAsyncIife } from "../diagnostics/async/no-missing-catch
 import { noRaceWithoutTimeout } from "../diagnostics/async/no-race-without-timeout.ts";
 import { noSwallowedErrorEmptyCatch } from "../diagnostics/async/no-swallowed-error-empty-catch.ts";
 import { noUnboundedPromiseAll } from "../diagnostics/async/no-unbounded-promise-all.ts";
+import { noUnclonableWorkerMessage } from "../diagnostics/async/no-unclonable-worker-message.ts";
 import { requireFetchTimeout } from "../diagnostics/async/require-fetch-timeout.ts";
 // bugs
 import { noBigintPrecisionLoss } from "../diagnostics/bugs/no-bigint-precision-loss.ts";
@@ -168,6 +169,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noRaceWithoutTimeout,
   noSwallowedErrorEmptyCatch,
   noUnboundedPromiseAll,
+  noUnclonableWorkerMessage,
   requireFetchTimeout,
   // bugs
   noBigintPrecisionLoss,

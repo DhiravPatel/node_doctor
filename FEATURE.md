@@ -1826,3 +1826,189 @@ The pattern from every prior extension holds harder here — most of this is Vis
 Then, in a second wave: **§159 suspicious-change-shape** and **§160 churn-weighting**, because both are pure git-log reasoning on data CI already has and both make the tool sharper on exactly the changes that matter. **§178 comment-code contradiction** is the most on-thesis of the cross-artifact set — stale comments are what agents read and believe — and its machine-verifiable subset is precise enough to ship.
 
 The rest is a menu, and the same rule governs it that has governed all 184: a false positive in §164 or §173 would be worse than not shipping them, and the invariants — deterministic offline core, local score, precision-first, AI-as-optional-layer — hold across §159–§184 without exception.
+
+---
+
+# node.doctor — Features (Frontier / §185–§210)
+
+A sixth extension. Everything here is **net-new** against §1–§184 — verified against all five prior halves so nothing restates an existing rule, command, or deliberately-rejected idea. Same maturity legend (**Core** / **Detected** / **Planned** / **Vision**), the same **⚙️ Now / 🔧 Needs depth / 🛰 Needs infra** buildability tags, and the same invariants (deterministic + offline core, local score, precision-first, AI-as-optional-layer).
+
+> **Where the whitespace actually is at 184 sections.** The catalog now owns injection, the event loop, the data-access and queue graphs, the export/route surfaces, the AI-security pack, the agent loop, diff-shape reasoning, negative-space detection, and cross-artifact consistency. Six directions remain genuinely unexplored: the **build-and-bundle dimension** (what the code becomes, not what it is), the **concurrency-model dimension** (workers, clustering, shared memory), the **process-boundary dimension** (what crosses a spawn, an IPC channel, a signal), the **numerical-and-encoding dimension** (the layer below serialization), the **failure-injection dimension** (what the code does when its own primitives fail), and the **authoring-provenance dimension** (what the shape of the code says about how it was produced).
+>
+> **New parts:** XLIV Build & Bundle Semantics (§185–§189) · XLV Concurrency & Shared-Memory (§190–§194) · XLVI Process & IPC Boundaries (§195–§199) · XLVII Primitive-Failure Reasoning (§200–§204) · XLVIII Authoring Provenance & Shape (§205–§210).
+
+---
+
+# Part XLIV — Build & Bundle Semantics
+
+*Every rule so far analyzes source. This part analyzes the **gap between source and artifact** — what the bundler, the transpiler and the packager do to the code on the way to production, where a correct source file becomes an incorrect artifact.*
+
+## 185. Conditional-Export Resolution Correctness ★★ Flagship
+**Status: Planned** · ⚙️ Now
+
+A `package.json` `exports` map is a resolution program, and it is routinely wrong in ways that surface only for *some* consumers: a `require` condition pointing at ESM, an `import` condition pointing at CJS, a `types` condition ordered after `default` (so TypeScript silently never sees it), a subpath resolving to a file that does not exist, and `main`/`module`/`exports` disagreeing about the same entry. §155 diffs the export *surface*; nothing checks that the map **resolves**. Pure resolution arithmetic against the files on disk, and the failure mode is "works for me, breaks for half my consumers."
+
+## 186. Transpile-Semantics Divergence ★ Differentiator
+**Status: Planned** · 🔧 Needs depth
+
+Where the emitted JavaScript does not mean what the TypeScript said: `useDefineForClassFields` changing field-initialization order, a side-effect-only import dropped, decorator metadata that disappears under a different setting, a `const enum` inlined across a package boundary, and `isolatedModules` violations that fail only under a different transpiler.
+
+## 187. Bundle-Boundary Leakage ★★ Flagship
+**Status: Planned** · 🔧 Needs depth
+
+Server-only values reaching a client bundle: a module reading `process.env.DATABASE_URL` transitively reachable from a client entry point, a server-only package pulled into a shared utility, `"use server"`/`"use client"` boundary violations. The blast-radius graph already computes reachability; this points it at the bundler's entry points instead of the request handlers. The failure mode is a secret in a file served to browsers.
+
+## 188. Tree-Shaking Defeat Detection ★
+**Status: Planned** · ⚙️ Now
+
+Patterns that silently disable dead-code elimination: a missing or wrong `sideEffects` field, a top-level statement with an observable effect in a library entry, `export *` chains that defeat static analysis, and a namespace import used for exactly one member.
+
+## 189. Source-Map & Debug-Artifact Hygiene ★
+**Status: Planned** · ⚙️ Now
+
+Source maps shipped to production exposing original source, `.map` files referenced but absent (so every production stack trace is unreadable), inline base64 maps inflating the bundle, and a `sourceRoot` leaking absolute build-machine paths.
+
+---
+
+# Part XLV — Concurrency & Shared-Memory
+
+*The catalog covers async concurrency (§10) and cross-request state (§59). It does not cover **real parallelism** — worker threads, clustering, shared memory — where Node's failure modes are different in kind, not degree.*
+
+## 190. Worker-Thread Boundary Correctness ★★ Flagship
+**Status: Detected** (`no-unclonable-worker-message`, opt-in) · ⚙️ Now
+
+**Shipped: the one case that is decidable.** `postMessage` does not pass a reference — it runs the **structured clone algorithm**, and that algorithm throws on a function. So `worker.postMessage({ rows, onDone: () => finish() })` is a `DataCloneError`, thrown synchronously, at the call, on whichever code path happens to carry the callback. It is not a type error, no linter sees it, and the test that exercises the other branch passes.
+
+The algorithm's rules are mostly undecidable from syntax — a `Map` clones, a `Proxy` throws, a class instance clones but silently loses its prototype — so the rule claims only **a function literal in the posted value**. The receiver must be a *proven* worker-thread port (a binding from `new Worker(…)` imported from `node:worker_threads`, or `parentPort` itself), because `postMessage` is also the method on a `BroadcastChannel`, a `MessagePort`, a browser `window` and any number of userland emitters — and the browser's has the same restriction with a different remedy, so a shared message would be wrong advice half the time. A bare identifier in the payload is never flagged: "this variable might be a function" is a guess. The walk stops at any nested function's own body, since that body is not part of the cloned structure. Zero findings across this project's 430 files.
+
+Everything else the algorithm rejects — a `Proxy`, a `WeakMap`, a misused `SharedArrayBuffer`, a dropped prototype, a transferable used after transfer — needs value provenance this rule does not have, and stays Planned rather than guessed at.
+
+## 191. Cluster & Multi-Process State Assumptions ★ Differentiator
+**Status: Planned** · 🔧 Needs depth
+
+Code that is correct single-process and wrong under `cluster`/PM2: an in-memory rate limiter or cache each worker keeps its own copy of, a `setInterval` cron that now fires N times, a lock held in a module-scope variable, an in-memory session store behind a load balancer with no sticky sessions. The commonest "it worked on one instance" outage class.
+
+## 192. Atomics & Memory-Ordering Misuse ★
+**Status: Planned** · 🔧 Needs depth
+
+`SharedArrayBuffer` accessed without `Atomics`, `Atomics.wait` on the main thread (blocking the event loop entirely), a busy-wait over shared memory, and non-atomic read-modify-write on a shared counter.
+
+## 193. Backpressure Across Async Iterators & Streams ★
+**Status: Planned** · ⚙️ Now
+
+The write-side half §128 deliberately left: ignoring the `false` return of `.write()`, an async iterator consumed faster than it produces, `for await` over an unbounded source with no concurrency limit, and a `Readable` pushed to without checking `push()`'s return.
+
+## 194. Event-Emitter Contract Violations ★
+**Status: Planned** · ⚙️ Now
+
+Emitting `error` with no listener (generalizing §31/§128), exceeding `maxListeners` on a long-lived emitter, `removeListener` with a different function identity than was added, and `once` used where the event fires before registration.
+
+---
+
+# Part XLVI — Process & IPC Boundaries
+
+## 195. Child-Process Boundary Correctness ★ Differentiator
+**Status: Planned** · ⚙️ Now
+
+Beyond §7's command injection: a child spawned with the parent's full `process.env` (leaking every secret to a subprocess), `stdio: "pipe"` with an unread pipe (the child blocks forever on a full buffer), `maxBuffer` exceeded silently truncating output, a child never killed on parent exit, and `detached` without `unref`.
+
+## 196. Signal-Handling Correctness ★
+**Status: Planned** · ⚙️ Now
+
+§182 checks a SIGTERM handler *exists*; this checks it is *correct*: an async handler whose work never completes, a handler registered twice, `SIGKILL`/`SIGSTOP` handlers that can never fire, and a handler calling `process.exit()` before its own cleanup.
+
+## 197. Exit-Code & Process-Lifecycle Semantics ★
+**Status: Planned** · ⚙️ Now
+
+`process.exit()` with a pending write (the bug this project found in its own CLI), `process.exitCode` assigned but a later `exit()` overriding it, an exit code above 255 silently wrapping, and a CLI that always exits 0 so failures are invisible to CI.
+
+## 198. IPC Message-Shape Contracts ★
+**Status: Planned** · 🔧 Needs depth
+
+§157's topology reasoning applied to `process.send`/`message`: a shape sent that no handler destructures, a handler expecting a field nothing sends, and a payload that will not survive structured clone.
+
+## 199. Working-Directory & Path-Resolution Assumptions ★
+**Status: Planned** · ⚙️ Now
+
+A relative `fs` path resolved against `process.cwd()` rather than the module, `__dirname` in ESM, `import.meta.url` used as a filesystem path without `fileURLToPath`, and a config located by walking up from `cwd` in a tool that may run anywhere.
+
+---
+
+# Part XLVII — Primitive-Failure Reasoning
+
+## 200. Allocation-Failure & Limit Reasoning ★
+**Status: Planned** · ⚙️ Now
+
+`Buffer.allocUnsafe` with a caller-controlled size, a string built past the engine's maximum length, `JSON.parse` of an unbounded body at the allocation layer, an array pre-allocated from an untrusted count, and a regex on input with no length bound.
+
+## 201. Numeric-Boundary & Coercion Correctness ★ Differentiator
+**Status: Planned** · ⚙️ Now
+
+The layer below §145: `parseInt` without a radix, `Number()` on a value that can be `""` (which is `0`, not `NaN`), integer division assumed where floats result, `%` on a negative operand, `Math.max()` of an empty array, an off-by-one in a `slice` bound from user input, and a comparison against `NaN`.
+
+## 202. Encoding & Buffer-Semantics Correctness ★
+**Status: Planned** · ⚙️ Now
+
+`Buffer.byteLength` vs `.length` confused, a `latin1`/`utf8` mismatch that silently corrupts, `toString()` splitting a multibyte character at a chunk boundary, base64url vs base64 confusion in a token path, and `Buffer.compare` where `timingSafeEqual` is required.
+
+## 203. Filesystem-Primitive Failure Modes ★
+**Status: Planned** · ⚙️ Now
+
+A write that is not atomic (no temp-then-rename), `EMFILE` from unbounded concurrent opens, a `readdir` on a directory being written, a `watch` firing twice per change, and a path assumed case-sensitive that is not on macOS/Windows.
+
+## 204. Time-Source Correctness ★
+**Status: Planned** · ⚙️ Now
+
+The non-timezone half of §116, provable where the timezone half is not: `Date.now()` used for elapsed time (it jumps with NTP; `performance.now()` is monotonic), a timeout computed from wall-clock subtraction, and `setTimeout` with a delay above 2³¹−1 (which fires immediately).
+
+---
+
+# Part XLVIII — Authoring Provenance & Shape
+
+*The final lens, and the most on-thesis: what the **shape** of the code says about how it was produced. Agents write recognizable code, and its failure modes are recognizable too.*
+
+## 205. Agent-Artifact Detection ★★ Flagship
+**Status: Planned** · ⚙️ Now
+
+Residue that ships because nobody read the diff: a `// TODO: implement` in a merged function body, a stub returning a hardcoded literal where an implementation belongs, commented-out alternatives left beside the chosen one, an obviously-templated docstring describing a different function. **A placeholder identifier is naming taste, not a defect** — the rule must fire only on unambiguous residue, or it becomes a style linter.
+
+## 206. Hallucinated-API Detection ★★ Flagship
+**Status: Core** (`node-doctor api-check`, aliases `hallucinated` / `check-api`) · 🔧 Needs depth for the rest
+
+**Shipped as a command.** `import { readJson } from "fs-extra"` — except `fs-extra` exports `readJson` *and* `readJSON`, and the one the agent picked does not exist. In JavaScript that is **not a compile error**: the import is `undefined`, and the failure is `TypeError: x is not a function` on the first request that reaches the line, in production. It is the single most common way an agent's code is wrong, and it is invisible to every existing check — the type checker sees it only if the package ships types *and* the project is strict, the linter has no idea what a package exports, and the suite passes if that path is uncovered.
+
+The machinery is §175's, pointed at production code and at `node_modules` instead of at mocks and project modules — including its `complete` flag, itself hardened by twelve confirmed findings in §155.
+
+**The claim is "this package does not export that name", so it abstains for the WHOLE package the moment the surface is not fully readable** — never for a single name, because a partially-read surface makes every absent name suspect. It skips, with a stated reason: a package that is **not installed** (`node_modules` is the only place the truth lives, and absent it says the check did not run rather than that the code is fine); a surface that is **not enumerable** (an unfollowable `export *`, a runtime-built `module.exports`, a parse failure); a **types-only** entry, because a `.d.ts` is a claim about the runtime rather than the runtime itself; a **dual ESM/CJS** package whose two entries export different names, since neither is authoritative; and a package used through **any computed access**, since `lib[name]` could be reaching anything. Named imports are checked under their *source* name, a local binding **shadows** the namespace import it collides with, and members read off a *default* import are not the named-export set and are never checked. Deep imports (`pkg/sub`) resolve through their own exports map and belong to §185.
+
+Zero false claims across this project's own 407 files, with eleven of its twelve dependencies honestly reported as skipped — which is the report working, not failing.
+
+## 207. Copy-Paste Divergence ★ Differentiator
+**Status: Planned** · 🔧 Needs depth
+
+Two structurally-identical blocks differing in one token — the classic copy-paste bug, and the one agents produce most: the same handler duplicated with one `userId` left as `orgId`. §122 fingerprints duplicates; this reports the *divergence within* a near-duplicate, which is where the bug is.
+
+## 208. Defensive-Bloat & Redundant-Guard Detection ★
+**Status: Planned** · ⚙️ Now
+
+The opposite failure: a null check on a value that provably cannot be null, a `try`/`catch` around code that cannot throw, a type check on an already-narrowed value, a re-validation of input validated one frame up. Agents over-defend, and the noise hides the guards that matter.
+
+## 209. Inconsistent-Abstraction-Level Detection ★
+**Status: Planned** · 🔧 Needs depth
+
+A function mixing a raw SQL string with a domain-service call, an HTTP handler doing its own connection pooling, a business-logic module reading `process.env` directly. Layering violations (§33) at the *statement* level rather than the module level.
+
+## 210. Comment-Density & Explanation-Debt Signals
+**Status: Vision** · 🛰 Needs infra
+
+Where the code is least explained relative to its complexity and churn — the modules a new engineer (or agent) will most likely misread. Combines §35's complexity, §160's churn and comment density into a targeting signal.
+
+---
+
+## Honest read: what to actually build
+
+Of §185–§210, **§206 and §190 shipped first** — the two the catalog's own read ranked highest, and both with no precision cliff. §206 is the defining agent failure mode and reuses machinery §175 already proved; §190's structured-clone boundary is a hard syntactic edge with a `DataCloneError` behind it.
+
+Next: **§185 conditional-export resolution** (pure resolution arithmetic, zero heuristics), then **§195 child-process boundaries** and **§201 numeric coercion**, both syntactic and both catching bugs that survive every test.
+
+**§207 copy-paste divergence and §209 abstraction-level are the two most likely to fail a precision hunt**, and if they do they should not ship. **§205 agent-artifact detection** is the most on-thesis but needs the sharpest scoping in the set: `// TODO: implement` in a merged body is a fact, and a variable named `data2` is taste — a rule that cannot tell them apart is a style linter wearing a correctness badge. The same discipline governs as it has for 206 sections.

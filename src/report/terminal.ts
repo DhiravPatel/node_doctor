@@ -638,6 +638,64 @@ export const renderReadiness = (
  * scripts found" and "node_modules is not installed" are different answers and
  * only one is safe to act on.
  */
+/**
+ * §206 — the hallucinated-API report.
+ *
+ * The SKIPPED list is printed, not hidden. A package whose surface could not be
+ * enumerated is the one place this analysis is blind, and a reader who takes a
+ * clean result as "every call is real" without seeing what was skipped has been
+ * misled by an accurate report.
+ */
+export const renderPackageApi = (
+  report: import("../core/package-api.ts").PackageApiReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  if (!report.installed) {
+    lines.push(`  ${p.yellow("●")} Not checked — no dependency is installed under \`node_modules\`.`);
+    lines.push(p.dim("    A package's real export surface is the only thing that can settle this."));
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  lines.push(
+    `  ${p.bold("Package API")}  ${p.dim(
+      `${report.summary.packagesChecked} package(s) checked · ${report.summary.filesScanned} file(s)`,
+    )}`,
+  );
+  lines.push("");
+
+  if (report.unknownMembers.length > 0) {
+    lines.push(`  ${p.red("✖")} ${p.bold(`${report.unknownMembers.length} name(s) the package does not export`)}`);
+    lines.push(p.dim("      The import is `undefined` — a TypeError on the first call that reaches it."));
+    lines.push("");
+    for (const m of report.unknownMembers.slice(0, 25)) {
+      const hint = m.suggestion ? p.dim(`  did you mean \`${m.suggestion}\`?`) : "";
+      lines.push(`      ${p.cyan(`${m.normalizedFilePath}:${m.line}`)}  \`${m.package}\` has no \`${m.name}\`${hint}`);
+    }
+    if (report.unknownMembers.length > 25) {
+      lines.push(p.dim(`      … ${report.unknownMembers.length - 25} more`));
+    }
+    lines.push("");
+  } else {
+    lines.push(p.green("  ✔ Every name used on a checked package really is exported by it."));
+    lines.push("");
+  }
+
+  if (report.skipped.length > 0) {
+    lines.push(p.dim(`  ${report.skipped.length} package(s) NOT checked:`));
+    for (const s of report.skipped.slice(0, 12)) {
+      lines.push(p.dim(`      · ${s.package} — ${s.reason}`));
+    }
+    if (report.skipped.length > 12) lines.push(p.dim(`      … ${report.skipped.length - 12} more`));
+    lines.push("");
+  }
+
+  return lines.join("\n");
+};
+
 export const renderSupplyChain = (
   report: import("../core/supply-chain.ts").SupplyChainReport,
   options: { color?: boolean } = {},
