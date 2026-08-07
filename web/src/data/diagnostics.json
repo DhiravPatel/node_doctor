@@ -1,13 +1,13 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 142,
+  "total": 143,
   "defaultOn": 95,
-  "optIn": 47,
+  "optIn": 48,
   "byCategory": {
     "Performance": 12,
     "Security": 60,
     "Maintainability": 15,
-    "Reliability": 37,
+    "Reliability": 38,
     "Bugs": 18
   },
   "categoryWeights": {
@@ -1307,6 +1307,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Resolve against a root and enforce containment: `const full = path.resolve(root, name); if (!full.startsWith(root + path.sep)) reject;` — or strip traversal with `path.basename(name)`. `join`/`resolve` normalize but do not confine."
+    },
+    {
+      "id": "no-peer-inconsistent-handler",
+      "title": "Route handler skips the wrapper its peers all use",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "error-handling",
+        "express",
+        "reliability"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Wrap this handler the way its siblings are wrapped, or — if it genuinely should differ — say so with an inline suppression and a reason. Every other route on this router routes its rejections through the wrapper; an unwrapped async handler that rejects never reaches the error middleware, and on Express 4 the request hangs until the client gives up."
     },
     {
       "id": "no-process-exit-in-request-path",

@@ -1615,7 +1615,24 @@ Combine the blast-radius graph (§120) with ownership (§89): a change to a low-
 *Every rule so far fires on something that **is** in the code. This part fires on what is conspicuously **missing** — the far harder and far rarer capability, because absence has no AST node to match. The engine's cross-file reachability makes a specific, precise version possible: "this pattern is present N times and absent once" is a real, low-false-positive signal.*
 
 ## 164. Peer-Consistency Anomaly Detection ★★ Flagship
-**Status: Planned** · 🔧 Needs depth (pattern clustering)
+**Status: Detected** (`no-peer-inconsistent-handler`, opt-in) · 🔧 Needs depth for the general form
+
+**Shipped as the one instantiation that can be made precise.** The idea is the most valuable in this document — the codebase states its own convention nineteen times, so the twentieth handler that breaks it is a finding no fixed ruleset could anticipate. It is also the most dangerous, because "19 of 20 siblings do X" is a *statistical* claim, and every statistical claim in this project's history is exactly where its false positives came from.
+
+So it ships as one narrow, fully-fenced rule rather than a general clustering engine. `no-peer-inconsistent-handler` fires when a route handler skips the wrapper (`asyncHandler`, `catchAsync`, …) that its peers on the same router all use — an unwrapped async handler that rejects never reaches the error middleware, and on Express 4 the request hangs until the client times out.
+
+**The gates, and what an adversarial hunt taught about each.** The hunt confirmed **fifteen** ways the first version was wrong, and every one traced to the same root: the population was not actually provable. The corrected model:
+
+- **The receiver must be a proven Express router**, bound from `Router()` or `express()` in the file. Without that the rule fired on Koa, on Fastify, and on anything with a `.get(path, fn)` shape — an HTTP client, a cache — while asserting Express semantics false for every one of them.
+- **The group is keyed on the resolved binding, never the name.** This was the worst finding. `router` is the most common identifier in Express code, so grouping by name merged every `const router = Router()` in a multi-factory route file into one population — and in the hunt's sharpest repro, four factories holding 3+3+3+1 routes produced a *fabricated* population of ten in which no individual router had enough routes to qualify at all. The flagged route had zero peers. A member path (`api.v1.get(…)`) is excluded for the same reason: two provably different routers reduce to one root name.
+- **Minimum group size 10**, because at 90% conformity a smaller group can never produce a deviant — the documented "5" was arithmetic that could not happen.
+- **Conformity ≥ 90%**, so a 6-vs-4 split, which is a codebase mid-migration, says nothing; two competing wrappers are not one convention and are silent.
+- **The wrapper must be a wrapper**: a named call taking exactly one argument that is a function. `makeHandler(db, path)` is a handler *factory* — a perfectly good convention that produces the handler rather than wrapping one — and reading it as an error wrapper turned every factory-style router into a wall of findings. A decorator taking options (`cache(60)(fn)`) fails the same test.
+- **The outlier must be provably unwrapped and provably able to reject.** A bare identifier may be wrapped where it is defined; a *synchronous* handler cannot reject; and a handler whose whole body is a `try`/`catch` — the webhook receiver that must always answer 200 — cannot reject either. All three are excluded from the population entirely rather than counted as violations.
+
+Reported at `confidence: medium` and opt-in, because it is strong evidence rather than proof — the one rule in the catalog where that distinction is stated in the metadata. Zero findings across this project's own 426 files.
+
+**Deliberately not done: the same reasoning applied to a missing middleware** (`requireAuth` on 19 of 20 routes). That version has legitimate outliers *by design* — the login route, the health probe, the webhook receiver — and "everyone else authenticates" is precisely the wrong thing to say about the login endpoint. A wrapper has no such exception: if nineteen handlers need their rejections routed, so does the twentieth. The general clustering form (any structural pattern, any peer group) still needs the pattern-clustering depth this section was originally filed under.
 
 The most powerful absence signal: **19 of 20 sibling handlers do X; the 20th doesn't.** Nineteen route handlers wrap their body in `asyncHandler`; one is bare. Every repository method filters by `tenantId`; one forgot. Every mutation invalidates its cache; one skips it. Cluster structurally-similar code (same directory, same shape, same role) and flag the **outlier** against its own peers — the codebase becomes its own rule set. This is learned-from-the-project linting with zero configuration, and it catches the exact class of bug that a fixed ruleset never anticipates because the "rule" is local to this codebase.
 

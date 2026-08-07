@@ -55,6 +55,7 @@ import { requirePaginationLimit } from "../diagnostics/event-loop/require-pagina
 // frameworks
 import { hapiRouteAuthDisabled } from "../diagnostics/frameworks/hapi-route-auth-disabled.ts";
 import { hapiRouteMissingValidation } from "../diagnostics/frameworks/hapi-route-missing-validation.ts";
+import { noPeerInconsistentHandler } from "../diagnostics/frameworks/no-peer-inconsistent-handler.ts";
 import { restifyMissingErrorHandler } from "../diagnostics/frameworks/restify-missing-error-handler.ts";
 // http
 import { corsCredentialsReflect } from "../diagnostics/http/cors-credentials-reflect.ts";
@@ -196,6 +197,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   // frameworks
   hapiRouteAuthDisabled,
   hapiRouteMissingValidation,
+  noPeerInconsistentHandler,
   restifyMissingErrorHandler,
   // http
   corsCredentialsReflect,

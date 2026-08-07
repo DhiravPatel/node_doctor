@@ -98,6 +98,36 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Diagnostics — peer-consistency (§164)
+
+- **`no-peer-inconsistent-handler`** (Reliability, opt-in, `confidence: medium`) —
+  a route handler that skips the wrapper its peers on the same router all use.
+  The codebase states its own convention nineteen times; the twentieth handler
+  that breaks it is a finding no fixed ruleset could anticipate. An unwrapped
+  async handler that rejects never reaches the error middleware, and on Express 4
+  the request hangs until the client times out.
+  This is **the only statistical rule in the catalog**, and an adversarial hunt
+  confirmed **fifteen** ways the first version got it wrong — every one tracing
+  to the same root, that the population was not actually provable. The corrected
+  model: the receiver must be a **proven Express router** (bound from `Router()`
+  or `express()`, so Koa, Fastify and any `.get(path, fn)`-shaped HTTP client or
+  cache are excluded); the group is keyed on the **resolved binding, never the
+  name** — the hunt's sharpest repro had four route factories holding 3+3+3+1
+  routes merge into a *fabricated* population of ten in which no individual
+  router qualified at all, and the flagged route had zero peers; the minimum
+  group is **10**, because at 90% conformity a smaller one can never produce a
+  deviant (the documented 5 was arithmetic that could not happen); the wrapper
+  must take **exactly one argument that is a function**, so `makeHandler(db,
+  path)` — a handler factory, not an error wrapper — no longer turns every
+  factory-style router into a wall of findings; and the outlier must be
+  **provably able to reject**, which excludes a bare identifier (may be wrapped
+  where it is defined), a synchronous handler, and one whose whole body is a
+  `try`/`catch`. Reported at `confidence: medium` because it is strong evidence
+  rather than proof. Zero findings across this project's 426 files.
+  The middleware variant (`requireAuth` on 19 of 20) is **deliberately not
+  shipped**: it has legitimate outliers by design, and "everyone else
+  authenticates" is exactly the wrong thing to say about the login endpoint.
+
 ### Supply chain — `node-doctor supply-chain` (§69)
 
 - **`node-doctor supply-chain [dir]`** (aliases `deps`, `install-scripts`) — two
