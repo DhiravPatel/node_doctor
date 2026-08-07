@@ -98,6 +98,51 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Package-exports resolution — `node-doctor exports-check` (§185)
+
+- **`node-doctor exports-check [dir]`** (aliases `exports-map`, `dual-package`) —
+  a `package.json` `exports` map is a resolution program, and every way it can be
+  wrong fails for a *consumer* while succeeding for the author, who has the whole
+  source tree and never loads through the map. Seven problems: a target that is
+  not on disk (`ERR_MODULE_NOT_FOUND`, and `npm publish` does not check), a
+  `require` condition pointing at ESM (`ERR_REQUIRE_ESM` for every CommonJS
+  consumer while ESM consumers work, so it passes the author's own test), an
+  `import` condition pointing at `.cjs`, a `types` condition ordered after
+  `default` (never reached: the package silently resolves to `any`), `types`
+  after any other runtime condition, `main` and `exports["."]` resolving to
+  different files, and a wildcard that matches nothing.
+  The bar is the runtime's own bar, so anything the resolver treats as "maybe" is
+  a silence. A file's module system comes from its extension first, then from
+  **ESM syntax, which is conclusive either way** — whether the nearest `type`
+  field says `module` or `commonjs`, `require()` cannot load that file, which is
+  exactly the claim. A bundled file with neither import/export nor `require` is
+  *unknown* and judged not at all. Conditions are tracked **structurally** as the
+  map is walked, so a subpath named `./require` is never read as a condition.
+  Bare-specifier targets belong to the package they name, `null` targets are
+  deliberate blocks, `types`/`typings` targets are never judged for module system,
+  and a `.` export carrying only `types` cannot disagree with `main` — it names no
+  runtime file. Exits 1 on any finding. Zero findings on this project's own
+  manifest.
+
+### Diagnostics — detached child processes (§195)
+
+- **`no-detached-child-without-unref`** (Reliability, warn, opt-in) —
+  `detached: true` without `unref()`. Detaching puts the child in its own process
+  group so it can outlive the parent, but the parent's event loop still holds a
+  reference to it: the parent **cannot exit** until the child does. A CLI that
+  spawns a detached background worker and then finishes its work simply hangs —
+  no error, no output, and in CI a job that runs to its timeout. It is the exact
+  opposite of what the author asked for.
+  The claim is "this handle is never unref'd", so every way it could be is a
+  silence. The spawner must be **proven by import** (`spawn` is also `cross-spawn`,
+  test helpers, and userland process pools), `detached` must be **literally**
+  `true` — a variable, a ternary, or a spread *after* the key that could overwrite
+  it all abstain — and the result must be bound to a plain local. `unref()`
+  anywhere on that binding ends the claim: a later line, a callback, a guard, a
+  `finally`, optional chaining, or a computed member that could *be* it. A binding
+  that escapes (returned, passed, stored, aliased) may be unref'd out of sight and
+  is never reported.
+
 ### Hallucinated-API detection — `node-doctor api-check` (§206)
 
 - **`node-doctor api-check [dir]`** (aliases `hallucinated`, `check-api`) — a

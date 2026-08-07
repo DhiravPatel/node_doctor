@@ -1,13 +1,13 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 144,
+  "total": 145,
   "defaultOn": 95,
-  "optIn": 49,
+  "optIn": 50,
   "byCategory": {
     "Performance": 12,
     "Security": 60,
     "Maintainability": 15,
-    "Reliability": 38,
+    "Reliability": 39,
     "Bugs": 19
   },
   "categoryWeights": {
@@ -729,6 +729,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Replace the deprecated API with its modern equivalent. These calls keep working until the runtime upgrade that removes them, at which point they become an outage rather than a warning."
+    },
+    {
+      "id": "no-detached-child-without-unref",
+      "title": "Detached child process is never unref'd, so the parent cannot exit",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "async",
+        "lifecycle",
+        "reliability"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Call `child.unref()` after spawning. `detached: true` lets the child outlive the parent, but the parent's event loop still holds a reference to it — so the parent hangs until the child exits, which is the opposite of what detaching was for."
     },
     {
       "id": "no-disabled-tls-verification",

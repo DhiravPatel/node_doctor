@@ -22,6 +22,7 @@ import { grpcInsecureCredentials } from "../diagnostics/api/grpc-insecure-creden
 import { noAsyncArrayCallback } from "../diagnostics/async/no-async-array-callback.ts";
 import { noAsyncExecutor } from "../diagnostics/async/no-async-executor.ts";
 import { noAwaitInLoopOverIndependentWork } from "../diagnostics/async/no-await-in-loop-over-independent-work.ts";
+import { noDetachedChildWithoutUnref } from "../diagnostics/async/no-detached-child-without-unref.ts";
 import { noMissingCatchOnAsyncIife } from "../diagnostics/async/no-missing-catch-on-async-iife.ts";
 import { noRaceWithoutTimeout } from "../diagnostics/async/no-race-without-timeout.ts";
 import { noSwallowedErrorEmptyCatch } from "../diagnostics/async/no-swallowed-error-empty-catch.ts";
@@ -165,6 +166,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noAsyncArrayCallback,
   noAsyncExecutor,
   noAwaitInLoopOverIndependentWork,
+  noDetachedChildWithoutUnref,
   noMissingCatchOnAsyncIife,
   noRaceWithoutTimeout,
   noSwallowedErrorEmptyCatch,

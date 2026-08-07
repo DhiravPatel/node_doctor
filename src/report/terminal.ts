@@ -696,6 +696,51 @@ export const renderPackageApi = (
   return lines.join("\n");
 };
 
+/**
+ * §185 — the `exports` map report.
+ *
+ * Every finding here is a resolution that FAILS at runtime for a consumer, so
+ * the report is a flat list ordered by how the map is written, not a score.
+ */
+export const renderExportsCheck = (
+  report: import("../core/exports-map.ts").ExportsCheckReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  if (!report.hasExportsMap) {
+    lines.push(`  ${p.yellow("\u25cf")} ${p.bold("No `exports` map")} ${p.dim(`in ${report.manifestPath}`)}`);
+    lines.push(p.dim("    Nothing to check. Without one, every file in the package is importable."));
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  lines.push(
+    `  ${p.bold("Package exports")}  ${p.dim(
+      `${report.summary.subpaths} subpath(s) \u00b7 ${report.summary.conditions} condition(s) \u00b7 ${report.manifestPath}`,
+    )}`,
+  );
+  lines.push("");
+
+  if (report.findings.length === 0) {
+    lines.push(p.green("  \u2714 Every declared entry point resolves, and the conditions are ordered correctly."));
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  lines.push(`  ${p.red("\u2716")} ${p.bold(`${report.findings.length} broken entry point(s)`)}`);
+  lines.push(p.dim("      Each one is an import that throws for a consumer, and never for you."));
+  lines.push("");
+  for (const f of report.findings) {
+    lines.push(`      ${p.cyan(f.conditionPath)}${f.target === null ? "" : p.dim(`  \u2192 ${f.target}`)}`);
+    lines.push(`        ${f.message}`);
+  }
+  lines.push("");
+
+  return lines.join("\n");
+};
+
 export const renderSupplyChain = (
   report: import("../core/supply-chain.ts").SupplyChainReport,
   options: { color?: boolean } = {},

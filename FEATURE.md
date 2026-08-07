@@ -1844,9 +1844,11 @@ A sixth extension. Everything here is **net-new** against §1–§184 — verifi
 *Every rule so far analyzes source. This part analyzes the **gap between source and artifact** — what the bundler, the transpiler and the packager do to the code on the way to production, where a correct source file becomes an incorrect artifact.*
 
 ## 185. Conditional-Export Resolution Correctness ★★ Flagship
-**Status: Planned** · ⚙️ Now
+**Status: Shipped** · `node-doctor exports-check [dir]` (aliases: `exports-map`, `dual-package`)
 
 A `package.json` `exports` map is a resolution program, and it is routinely wrong in ways that surface only for *some* consumers: a `require` condition pointing at ESM, an `import` condition pointing at CJS, a `types` condition ordered after `default` (so TypeScript silently never sees it), a subpath resolving to a file that does not exist, and `main`/`module`/`exports` disagreeing about the same entry. §155 diffs the export *surface*; nothing checks that the map **resolves**. Pure resolution arithmetic against the files on disk, and the failure mode is "works for me, breaks for half my consumers."
+
+**Seven problems, each a resolution that fails for a consumer and succeeds for the author** — the author has the whole source tree and never loads through the map: `missing-target`, `require-points-at-esm`, `import-points-at-cjs`, `types-after-default`, `types-condition-not-first`, `main-disagrees-with-exports`, `dead-wildcard`. The bar is the runtime's own bar, so anything the resolver treats as "maybe" is a silence. A file's module system is settled by extension first, then by **ESM syntax — which is conclusive either way**: whether the nearest `type` field says `module` (so it IS an ES module) or `commonjs` (so it is a syntax error waiting to happen), `require()` cannot load it, which is exactly the claim being made. A bundled file with no import/export and no `require` is *unknown* and judged not at all. Conditions are tracked **structurally** as the map is walked rather than recovered from the printed path, so a subpath named `./require` is never read as a condition. Bare-specifier targets belong to the package they name; `null` targets are deliberate blocks; `types`/`typings` targets are never judged for module system, and a `.` export carrying nothing but `types` cannot disagree with `main` — it names no runtime file. Wildcards are expanded against the real tree, so a live pattern is silent and a dead one is `ERR_PACKAGE_PATH_NOT_EXPORTED` for every subpath it was meant to serve. Exits 1 on any finding.
 
 ## 186. Transpile-Semantics Divergence ★ Differentiator
 **Status: Planned** · 🔧 Needs depth
@@ -1908,9 +1910,13 @@ Emitting `error` with no listener (generalizing §31/§128), exceeding `maxListe
 # Part XLVI — Process & IPC Boundaries
 
 ## 195. Child-Process Boundary Correctness ★ Differentiator
-**Status: Planned** · ⚙️ Now
+**Status: Partially shipped** · `no-detached-child-without-unref`
 
 Beyond §7's command injection: a child spawned with the parent's full `process.env` (leaking every secret to a subprocess), `stdio: "pipe"` with an unread pipe (the child blocks forever on a full buffer), `maxBuffer` exceeded silently truncating output, a child never killed on parent exit, and `detached` without `unref`.
+
+**`detached` without `unref` shipped; the rest did not, and the reason is the same for each.** The shipped case is the one that is decidable from syntax: `detached: true` puts the child in its own process group so it can outlive the parent, but the parent's event loop still holds a reference — so the parent *cannot exit* until the child does, which is the exact opposite of what the author asked for. A CLI that spawns a detached background worker and then finishes simply hangs. The claim is "this handle is never unref'd", so every way it could be is a silence: the spawner must be proven by import (`spawn` is also `cross-spawn`, test helpers, and userland process pools), `detached` must be **literally** `true` with no spread after it that could overwrite it, the result must be bound to a plain local, and `unref()` anywhere on that binding — a later line, a callback, a guard, a `finally`, a computed member that *could* be it — ends the claim. A binding that escapes (returned, passed, stored, aliased) may be unref'd out of sight and is never reported.
+
+**Not shipped, with reasons.** *Full `process.env` inheritance* is the **default**, so flagging it flags every correct `spawn` in every codebase; "should this child see the parent's secrets" is a policy question the syntax does not answer. *`stdio: "pipe"` with an unread pipe* requires proving no consumer exists anywhere — including in a handler attached later, or by a caller holding the returned handle — which is the whole-program reachability this engine deliberately does not claim. *`maxBuffer` exceeded* is a runtime quantity, not a syntactic one. *A child never killed on parent exit* is §165's resource-lifecycle question and fails the same way: the kill may live in a signal handler, a `finally`, or a teardown module, and absence of a syntactic kill is not absence of a kill.
 
 ## 196. Signal-Handling Correctness ★
 **Status: Planned** · ⚙️ Now
@@ -2009,6 +2015,8 @@ Where the code is least explained relative to its complexity and churn — the m
 
 Of §185–§210, **§206 and §190 shipped first** — the two the catalog's own read ranked highest, and both with no precision cliff. §206 is the defining agent failure mode and reuses machinery §175 already proved; §190's structured-clone boundary is a hard syntactic edge with a `DataCloneError` behind it.
 
-Next: **§185 conditional-export resolution** (pure resolution arithmetic, zero heuristics), then **§195 child-process boundaries** and **§201 numeric coercion**, both syntactic and both catching bugs that survive every test.
+**§185 and §195 followed**, in that order. §185 shipped whole as `exports-check`: it is pure resolution arithmetic, and every one of its seven problems is a load that throws for a consumer and resolves for the author. §195 shipped **one of its five sub-cases** — `detached` without `unref` — and the four it did not ship are recorded above with reasons; each fails on the same boundary, which is that "this never happens anywhere" is a whole-program claim and "this option is set and this method is never named" is a syntactic one.
+
+Next: **§201 numeric coercion**, syntactic and catching bugs that survive every test.
 
 **§207 copy-paste divergence and §209 abstraction-level are the two most likely to fail a precision hunt**, and if they do they should not ship. **§205 agent-artifact detection** is the most on-thesis but needs the sharpest scoping in the set: `// TODO: implement` in a merged body is a fact, and a variable named `data2` is taste — a rule that cannot tell them apart is a style linter wearing a correctness badge. The same discipline governs as it has for 206 sections.
