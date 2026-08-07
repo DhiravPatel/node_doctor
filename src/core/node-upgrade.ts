@@ -33,6 +33,16 @@
  *   - A DIRECT DEPENDENCY. `glob` and `abort-controller` are transitively
  *     present in a huge share of tooling; a transitive package is nobody's to
  *     delete.
+ *   - EVERY MENTION UNDERSTOOD. This is the gate that makes the others hold. An
+ *     adversarial hunt found nine separate ways to slip a real usage past the
+ *     collector — a re-export (`export { v1 } from "uuid"`), a dynamic
+ *     `await import("uuid")`, a member-call require (`require("dotenv").parse`),
+ *     an options object hoisted into a variable, a glob built from a template,
+ *     a file that failed to parse — and every one of them turned into a
+ *     confident "safe to delete". Enumerating usage forms is a losing game, so
+ *     the gate is inverted: if any file so much as MENTIONS the package in a
+ *     form this did not positively parse into a known shape, the package is not
+ *     assessed and the report says which file it could not read.
  *
  * And the caveat ships with the finding, always. A correct entry with a missing
  * caveat still misleads: telling someone `fetch` replaces `node-fetch` without
@@ -55,6 +65,13 @@ const SOURCE_GLOB = "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}";
 
 /** Node majors worth targeting: current LTS and the two either side. */
 export const UPGRADE_TARGETS = [20, 22, 24] as const;
+
+/**
+ * The newest major this build carries removal data for. Past it the report can
+ * only say "nothing known to have been removed *so far*", which is a different
+ * sentence from "nothing breaks" and must be said differently.
+ */
+export const NEWEST_KNOWN_TARGET = 24;
 
 export interface UpgradeBreak {
   /** The `no-deprecated-node-api` finding that proved it. */
@@ -121,6 +138,14 @@ interface Redundancy {
    * does (the swap is safe) or a reason string when it does not.
    */
   blockedBy: (usage: PackageUsage) => string | null;
+  /**
+   * True when the verdict depends on reading call ARGUMENTS. For these an
+   * argument this cannot evaluate — a variable, a template literal — is not
+   * "no options", it is "unknown options", and blocks.
+   */
+  argumentsMatter?: boolean;
+  /** Companion packages whose presence proves the built-in is not sufficient. */
+  companions?: string[];
 }
 
 /** What the scan saw of one package's use across the whole tree. */
@@ -133,10 +158,18 @@ interface PackageUsage {
   memberReads: Set<string>;
   /** True when any call passed an options object. */
   callsWithOptions: boolean;
+  /**
+   * True when a call passed an argument this cannot read — a hoisted options
+   * variable, a template-literal path, a spread. Every gate that inspects
+   * arguments is blind to these, so any of them blocks the whole assessment.
+   */
+  opaqueArguments: boolean;
   /** Static string arguments to calls, for glob detection. */
   stringArguments: string[];
   /** `file:line` of every call site. */
   sites: string[];
+  /** Files that name the package in a form this did not parse into a site. */
+  unreadableMentions: string[];
   /** The package name appears in a package.json script — the CLI is not replaced. */
   usedAsCli: boolean;
 }
@@ -179,6 +212,8 @@ const REDUNDANCIES: Redundancy[] = [
       const globby = u.stringArguments.find((a) => GLOB_META.test(a));
       return globby ? `a call passes the glob \`${globby}\`, which \`fs.rm\` does not expand` : null;
     },
+    /** A path this cannot read may be a glob, which `fs.rm` will not expand. */
+    argumentsMatter: true,
   },
   {
     package: "mkdirp",
@@ -198,6 +233,8 @@ const REDUNDANCIES: Redundancy[] = [
     caveat:
       "Global `fetch` does not support node-fetch's non-standard `agent`, `follow`, `size`, `highWaterMark` or `insecureHTTPParser` options, and its `res.body` is a WHATWG ReadableStream — `res.body.pipe(...)` breaks. `HTTP_PROXY`/`HTTPS_PROXY` are not honoured by default.",
     blockedBy: (u) => (u.callsWithOptions ? "a call passes an options object that may use a node-fetch extension" : null),
+    /** An options object this cannot read may carry `agent`/`size`/`follow`. */
+    argumentsMatter: true,
   },
   {
     package: "dotenv",
@@ -212,19 +249,27 @@ const REDUNDANCIES: Redundancy[] = [
       if (extras.length > 0) return `it also uses ${extras.map((n) => `\`${n}\``).join(", ")}`;
       return u.callsWithOptions ? "`config()` is called with options (`path`/`override` have no equivalent)" : null;
     },
+    argumentsMatter: true,
+    /** dotenv-expand exists precisely to add the expansion Node does not do. */
+    companions: ["dotenv-expand", "dotenvx", "@dotenvx/dotenvx"],
   },
   {
     package: "glob",
     builtin: "`fs.glob` / `fs.globSync`",
-    window: { stableFrom: 24, label: "22.17+ or 24+ (not 23.x)" },
+    // Stable on 22.17+ and 24+. Majors 22 and 23 are excluded wholesale because
+  // the window is per-MAJOR: a 22.0 project would be wrongly cleared.
+  window: { stableFrom: 24, label: "24+ (22.17+ also has it; 23.x does not)" },
     caveat:
       "Node's `fs.glob` supports only `cwd`, `exclude` and `withFileTypes` — no `ignore`, `dot`, `absolute`, `nodir` or `signal` — negation patterns are not supported, and the async form yields an AsyncIterator rather than an array.",
     blockedBy: (u) => {
       if (u.wholeModuleImport) return "a default or namespace import hides which of glob's APIs are used";
       const extras = [...u.namedImports, ...u.memberReads].filter((n) => n !== "glob" && n !== "globSync").sort();
       if (extras.length > 0) return `it also uses ${extras.map((n) => `\`${n}\``).join(", ")}`;
-      return u.callsWithOptions ? "a call passes options Node's `fs.glob` does not support" : null;
+      if (u.callsWithOptions) return "a call passes options Node's `fs.glob` does not support";
+      const negated = u.stringArguments.find((a) => a.startsWith("!"));
+      return negated ? `a call passes the negation pattern \`${negated}\`, which Node's \`fs.glob\` does not support` : null;
     },
+    argumentsMatter: true,
   },
 ];
 
@@ -241,8 +286,10 @@ const emptyUsage = (): PackageUsage => ({
   wholeModuleImport: false,
   memberReads: new Set(),
   callsWithOptions: false,
+  opaqueArguments: false,
   stringArguments: [],
   sites: [],
+  unreadableMentions: [],
   usedAsCli: false,
 });
 
@@ -258,6 +305,8 @@ const packageOf = (specifier: string): { name: string; subpath: string | null } 
 interface Manifest {
   dependencies: Set<string>;
   scripts: string[];
+  /** A monorepo root: the packages under it declare their own dependencies. */
+  isWorkspaceRoot: boolean;
   /** Any signal that this package also targets a browser or React Native. */
   browserTargeted: boolean;
   engineMajor: number | null;
@@ -298,6 +347,7 @@ const readManifest = async (rootDirectory: string): Promise<Manifest | null> => 
   return {
     dependencies,
     scripts,
+    isWorkspaceRoot: Array.isArray(pkg.workspaces) || (pkg.workspaces !== null && typeof pkg.workspaces === "object"),
     // A browser build means `fetch`/`AbortController` may be there for the
     // bundle, not for Node — deleting them breaks the browser target.
     browserTargeted:
@@ -337,6 +387,16 @@ export const buildNodeUpgradeReport = async (
 
   const manifest = await readManifest(rootDirectory);
   if (manifest === null) notes.push("No readable package.json — dependency redundancy was not checked.");
+  else if (manifest.isWorkspaceRoot) {
+    notes.push(
+      "This is a workspace root: only its own dependencies were assessed, not those declared by the packages under it.",
+    );
+  }
+  if (target > NEWEST_KNOWN_TARGET) {
+    notes.push(
+      `Node ${target} is past the newest release this build has data for (Node ${NEWEST_KNOWN_TARGET}) — "nothing breaks" below means "nothing known to have been removed up to ${NEWEST_KNOWN_TARGET}", not a statement about ${target}.`,
+    );
+  }
 
   // --- what breaks ---------------------------------------------------------
   const breaks: UpgradeBreak[] = [];
@@ -378,6 +438,53 @@ export const buildNodeUpgradeReport = async (
     const assessing = candidates.filter((r) => !browserBlocked.includes(r));
 
     if (assessing.length > 0) {
+      /**
+       * Record what a call's arguments say — and, crucially, what they do NOT.
+       * An argument this cannot evaluate is not "no options"; it is "unknown
+       * options", and for an entry whose verdict reads arguments that is the
+       * difference between a safe swap and a broken one.
+       */
+      const recordArguments = (u: PackageUsage, args: AstNode[]): void => {
+        for (const arg of args) {
+          if (arg.type === "ObjectExpression") {
+            u.callsWithOptions = true;
+            continue;
+          }
+          const literal = getStaticStringValue(arg);
+          if (literal !== null) {
+            u.stringArguments.push(literal);
+            continue;
+          }
+          if (arg.type === "TemplateLiteral") {
+            // The static parts are readable even when the holes are not: a
+            // `\`${dir}/**/*.log\`` carries its glob in a quasi.
+            for (const quasi of (arg.quasis as AstNode[] | undefined) ?? []) {
+              const cooked = (quasi.value as { cooked?: unknown } | undefined)?.cooked;
+              if (typeof cooked === "string" && cooked !== "") u.stringArguments.push(cooked);
+            }
+            u.opaqueArguments = true;
+            continue;
+          }
+          if (arg.type === "ArrayExpression") {
+            // `glob(["a/**", "!b/**"])` — read the readable elements, and treat
+            // an unreadable one as opaque.
+            for (const element of (arg.elements as Array<AstNode | null> | undefined) ?? []) {
+              const value = element === null ? null : getStaticStringValue(element);
+              if (value === null) u.opaqueArguments = true;
+              else u.stringArguments.push(value);
+            }
+            continue;
+          }
+          // A function (a callback), a spread, a variable, a template with a
+          // hole: all unreadable.
+          if (arg.type !== "ArrowFunctionExpression" && arg.type !== "FunctionExpression") {
+            u.opaqueArguments = true;
+          } else {
+            u.callsWithOptions = true; // a filter/callback is an option too
+          }
+        }
+      };
+
       const usage = new Map<string, PackageUsage>();
       for (const r of assessing) {
         const u = emptyUsage();
@@ -403,9 +510,16 @@ export const buildNodeUpgradeReport = async (
         } catch {
           continue;
         }
-        if (!assessing.some((r) => sourceText.includes(r.package))) continue;
+        const mentioned = assessing.filter((r) => sourceText.includes(r.package));
+        if (mentioned.length === 0) continue;
+
         const parsed = parseSource(filePath, sourceText);
-        if (parsed.parseFailed) continue;
+        const normalizedForMention = relative(rootDirectory, filePath).split(sep).join("/");
+        if (parsed.parseFailed) {
+          // A file this could not read may use the package in any way at all.
+          for (const r of mentioned) usage.get(r.package)!.unreadableMentions.push(normalizedForMention);
+          continue;
+        }
         attachParents(parsed.program);
         filesScanned += 1;
         const locate = createLocator(sourceText);
@@ -437,25 +551,94 @@ export const buildNodeUpgradeReport = async (
         };
 
         for (const stmt of (parsed.program.body as AstNode[] | undefined) ?? []) {
-          if (stmt.type !== "ImportDeclaration") continue;
           const source = stmt.source?.value;
           if (typeof source !== "string") continue;
-          noteImport(source, stmt, ((stmt.specifiers as AstNode[] | undefined) ?? []));
+          if (stmt.type === "ImportDeclaration") {
+            noteImport(source, stmt, (stmt.specifiers as AstNode[] | undefined) ?? []);
+            continue;
+          }
+          // `export { v1, v5 as five } from "uuid"` re-exports the package's own
+          // members into this project's public API — the same fact as importing
+          // them, written differently. `ExportSpecifier.local` is the name in
+          // the SOURCE module, which is the imported name.
+          if (stmt.type === "ExportNamedDeclaration") {
+            const specs = ((stmt.specifiers as AstNode[] | undefined) ?? []).map(
+              (spec) =>
+                ({ type: "ImportSpecifier", imported: spec.local, local: spec.local }) as unknown as AstNode,
+            );
+            noteImport(source, stmt, specs);
+            continue;
+          }
+          // `export * from "uuid"` / `export * as uuid from "uuid"` re-export the
+          // WHOLE surface — exactly what `wholeModuleImport` is for.
+          if (stmt.type === "ExportAllDeclaration") {
+            noteImport(source, stmt, [{ type: "ImportNamespaceSpecifier" } as unknown as AstNode]);
+          }
         }
 
         for (const call of collectDescendants(
           parsed.program,
-          (n) => n.type === "CallExpression",
+          // `import("pkg")` is an ImportExpression in ESTree, NOT a
+          // CallExpression — matching only calls made every dynamic import
+          // invisible, which read as "this package is unused here".
+          (n) => n.type === "CallExpression" || n.type === "ImportExpression",
           undefined,
           true,
         )) {
           const callee = call.callee as AstNode | undefined;
           const args = (call.arguments as AstNode[] | undefined) ?? [];
 
+          // `await import("uuid")` — the members loaded are invisible.
+          if (call.type === "ImportExpression" || callee?.type === "Import") {
+            const spec = getStaticStringValue((call.source as AstNode | undefined) ?? args[0]);
+            if (spec === null) {
+              // `import(name)` — the specifier is computed, so this file may be
+              // loading any of the packages it mentions.
+              for (const r of mentioned) usage.get(r.package)!.unreadableMentions.push(normalizedFilePath);
+              continue;
+            }
+            const u = usage.get(packageOf(spec).name);
+            if (u) {
+              u.wholeModuleImport = true;
+              u.sites.push(`${normalizedFilePath}:${locate(call.start as number).line}`);
+            }
+            continue;
+          }
+
+          // `require("dotenv").config(…)` / `require("uuid").v1()` — a member
+          // call straight off the require, with no binding to follow.
+          if (callee?.type === "MemberExpression") {
+            const object = callee.object as AstNode | undefined;
+            if (
+              object?.type === "CallExpression" &&
+              (object.callee as AstNode | undefined)?.type === "Identifier" &&
+              (object.callee as AstNode).name === "require"
+            ) {
+              const spec = getStaticStringValue(((object.arguments as AstNode[] | undefined) ?? [])[0]);
+              const u = spec === null ? undefined : usage.get(packageOf(spec).name);
+              if (u) {
+                const property = callee.property as AstNode | undefined;
+                const member =
+                  property?.type === "Identifier" && !callee.computed
+                    ? (property.name as string)
+                    : getStaticStringValue(property);
+                // A computed member is a name this cannot read at all.
+                if (member === null) u.unreadableMentions.push(normalizedFilePath);
+                else u.memberReads.add(member);
+                u.sites.push(`${normalizedFilePath}:${locate(call.start as number).line}`);
+                recordArguments(u, args);
+                continue;
+              }
+            }
+          }
+
           // `require("uuid")` / `const { v4 } = require("uuid")`
           if (callee?.type === "Identifier" && callee.name === "require") {
             const spec = getStaticStringValue(args[0]);
-            if (spec === null) continue;
+            if (spec === null) {
+              for (const r of mentioned) usage.get(r.package)!.unreadableMentions.push(normalizedFilePath);
+              continue;
+            }
             const declarator = call.parent?.type === "VariableDeclarator" ? (call.parent as AstNode) : null;
             const id = declarator?.id as AstNode | undefined;
             if (id?.type === "ObjectPattern") {
@@ -489,11 +672,7 @@ export const buildNodeUpgradeReport = async (
           const member = path.split(".")[1];
           if (member !== undefined) u.memberReads.add(member);
           u.sites.push(`${normalizedFilePath}:${locate(call.start as number).line}`);
-          for (const arg of args) {
-            if (arg.type === "ObjectExpression") u.callsWithOptions = true;
-            const literal = getStaticStringValue(arg);
-            if (literal !== null) u.stringArguments.push(literal);
-          }
+          recordArguments(u, args);
         }
       }
 
@@ -503,6 +682,26 @@ export const buildNodeUpgradeReport = async (
         // either way it is not this report's business to name.
         if (u.sites.length === 0) {
           notes.push(`\`${r.package}\` is declared but never imported in source — not assessed.`);
+          continue;
+        }
+        if (u.unreadableMentions.length > 0) {
+          const files = [...new Set(u.unreadableMentions)].sort().slice(0, 3).join(", ");
+          notes.push(
+            `\`${r.package}\` was not assessed: ${files} mentions it in a form this could not read, so its usage cannot be proven safe to remove.`,
+          );
+          continue;
+        }
+        if (r.argumentsMatter === true && u.opaqueArguments) {
+          notes.push(
+            `\`${r.package}\` was not assessed: a call passes an argument this cannot evaluate (a variable, a template, a spread), and the verdict depends on reading it.`,
+          );
+          continue;
+        }
+        const companion = (r.companions ?? []).find((c) => manifest.dependencies.has(c));
+        if (companion !== undefined) {
+          notes.push(
+            `\`${r.package}\` cannot be replaced: the project also depends on \`${companion}\`, which exists to add what the built-in does not do.`,
+          );
           continue;
         }
         const blocked = r.blockedBy(u);

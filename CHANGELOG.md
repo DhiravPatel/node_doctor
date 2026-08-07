@@ -98,6 +98,91 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Supply chain — `node-doctor supply-chain` (§69)
+
+- **`node-doctor supply-chain [dir]`** (aliases `deps`, `install-scripts`) — two
+  supply-chain facts readable with no network and no vulnerability feed.
+  **What runs when you install:** a `preinstall`/`install`/`postinstall`/`prepare`
+  script executes arbitrary commands on every developer laptop and CI runner
+  before any of your code does, and `npm ls` will not tell you which packages have
+  one. Read from `node_modules`, because the manifest declares ranges and *which
+  version actually got installed* is the fact that matters — and **when
+  `node_modules` is absent the report says the check did not run**, never "none
+  found". **Where it came from:** a lockfile entry resolved from a git ref or an
+  http tarball skips the registry's immutability and integrity guarantees.
+  Neither is an accusation — a postinstall script is how `esbuild` fetches its
+  binary — so the rendering deliberately avoids the finding vocabulary. Exits 0.
+  Typosquatting is **not** shipped: it is an edit-distance guess against a
+  popularity list, the exact class of statistical claim this project has
+  repeatedly found to be its own worst false-positive source.
+
+### Diagnostics — test-reality drift (§175)
+
+- **`no-mock-of-missing-export`** (Maintainability, project scope, opt-in) — a
+  `jest.mock`/`vi.mock` factory that stubs a member the real module does not
+  export. A test mocks `./services/user` and stubs `getUser`; the real export is
+  renamed to `fetchUser`; nothing fails, the suite stays green, and the test now
+  exercises a stub of a function that does not exist.
+  The claim is "that module does not export this name", so the rule abstains for
+  the **whole mock** whenever the export surface cannot be enumerated: a
+  non-relative specifier, a target not in the graph, an `export * from` (a barrel
+  is nothing but those), a CommonJS surface built at runtime, a module with no ESM
+  exports, or a factory that spreads — which is exactly how a partial mock is
+  written. Silent across this project's own 431 files.
+
+### Fixed — `--cache` had never hit
+
+- `scanProject` wrote its cache store with a hardcoded `version: 1` while
+  `loadCache` accepts only `CACHE_VERSION`, which became `2` when suppression keys
+  were added. Every `--cache` run therefore wrote a store the next run silently
+  discarded, and the cache had been a no-op since. Found by the §83 adversarial
+  hunt; `CACHE_VERSION` is now exported and used at both ends, and a round-trip is
+  covered.
+
+### Fixed — a nonexistent scan target scored 100/100
+
+- `node-doctor /typo` globbed nothing, analyzed nothing, and printed **100/100
+  healthy with exit 0** — the most dangerous output the tool can produce. Same for
+  `architecture` and every command routing through `resolveScanTarget`. A target
+  that is not a readable directory is now a usage error (exit 2, no stack trace),
+  and in `--json` mode a well-formed `ok:false` report.
+
+### Hardening from the §83 adversarial hunt
+
+- **Wrong facts in the deprecation table, again.** `util.debug` was listed as
+  removed in Node 12 — it exists and works on Node 20 and 22 (the name survives as
+  an alias of `util.debuglog`), so the entry is **removed**. `url.parse` and
+  `url.resolve` are DEP0169 **Application** scope, not Runtime, so the message no
+  longer claims they "print a warning on every call". The two `crypto.createCipher`
+  entries carried their documentation-only date in a field documented as "when the
+  current status began". `domain.create` now carries DEP0032 rather than an empty
+  string.
+- **The matcher ignored lexical scope.** Resolving the receiver only through the
+  top-level import map meant `function f(util) { util.isString(x) }` and a local
+  `const fs = makeFs()` both fired — a parameter named like a builtin is somebody
+  else's object. It now resolves the binding at the node. Conversely,
+  `import process from "node:process"` silently disabled *every* `process.*` entry;
+  that import binds the same object and is now accepted.
+- **`node-upgrade`'s redundancy gate had nine holes**, each turning a real usage
+  into a confident "safe to delete": a re-export (`export { v1 } from "uuid"`, and
+  the `export *` forms), a dynamic `await import("uuid")`, a computed
+  `import(name)`, a member-call require (`require("dotenv").parse(…)`), an options
+  object hoisted into a variable, a glob built from a template literal, a negation
+  pattern inside an array, `dotenv-expand` sitting alongside `dotenv`, and a file
+  that failed to parse. Enumerating usage forms is a losing game, so **the gate is
+  inverted**: any file that mentions the package in a form the collector did not
+  positively parse abstains for the whole package, and the report names the file.
+  An argument that cannot be evaluated is now "unknown options", not "no options".
+  A workspace root says its packages were not assessed; a `--target` past the
+  newest known release says the answer is "nothing known to have been removed so
+  far", not "nothing breaks".
+- **`architecture.modules` states what it counts.** Fan-in/fan-out are static ESM
+  `import … from` edges — the same graph `hubs` and `no-circular-imports` use — so
+  they under-count `require`, dynamic `import()`, bare side-effect imports and
+  `export … from`. Under-counting is the safe direction for a ranking, but a
+  consumer treating them as a complete census would be wrong, so the limit is
+  stated rather than implied.
+
 ### Node upgrade planning — `node-doctor node-upgrade` (§83)
 
 - **`node-doctor node-upgrade [dir] [--target <major>]`** (aliases `upgrade`,

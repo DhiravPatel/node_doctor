@@ -69,7 +69,9 @@ const DEPRECATED_PATHS: Record<string, Deprecation> = {
   "crypto.createCipher": {
     dep: "DEP0106",
     status: "end-of-life",
-    since: "Node 10",
+    // `since` is when the CURRENT status began — the removal, not the earlier
+    // documentation-only date.
+    since: "Node 22",
     removedIn: "Node 22",
     replacement:
       "`crypto.createCipheriv` with an explicit IV, and a key derived with `crypto.scrypt`/`pbkdf2` over a random salt",
@@ -77,7 +79,7 @@ const DEPRECATED_PATHS: Record<string, Deprecation> = {
   "crypto.createDecipher": {
     dep: "DEP0106",
     status: "end-of-life",
-    since: "Node 10",
+    since: "Node 22",
     removedIn: "Node 22",
     replacement: "`crypto.createDecipheriv` with an explicit IV",
   },
@@ -106,7 +108,6 @@ const DEPRECATED_PATHS: Record<string, Deprecation> = {
   "util.log": { dep: "DEP0059", status: "end-of-life", since: "Node 6", removedIn: "Node 23", replacement: "a real logger, or `console.log(new Date().toLocaleString(), message)`" },
   "util.print": { dep: "DEP0026", status: "end-of-life", since: "Node 0.12", removedIn: "Node 12", replacement: "`console.log`" },
   "util.puts": { dep: "DEP0027", status: "end-of-life", since: "Node 0.12", removedIn: "Node 12", replacement: "`console.log`" },
-  "util.debug": { dep: "DEP0028", status: "end-of-life", since: "Node 0.12", removedIn: "Node 12", replacement: "`console.error`" },
   "util.error": { dep: "DEP0029", status: "end-of-life", since: "Node 0.12", removedIn: "Node 12", replacement: "`console.error`" },
   "os.tmpDir": { dep: "DEP0022", status: "end-of-life", since: "Node 7", removedIn: "Node 14", replacement: "`os.tmpdir()`" },
   "os.getNetworkInterfaces": { dep: "DEP0023", status: "end-of-life", since: "Node 0.6", removedIn: "Node 12", replacement: "`os.networkInterfaces()`" },
@@ -120,13 +121,14 @@ const DEPRECATED_PATHS: Record<string, Deprecation> = {
   "fs.SyncWriteStream": { dep: "DEP0061", status: "end-of-life", since: "Node 8", removedIn: "Node 11", replacement: "`fs.createWriteStream`" },
 
   // --- Runtime: warns today, still works. -----------------------------------
+  // Application scope: warns for your code, silent inside `node_modules`.
   "url.parse": {
     dep: "DEP0169",
-    status: "runtime",
+    status: "application",
     since: "Node 24",
     replacement: "`new URL(input)` — the legacy parser mis-handles hostile URLs",
   },
-  "url.resolve": { dep: "DEP0169", status: "runtime", since: "Node 24", replacement: "`new URL(relative, base)`" },
+  "url.resolve": { dep: "DEP0169", status: "application", since: "Node 24", replacement: "`new URL(relative, base)`" },
 
   // --- Documentation-only: discouraged, but nothing is scheduled. -----------
   "fs.exists": {
@@ -143,7 +145,7 @@ const DEPRECATED_PATHS: Record<string, Deprecation> = {
     replacement: "a public API — `process.binding` is internal, unstable, and unavailable under `--permission`",
   },
   "domain.create": {
-    dep: "",
+    dep: "DEP0032",
     status: "documentation-only",
     since: "Node 1.4",
     replacement:
@@ -230,11 +232,28 @@ const builtinFor = (
   ctx: DiagnosticContext,
   namespaces: Map<string, string>,
 ): string | null => {
-  // `process` is a global with no import; every other receiver must be bound.
-  if (name === "process") {
-    return ctx.scope.getBinding("process", node) === null && !namespaces.has("process") ? "process" : null;
+  const bound = namespaces.get(name);
+
+  // A LOCAL binding shadows the module-level one. Resolving only through the
+  // top-level import map fired on `function f(util) { util.isString(x) }` and on
+  // `const fs = makeFs()` inside a function — a parameter named like a builtin
+  // is somebody else's object, and `Array.isArray` would be wrong advice for it.
+  const binding = ctx.scope.getBinding(name, node);
+  if (binding !== null && binding.kind !== "import") {
+    // The one exception: a `const fs = require("node:fs")` IS the builtin, and
+    // that is exactly what `namespaces` recorded at module level.
+    const declaredAtModuleScope = binding.scopeKind === "module";
+    if (!declaredAtModuleScope || bound === undefined) return null;
   }
-  return namespaces.get(name) ?? null;
+
+  if (name === "process") {
+    // `process` is a global — but `import process from "node:process"` binds it
+    // to the same object, and refusing that form silently disabled every
+    // `process.*` entry for anyone who imports it explicitly.
+    if (bound === "process") return "process";
+    return binding === null ? "process" : null;
+  }
+  return bound ?? null;
 };
 
 export const noDeprecatedNodeApi = defineDiagnostic({

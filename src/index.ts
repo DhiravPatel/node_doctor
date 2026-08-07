@@ -165,6 +165,10 @@ export type {
   RedundantDependency,
   NodeUpgradeOptions,
 } from "./core/node-upgrade.ts";
+// §69 — Supply chain: which dependencies execute code at install time, and
+// which resolve from outside the registry. Facts, never an accusation.
+export { buildSupplyChainReport } from "./core/supply-chain.ts";
+export type { SupplyChainReport, InstallScript, NonRegistrySource, CheckState } from "./core/supply-chain.ts";
 // §77 — OpenAPI Generation From Code: a spec derived from the actual routes, so
 // it cannot drift from the code that serves it.
 export { buildOpenApiDocument } from "./core/openapi.ts";

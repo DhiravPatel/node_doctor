@@ -849,7 +849,17 @@ Emit a Software Bill of Materials in **CycloneDX** and **SPDX** formats for the 
 - **Pre-commit secret blocking** *(Planned)* — the pre-commit hook ships and is advisory today; making secrets a hard block is the remaining step.
 
 ## 69. Malicious & Risky Dependency Detection
-**Status: Planned → Vision**
+**Status: Core** (`node-doctor supply-chain`, aliases `deps` / `install-scripts`) for the offline slice; **Vision** for anything needing a feed
+
+**Shipped: the two facts that need no network and no vulnerability feed.**
+
+**Which dependencies run code when you install.** A `preinstall`/`install`/`postinstall`/`prepare` script executes arbitrary commands on every developer laptop and every CI runner before a single line of your code has run — the delivery mechanism for essentially every npm compromise of the last decade, and `npm ls` will not tell you which packages have one. Read from `node_modules`, because that is the only place the truth lives: the manifest declares ranges, and which version actually got installed (and whether *it* carries a script) is a fact about the installed tree. **When `node_modules` is absent the report says the check did not run** — never "no install scripts found", because those are different answers and only one is safe to act on.
+
+**Which dependencies did not come from the registry.** A lockfile entry resolved from a git ref or an http tarball skips the registry's immutability and integrity guarantees: the same lockfile can install different bytes tomorrow, and there is no signed provenance to check.
+
+**Neither is an accusation.** A postinstall script is how `esbuild` fetches its platform binary and how `husky` installs a git hook. The report states what runs and where it came from, and the rendering deliberately avoids the finding vocabulary — no severity, no score — because "this package is malicious" is not a claim static analysis can make.
+
+Typosquatting and dependency-confusion remain unshipped: both are edit-distance guesses against a popularity list, which is exactly the class of statistical claim this project has repeatedly found to be its own worst false-positive source.
 
 - Typosquatting / dependency-confusion detection.
 - Install-script and lifecycle-hook risk analysis.
@@ -1695,9 +1705,13 @@ A test with no assertion passes forever and proves nothing — it inflates cover
 The patterns that make a test non-deterministic, caught before it starts intermittently failing CI: a real `Date.now()`/`new Date()` asserted against a fixed value, a hard-coded `setTimeout` sleep instead of awaiting a condition, a test depending on another test's mutation of shared state, an assertion on iteration order of an unordered collection, a real network/filesystem call in a unit test, `Math.random()` in a fixture. Flaky tests erode trust in the whole suite; this catches the shapes that cause it.
 
 ## 175. Test-Reality Drift ★ Differentiator
-**Status: Planned** · 🔧 Needs depth
+**Status: Detected** (`no-mock-of-missing-export`, opt-in) · 🔧 Needs depth for the rest
 
-A mock that has silently diverged from the thing it mocks: a mocked function whose signature no longer matches the real export (via the export surface, §155), a stubbed API response shape that no longer matches the client's actual return type, a hand-rolled fake of a module whose real interface gained a required method. The test passes against a fiction. Reuses the type source (§57) and export analysis to compare the mock against reality.
+**Shipped: the one piece decidable without running anything.** `no-mock-of-missing-export` fires when a `jest.mock`/`vi.mock` factory stubs a member the real module does not export. A test mocks `./services/user` and stubs `getUser`; someone renames the real export to `fetchUser`; nothing fails, the suite stays green, and the test now exercises a stub of a function that does not exist. The coverage number does not move and the confidence is entirely false.
+
+The claim is "that module does not export this name", which is wrong the moment the export surface cannot be fully enumerated — so the rule abstains for the **whole mock**, not just the doubtful key: on a non-relative specifier, a target not in the graph, an `export * from` (a barrel is nothing but those), a CommonJS surface assembled at runtime, a module with no ESM exports at all, and a factory that spreads (`...vi.importActual(…)`), which is exactly how a partial mock is written. `default` and `__esModule` are interop keys and are never checked; type-only exports count as exports, because claiming a module does not export a name it does export would be false. Silent across this project's own 431 files.
+
+The rest of §175 needs the type source and mock-shape modelling, and stays planned: a mock that has silently diverged from the thing it mocks — a mocked function whose signature no longer matches the real export (via the export surface, §155), a stubbed API response shape that no longer matches the client's actual return type, a hand-rolled fake of a module whose real interface gained a required method. The test passes against a fiction. Reuses the type source (§57) and export analysis to compare the mock against reality.
 
 ## 176. Over-Mocking & Tautology Detection ★
 **Status: Detected** (`no-tautological-mock-assertion`, opt-in) · ⚙️ Now

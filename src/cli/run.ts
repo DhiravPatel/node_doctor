@@ -24,7 +24,7 @@ import { installGitHook } from "../install/git-hook.ts";
 import { scanProject } from "../core/scan.ts";
 import type { ScanReport } from "../core/scan.ts";
 import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
-import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver, renderOpenApi, renderArchitecture, renderChurn, renderReviewRouting, renderReadiness, renderChangeShape, renderI18n, renderNodeUpgrade } from "../report/terminal.ts";
+import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver, renderOpenApi, renderArchitecture, renderChurn, renderReviewRouting, renderReadiness, renderChangeShape, renderI18n, renderNodeUpgrade, renderSupplyChain } from "../report/terminal.ts";
 import { scanAgentContext, applyContextHygiene } from "../core/agent-context.ts";
 import { isWorkspaceRoot, scanWorkspaces, workspaceFindings, discoverWorkspaces } from "../core/workspaces.ts";
 import { toJson, toJsonError } from "../report/json.ts";
@@ -63,6 +63,7 @@ import { buildReadinessReport, collectReadinessEvidence } from "../core/readines
 import { buildChangeShapeReport } from "../core/change-shape.ts";
 import { buildI18nReport } from "../core/i18n.ts";
 import { buildNodeUpgradeReport, UPGRADE_TARGETS } from "../core/node-upgrade.ts";
+import { buildSupplyChainReport } from "../core/supply-chain.ts";
 import { buildImpactGraph, computeImpact } from "../core/impact.ts";
 import { collectAttackPaths } from "../core/attack-paths.ts";
 import { loadCodeowners, groupByOwner, scorePrRisk } from "../core/ownership.ts";
@@ -109,10 +110,26 @@ const makeSourceReader = (): ((f: Finding) => string | undefined) => {
  * Resolve the directory to scan and the config to use, honoring a `rootDir`
  * config redirect (resolved against the config file's own location).
  */
+/** A scan target that is not a readable directory. Never a silent clean result. */
+export class ScanTargetError extends Error {
+  readonly target: string;
+  constructor(target: string) {
+    super(`"${target}" is not a directory`);
+    this.name = "ScanTargetError";
+    this.target = target;
+  }
+}
+
 const resolveScanTarget = async (
   args: ParsedArgs,
 ): Promise<{ dir: string; config: NodeDoctorConfig }> => {
   const cliDir = resolve(args.positionals[0] ?? ".");
+  // A path that does not exist must never resolve to a clean scan. Without
+  // this, `node-doctor /typo` globbed nothing, analyzed nothing, and printed
+  // 100/100 healthy with exit 0 — the most dangerous output the tool can make.
+  if (!existsSync(cliDir) || !statSync(cliDir).isDirectory()) {
+    throw new ScanTargetError(args.positionals[0] ?? ".");
+  }
   const loaded = await loadConfigWithSource(cliDir, args.config ? resolve(args.config) : undefined);
   if (loaded.config.rootDir && loaded.sourcePath) {
     const redirected = resolve(dirname(loaded.sourcePath), loaded.config.rootDir);
@@ -311,6 +328,7 @@ Usage:
   node-doctor change-shape [--diff <b>]  Edits whose SHAPE deserves a second look (auth one-liners, unpinned deps)
   node-doctor i18n [dir]                 Locale integrity: missing keys, broken placeholders, dead translations
   node-doctor node-upgrade [--target N]  What breaks on a Node upgrade, and what the runtime now ships natively
+  node-doctor supply-chain [dir]         What runs at install time, and what did not come from the registry
   node-doctor context [dir] [--write]    Find files an AI agent must not read; --write fences them off
   node-doctor deslop [directory]         Dead-code scan (unused files/exports/deps)
   node-doctor explain <diagnostic-id>          Explain a diagnostic and its fix
@@ -1780,6 +1798,27 @@ const runNodeUpgrade = async (args: ParsedArgs): Promise<number> => {
   return out.breaks.length > 0 ? 1 : 0;
 };
 
+/**
+ * §69 — what runs at install time, and what did not come from the registry.
+ * Reports facts and makes no accusation: a postinstall script is how `esbuild`
+ * fetches its binary, and "this package is malicious" is not a claim static
+ * analysis can make. Always exits 0.
+ */
+const runSupplyChain = async (args: ParsedArgs): Promise<number> => {
+  const { dir } = await resolveScanTarget(args);
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) {
+    process.stderr.write(`node-doctor supply-chain: "${args.positionals[0] ?? "."}" is not a directory\n`);
+    return 2;
+  }
+  const report = await buildSupplyChainReport(dir);
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(report) : JSON.stringify(report, null, 2)) + "\n");
+  } else {
+    process.stdout.write(renderSupplyChain(report, { color: useColor(args) }));
+  }
+  return 0;
+};
+
 const runFix = async (args: ParsedArgs, version: string): Promise<number> => {
   const dir = resolve(args.positionals[0] ?? ".");
   const only = await resolveOnly(args, dir);
@@ -1877,6 +1916,8 @@ export const main = async (argv: string[]): Promise<number> => {
         return await runArchitecture(args);
       case "churn":
         return await runChurn(args);
+      case "supply-chain":
+        return await runSupplyChain(args);
       case "node-upgrade":
         return await runNodeUpgrade(args);
       case "i18n":
@@ -1918,6 +1959,12 @@ export const main = async (argv: string[]): Promise<number> => {
         return args.watch ? await runWatch(args, version) : await runScan(args, version);
     }
   } catch (err) {
+    // A bad scan target is a usage error, not a crash — no stack, just the fact.
+    if (err instanceof ScanTargetError) {
+      if (args.json) process.stdout.write(toJsonError(err, { compact: args.jsonCompact }) + "\n");
+      else process.stderr.write(`node-doctor: ${err.target} is not a directory\n`);
+      return 2;
+    }
     // In JSON mode, always emit a well-formed error report so CI consumers can parse it.
     if (args.json) {
       process.stdout.write(toJsonError(err, { compact: args.jsonCompact }) + "\n");

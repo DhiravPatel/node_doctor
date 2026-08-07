@@ -1,12 +1,12 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 141,
+  "total": 142,
   "defaultOn": 95,
-  "optIn": 46,
+  "optIn": 47,
   "byCategory": {
     "Performance": 12,
     "Security": 60,
-    "Maintainability": 14,
+    "Maintainability": 15,
     "Reliability": 37,
     "Bugs": 18
   },
@@ -1186,6 +1186,21 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Register an `error` listener on every websocket: `ws.on(\"error\", (err) => logger.error({ err }, \"socket error\"))`. A socket is an EventEmitter, so an `error` event with no listener is re-thrown as an uncaught exception — one client dropping its connection would otherwise take down the process and every other socket with it."
+    },
+    {
+      "id": "no-mock-of-missing-export",
+      "title": "Mock stubs a member the module does not export",
+      "category": "Maintainability",
+      "severity": "warn",
+      "scope": "project",
+      "tags": [
+        "maintainability",
+        "testing"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Rename the mocked member to match the real export, or delete it. A mock that stubs a name the module no longer exports keeps the suite green while testing a stub of something that does not exist — the coverage number does not move, and the confidence is false."
     },
     {
       "id": "no-node-builtin-on-edge",

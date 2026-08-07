@@ -86,6 +86,14 @@ export interface ArchitectureReport {
    * consumer asking "rank my modules by coupling" gets ten rows and no way to
    * see the rest. Both numbers are already in scope when the hubs are computed,
    * so emitting them costs nothing and keeps a metrics view client-side.
+   *
+   * WHAT THEY COUNT: static ESM `import … from "…"` edges between in-project
+   * modules, which is the same graph `hubs`, `cycles` and `no-circular-imports`
+   * are built on. They therefore UNDER-count — a `require()`, a dynamic
+   * `import()`, a bare `import "./side-effect.ts"` and an `export … from` are
+   * all real coupling this does not see. Under-counting is the safe direction
+   * for a ranking, but a consumer treating these as a complete dependency
+   * census would be wrong, so the limit is stated rather than implied.
    */
   modules: ModuleDegree[];
   summary: {

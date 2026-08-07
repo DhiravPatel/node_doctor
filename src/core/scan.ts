@@ -41,6 +41,7 @@ import {
   hashContent,
   computeProbe,
   CACHE_DIR_NAME,
+  CACHE_VERSION,
   type CacheStore,
 } from "./cache.ts";
 import { DIAGNOSTICS } from "./registry.ts";
@@ -111,7 +112,7 @@ export interface ScanReport {
     analyzedFileCount: number;
     totalLines: number;
     /**
-     * Per-file line counts, in sorted path order.
+     * Per-file line counts, in sorted path order (schema v3).
      *
      * The project total alone makes a per-module density impossible to compute:
      * a consumer can group findings by directory but has no denominator, so
@@ -638,12 +639,15 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
   // Content-hash cache setup.
   const cacheDir = options.cacheDir ?? join(rootDirectory, CACHE_DIR_NAME);
   const cacheEnabled = options.cache === true;
-  const cache: CacheStore = cacheEnabled ? await loadCache(cacheDir) : { version: 1, files: {} };
+  const cache: CacheStore = cacheEnabled ? await loadCache(cacheDir) : { version: CACHE_VERSION, files: {} };
   const probe = cacheEnabled ? computeProbe(fileDiagnostics, effectiveSeverity, project.capabilities) : "";
   // The workspace pass needs this project's facts even when this project runs no
   // project-scope diagnostic of its own — a cache hit must not swallow them.
   const needFacts = projectDiagnostics.length > 0 || options.onModuleFacts !== undefined;
-  const nextCache: CacheStore = { version: 1, files: {} };
+  // MUST be CACHE_VERSION, not a literal: `loadCache` rejects any other value,
+  // so a hardcoded 1 here meant every --cache run wrote a store the next run
+  // silently discarded. The cache had not hit since CACHE_VERSION became 2.
+  const nextCache: CacheStore = { version: CACHE_VERSION, files: {} };
 
   const recordParseFailure = (filePath: string, normalizedFilePath: string, message: string): void => {
     parseFailures.push({ filePath, normalizedFilePath, message });

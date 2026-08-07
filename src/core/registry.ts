@@ -79,6 +79,7 @@ import { noConsoleLogInCommittedCode } from "../diagnostics/maintainability/no-c
 import { noDeadAsync } from "../diagnostics/maintainability/no-dead-async.ts";
 import { noDuplicateRouteDefinition } from "../diagnostics/maintainability/no-duplicate-route-definition.ts";
 import { noFlakyTestPattern } from "../diagnostics/maintainability/no-flaky-test-pattern.ts";
+import { noMockOfMissingExport } from "../diagnostics/maintainability/no-mock-of-missing-export.ts";
 import { noRedundantTryCatchRethrow } from "../diagnostics/maintainability/no-redundant-try-catch-rethrow.ts";
 import { noTautologicalMockAssertion } from "../diagnostics/maintainability/no-tautological-mock-assertion.ts";
 import { preferNodeProtocolImports } from "../diagnostics/maintainability/prefer-node-protocol-imports.ts";
@@ -219,6 +220,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noDeadAsync,
   noDuplicateRouteDefinition,
   noFlakyTestPattern,
+  noMockOfMissingExport,
   noRedundantTryCatchRethrow,
   noTautologicalMockAssertion,
   preferNodeProtocolImports,

@@ -628,6 +628,99 @@ export const renderReadiness = (
  * attached, and a reader who acts on the first half alone has been misled by a
  * true sentence.
  */
+/**
+ * §69 — the supply-chain report.
+ *
+ * Never uses the finding vocabulary: no ✖, no severity, no score. A postinstall
+ * script is how `esbuild` fetches its binary — the report states what runs and
+ * where it came from, and leaves the judgement to the reader. When a check did
+ * not run, it says so where the result would have been, because "no install
+ * scripts found" and "node_modules is not installed" are different answers and
+ * only one is safe to act on.
+ */
+export const renderSupplyChain = (
+  report: import("../core/supply-chain.ts").SupplyChainReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  lines.push(
+    `  ${p.bold("Supply chain")}  ${p.dim(
+      `${report.summary.directDependencies} direct · ${report.summary.packagesInspected} installed package(s) inspected`,
+    )}`,
+  );
+  lines.push("");
+
+  if (report.installScriptCheck !== "checked") {
+    lines.push(
+      `  ${p.yellow("●")} Install scripts NOT checked — ${
+        report.installScriptCheck === "not-installed"
+          ? "`node_modules` is not present, and the manifest cannot tell you which installed version has a script"
+          : "the installed tree could not be read"
+      }.`,
+    );
+    lines.push(p.dim("    This is not the same as finding none."));
+    lines.push("");
+  } else if (report.installScripts.length === 0) {
+    lines.push(p.green("  ✔ No installed package runs a script at install time."));
+    lines.push("");
+  } else {
+    const direct = report.installScripts.filter((s) => s.direct);
+    const transitive = report.installScripts.filter((s) => !s.direct);
+    lines.push(
+      `  ${p.bold(`${report.summary.withInstallScripts} package(s) run code when you install`)}  ${p.dim(
+        `${direct.length} direct · ${transitive.length} transitive`,
+      )}`,
+    );
+    lines.push(
+      p.dim("      Each runs on every developer machine and CI runner, before any of your code does."),
+    );
+    lines.push("");
+    for (const s of [...direct, ...transitive].slice(0, 25)) {
+      const tag = s.direct ? p.yellow("direct") : p.dim("transitive");
+      lines.push(`      ${p.cyan(`${s.package}@${s.version}`)}  ${p.dim(s.hook)}  ${tag}`);
+      lines.push(`          ${p.dim(s.command)}`);
+    }
+    if (report.installScripts.length > 25) {
+      lines.push(p.dim(`      … ${report.installScripts.length - 25} more`));
+    }
+    lines.push("");
+  }
+
+  if (report.sourceCheck !== "checked") {
+    lines.push(
+      `  ${p.yellow("●")} Package sources NOT checked — ${
+        report.sourceCheck === "no-lockfile"
+          ? "no `package-lock.json` was found"
+          : "the lockfile could not be parsed"
+      }.`,
+    );
+    lines.push("");
+  } else if (report.nonRegistrySources.length === 0) {
+    lines.push(p.green("  ✔ Every locked dependency resolves from the public registry."));
+    lines.push("");
+  } else {
+    lines.push(`  ${p.bold(`${report.nonRegistrySources.length} dependenc(ies) do not come from the registry`)}`);
+    lines.push("");
+    for (const s of report.nonRegistrySources.slice(0, 20)) {
+      lines.push(`      ${p.cyan(s.package)}`);
+      lines.push(`          ${p.dim(s.resolved)}`);
+      lines.push(`          ${p.dim(s.why)}`);
+    }
+    if (report.nonRegistrySources.length > 20) {
+      lines.push(p.dim(`      … ${report.nonRegistrySources.length - 20} more`));
+    }
+    lines.push("");
+  }
+
+  lines.push(
+    p.dim("  These are facts, not accusations — a postinstall script is also how `esbuild` fetches its binary."),
+  );
+  lines.push("");
+  return lines.join("\n");
+};
+
 export const renderNodeUpgrade = (
   report: import("../core/node-upgrade.ts").NodeUpgradeReport,
   options: { color?: boolean } = {},
@@ -649,7 +742,7 @@ export const renderNodeUpgrade = (
     if (report.breaks.length > 20) lines.push(p.dim(`      … ${report.breaks.length - 20} more`));
     lines.push("");
   } else {
-    lines.push(p.green(`  ✔ No removed API is called — nothing here breaks on Node ${report.target}.`));
+    lines.push(p.green(`  ✔ No removed API is called among the removals this build knows about.`));
     lines.push("");
   }
 

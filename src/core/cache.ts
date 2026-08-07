@@ -19,7 +19,7 @@ const CACHE_FILE = "cache.json";
 // v2 adds `suppressedKeys` (§161): the ratchet must know which findings vanished
 // because they were SUPPRESSED rather than fixed, and a cached file has to carry
 // that fact too. Bumping the version discards v1 entries cleanly.
-const CACHE_VERSION = 2;
+export const CACHE_VERSION = 2;
 
 /** A cached per-file analysis (file-scope only). */
 export interface CacheEntry {
