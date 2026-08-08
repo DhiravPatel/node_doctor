@@ -1901,9 +1901,13 @@ Code that is correct single-process and wrong under `cluster`/PM2: an in-memory 
 The write-side half §128 deliberately left: ignoring the `false` return of `.write()`, an async iterator consumed faster than it produces, `for await` over an unbounded source with no concurrency limit, and a `Readable` pushed to without checking `push()`'s return.
 
 ## 194. Event-Emitter Contract Violations ★
-**Status: Planned** · ⚙️ Now
+**Status: Partially shipped** · `no-literal-listener-removal`
 
 Emitting `error` with no listener (generalizing §31/§128), exceeding `maxListeners` on a long-lived emitter, `removeListener` with a different function identity than was added, and `once` used where the event fires before registration.
+
+**The identity half shipped.** `removeListener`/`off`/`removeEventListener` all match by reference identity, so a function LITERAL written at the removal site — or a fresh `.bind(…)`, which allocates a new object every time it runs — was never registered and removes nothing. The call succeeds, the listener stays attached holding everything it closes over, and a per-connection handler grows the emitter until `MaxListenersExceededWarning` shows up in production logs attributed to something else. This needs no knowledge of the receiver: no removal API in any library matches structurally. An identifier is never reported, and a **test file is inert** — the harm is a long-lived process, which a test does not have, and every real-world instance the corpus sweep surfaced was a suite *asserting* the no-op. Found two real bugs on first contact: `@tiptap/core`'s `ResizableNodeView` adds and removes with two different `.bind(this)` results, and the Chrome DevTools frontend bundled into `@react-native/debugger-frontend` does the same.
+
+**Not shipped, with reasons.** *`error` with no listener* needs whole-program reachability — the handler may be attached by the caller, in a factory, or after the emitter is returned. *`maxListeners` exceeded* is a runtime count. *`once` where the event fires before registration* is an ordering question no syntax answers.
 
 ---
 
@@ -1934,9 +1938,19 @@ Beyond §7's command injection: a child spawned with the parent's full `process.
 §157's topology reasoning applied to `process.send`/`message`: a shape sent that no handler destructures, a handler expecting a field nothing sends, and a payload that will not survive structured clone.
 
 ## 199. Working-Directory & Path-Resolution Assumptions ★
-**Status: Planned** · ⚙️ Now
+**Status: Partially shipped** · `no-dirname-in-esm`, `no-url-as-filesystem-path`
 
 A relative `fs` path resolved against `process.cwd()` rather than the module, `__dirname` in ESM, `import.meta.url` used as a filesystem path without `fileURLToPath`, and a config located by walking up from `cwd` in a tool that may run anywhere.
+
+**Both module-identity cases shipped; both are decidable, and the other two are not.**
+
+`no-dirname-in-esm` — `__dirname`/`__filename` are CommonJS wrapper parameters, so in an ES module the first line that reads one throws `ReferenceError` at module evaluation. The claim is "this file is an ES module", and being wrong about that turns correct CommonJS into a false report, so the module system is PROVEN: a `.mjs`/`.mts` extension, or `import.meta` in the file (which does not parse in CommonJS), or a `.js`/`.jsx` file in a `"type": "module"` package that really has `import`/`export`. A `.ts` file is not judged that last way — its emitted module format is a `tsconfig` question. Four silences the hunt and the corpus sweep proved necessary: a local `__dirname` (the `fileURLToPath` shim); a `typeof __dirname` guard anywhere in the file, which is the one operator that may name an undeclared binding safely and makes the file dual-mode; a **tool config** (`*.config.js`), which the tool's own loader bundles with `__dirname` defined; and a **bundler marker** (`import.meta.env`, `import.meta.hot`), which does not exist in Node at all and so proves the file is compiled before it runs. Only a *reference* counts — an interface member, a class field, a re-export specifier, an import alias and a TypeScript parameter property all merely spell the name.
+
+`no-url-as-filesystem-path` — `import.meta.url` is a `file://` URL string, and the finding is that raw node sitting where the string gets rewritten or opened. Narrowed by the hunt to the four `path` members that actually break it — `join` and `normalize` collapse the scheme's slashes, `resolve` and `relative` measure against `process.cwd()` — because `basename`, `dirname`, `extname` and `parse` are pure segment arithmetic that works correctly on a URL, and a module name or a sibling URL built that way is right. `fs` is judged in argument 0 only. Both rules re-check at the CALL SITE that the imported name has not been shadowed: `resolve` is the most-collided identifier in Node, being a Promise executor's own parameter and `import-meta-resolve`'s `resolve(specifier, parentURL)` whose second argument really is a URL.
+
+**Known boundaries, stated rather than hidden.** A `.js` source under a `type: module` root that a bundler transpiles to CommonJS before it runs — a serverless-webpack Lambda, a Babel monorepo workspace — is reported even though `__dirname` is defined in the artifact; the two settings are contradictory in intent, and 2,866 real source files across five `type: module` projects produced no instance. A test that *asserts* the ReferenceError, or asserts that a bare `file://` string is not a path, is reported on code whose brokenness is the point.
+
+**Not shipped, with reasons.** *A relative `fs` path resolved against `cwd`* is not a defect — `readFile("./config.json")` is correct in a CLI run from the project root and wrong in a library, and nothing in the syntax says which this is. *A config located by walking up from `cwd`* is the documented behaviour of every tool that does it.
 
 ---
 
@@ -1948,9 +1962,13 @@ A relative `fs` path resolved against `process.cwd()` rather than the module, `_
 `Buffer.allocUnsafe` with a caller-controlled size, a string built past the engine's maximum length, `JSON.parse` of an unbounded body at the allocation layer, an array pre-allocated from an untrusted count, and a regex on input with no length bound.
 
 ## 201. Numeric-Boundary & Coercion Correctness ★ Differentiator
-**Status: Planned** · ⚙️ Now
+**Status: Partially shipped** · `no-nan-comparison`
 
 The layer below §145: `parseInt` without a radix, `Number()` on a value that can be `""` (which is `0`, not `NaN`), integer division assumed where floats result, `%` on a negative operand, `Math.max()` of an empty array, an off-by-one in a `slice` bound from user input, and a comparison against `NaN`.
+
+**One of the seven is a fact about the language rather than a guess about the data, and that is the one that shipped.** `NaN` is the only value not equal to itself, so every comparison against it has a constant answer: `=== NaN` is a validation branch that never runs, so the `NaN` flows onward and surfaces three layers away as a `null` in JSON or an `Invalid Date`; `!== NaN` is a guard that never rejects anything while reading like a check that was performed. Both shapes are silent, and they fail in opposite directions. The hunt found the rule's own precision model was only half-implemented: it excluded a rebound `NaN` but not a rebound `Number`, so a file declaring its own `Number` — a value namespace, an interpreter class, a schema object — was reported for comparing object identity, and applying the rule's advice there is a `TypeError`. Both roots are now checked, including the TypeScript `namespace`/`enum` declarations the scope resolver does not record. A **test file is inert**: `expect(NaN === NaN).toBe(false)` pins the constant down on purpose and has no branch at all.
+
+**Not shipped, with reasons.** The other six all require knowing something about the VALUE, and this engine reasons about syntax. *`parseInt` without a radix* is a provable omission but not a provable defect — since ES5 the default is 10 unless the string carries an `0x` prefix, and ESLint's `radix` rule already owns the style question. *`Number("")` being `0`* needs proof that the operand can be the empty string. *Integer division*, *`%` on a negative operand* and *an off-by-one `slice` bound* are claims about ranges. *`Math.max()` of an empty array* needs proof the array can be empty, which is the emptiness analysis §145 already declines to fake.
 
 ## 202. Encoding & Buffer-Semantics Correctness ★
 **Status: Planned** · ⚙️ Now
@@ -1963,9 +1981,13 @@ The layer below §145: `parseInt` without a radix, `Number()` on a value that ca
 A write that is not atomic (no temp-then-rename), `EMFILE` from unbounded concurrent opens, a `readdir` on a directory being written, a `watch` firing twice per change, and a path assumed case-sensitive that is not on macOS/Windows.
 
 ## 204. Time-Source Correctness ★
-**Status: Planned** · ⚙️ Now
+**Status: Partially shipped** · `no-oversized-timer-delay`
 
 The non-timezone half of §116, provable where the timezone half is not: `Date.now()` used for elapsed time (it jumps with NTP; `performance.now()` is monotonic), a timeout computed from wall-clock subtraction, and `setTimeout` with a delay above 2³¹−1 (which fires immediately).
+
+**The overflow shipped.** Node stores a timer delay in a signed 32-bit int, so anything above 2,147,483,647 ms (24.85 days) is clamped to **1 ms** — the session expiry meant for next month runs on the next tick, and a monthly `setInterval` becomes a 1 ms hot loop. The arithmetic reads as obviously correct (`1000 * 60 * 60 * 24 * 30` is plainly "30 days"), which is exactly why it survives review, and nothing but production ever waits long enough to notice. The claim is arithmetic, so it is made only where the arithmetic is: the delay must fold to a number from numeric literals and `+ - * / **` ALONE — a variable, a config read or a call is never folded, however plainly its name says `THIRTY_DAYS`. The callee must be a global `setTimeout`/`setInterval` with no local binding over it, or a `node:timers` import that still resolves to that import at the call site, so a fake-timer harness or an injected scheduler with its own units is never judged.
+
+**Not shipped, with reasons.** *`Date.now()` for elapsed time* is true as a fact and useless as a finding: measuring a request or a query with wall-clock subtraction is what essentially every Node service does, the NTP step it warns about is rare and small, and a rule that fires on all of it is a style linter wearing a correctness badge. *A timeout computed from wall-clock subtraction* is the same claim one step further on.
 
 ---
 
@@ -2017,6 +2039,10 @@ Of §185–§210, **§206 and §190 shipped first** — the two the catalog's ow
 
 **§185 and §195 followed**, in that order. §185 shipped whole as `exports-check`: it is pure resolution arithmetic, and every one of its seven problems is a load that throws for a consumer and resolves for the author. §195 shipped **one of its five sub-cases** — `detached` without `unref` — and the four it did not ship are recorded above with reasons; each fails on the same boundary, which is that "this never happens anywhere" is a whole-program claim and "this option is set and this method is never named" is a syntactic one.
 
-Next: **§201 numeric coercion**, syntactic and catching bugs that survive every test.
+**Five more shipped in one wave**, chosen on a single criterion — the claim has to be an always-wrong fact about the language or the runtime, not an inference about the data: `no-nan-comparison` (§201), `no-oversized-timer-delay` (§204), `no-dirname-in-esm` and `no-url-as-filesystem-path` (§199), `no-literal-listener-removal` (§194). Each catalog section above now records which of its sub-cases shipped and, for the ones that did not, the specific thing they would have to know that syntax does not say.
+
+The wave was gated on a corpus sweep of **466,000 real files** across eighteen projects and their dependency trees, plus an adversarial hunt whose 42 claimed false positives were each reproduced by hand. Between them they found six genuine precision defects — a rule that checked whether `NaN` was rebound but not whether `Number` was, two rules that bound imported names without re-checking them at the call site, a `typeof` guard treated as a reference, a bundler-loaded config treated as a Node module, and a set of `path` functions that included four which work correctly on a URL — and two real bugs in published packages (`@tiptap/core`, `@swc/helpers`) plus one in the Chrome DevTools frontend.
+
+Next: **§202 encoding and buffer semantics**, whose `timingSafeEqual` and `byteLength`-vs-`length` cases are the same shape as the ones that just shipped.
 
 **§207 copy-paste divergence and §209 abstraction-level are the two most likely to fail a precision hunt**, and if they do they should not ship. **§205 agent-artifact detection** is the most on-thesis but needs the sharpest scoping in the set: `// TODO: implement` in a merged body is a fact, and a variable named `data2` is taste — a rule that cannot tell them apart is a style linter wearing a correctness badge. The same discipline governs as it has for 206 sections.

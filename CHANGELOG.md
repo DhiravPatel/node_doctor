@@ -98,6 +98,87 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Diagnostics — five always-wrong facts (§194, §199, §201, §204)
+
+Five new rules, chosen on one criterion: the claim has to be an always-wrong fact
+about the language or the runtime, not an inference about the data. All five are
+`error`, enabled by default, and gated on a **466,000-file corpus sweep** across
+eighteen real projects and their dependency trees.
+
+- **`no-nan-comparison`** (Bugs, §201) — `NaN` is the only value not equal to
+  itself, so every comparison against it has a constant answer. `=== NaN` is a
+  validation branch that never runs, so the `NaN` flows onward and surfaces three
+  layers away as a `null` in JSON or an `Invalid Date`; `!== NaN` is a guard that
+  never rejects anything while reading like a check that was performed. Both
+  shapes are silent, and they fail in opposite directions.
+  A file that declares its **own `Number`** — a value namespace, an interpreter
+  class, a schema object — is comparing object identity and is never reported;
+  applying this rule's advice inside such a file is a `TypeError`. TypeScript
+  `namespace`/`enum` declarations are matched by syntax because the scope
+  resolver does not record them. A test file is inert: `expect(NaN === NaN)`
+  pins the constant down on purpose and has no branch at all.
+
+- **`no-oversized-timer-delay`** (Bugs, §204) — Node stores a timer delay in a
+  signed 32-bit int, so anything above 2,147,483,647 ms (24.85 days) is clamped
+  to **1 ms**: the session expiry meant for next month runs on the next tick, and
+  a monthly `setInterval` becomes a 1 ms hot loop. `1000 * 60 * 60 * 24 * 30`
+  reads as obviously correct, which is why it survives review, and nothing but
+  production ever waits long enough to notice.
+  The delay must fold from numeric literals and `+ - * / **` ALONE — a variable,
+  a config read or a call is never folded, however plainly its name says
+  `THIRTY_DAYS` — and the callee must be a global timer or a `node:timers`
+  import that still resolves to that import at the call site.
+
+- **`no-dirname-in-esm`** (Bugs, §199) — `__dirname`/`__filename` are CommonJS
+  wrapper parameters, so in an ES module the first line that reads one throws
+  `ReferenceError` at module evaluation, before any of the module's own code
+  runs. This is the commonest breakage when a package flips `"type": "module"`,
+  and a lazily-imported route file can carry it to production untouched.
+  The module system is **proven, never inferred**: a `.mjs`/`.mts` extension, or
+  `import.meta` in the file (which does not parse in CommonJS), or a `.js` file
+  in a `"type": "module"` package that really has `import`/`export`. A `.ts` file
+  is not judged that last way — its emitted format is a `tsconfig` question.
+  Silent on: a local `__dirname` (the `fileURLToPath` shim), a `typeof __dirname`
+  guard anywhere in the file, a tool **config** (`*.config.js`, which the tool's
+  own loader bundles with `__dirname` defined), and a **bundler marker**
+  (`import.meta.env`, `import.meta.hot`, which do not exist in Node at all).
+  Only a *reference* counts — an interface member, a class field, a re-export
+  specifier, an import alias and a TypeScript parameter property merely spell it.
+
+- **`no-url-as-filesystem-path`** (Bugs, §199) — `import.meta.url` is a `file://`
+  URL string, not a path. Narrowed to the four `node:path` members that actually
+  break it: `join` and `normalize` collapse the scheme's slashes, `resolve` and
+  `relative` measure against `process.cwd()`. `basename`, `dirname`, `extname`
+  and `parse` are pure segment arithmetic that works correctly on a URL, so a
+  module name for a logger or a sibling URL for a dynamic import is never
+  reported. `fs` is judged in argument 0 only, and `fileURLToPath(…)`/`new URL(…)`
+  exclude themselves by construction.
+
+- **`no-literal-listener-removal`** (Reliability, §194) — `removeListener`/`off`/
+  `removeEventListener` match by reference identity, so a function literal
+  written at the removal site removes nothing. `.bind(…)` is the subtler half:
+  it returns a NEW function every time it runs, so the bound listener added and
+  the bound listener removed are two different objects with identical source
+  text. The listener stays attached holding everything it closes over, until
+  `MaxListenersExceededWarning` shows up attributed to something else.
+  A test file is inert — the harm is a long-lived process, which a test does not
+  have, and every real-world instance found was a suite asserting the no-op.
+
+Hardened against an adversarial hunt whose **42 claimed false positives were each
+reproduced by hand** (the hunt's own verification pass lost 26 of 47 agents to
+infrastructure errors, so its verdicts were not trusted). Between the hunt and
+the corpus sweep, six genuine precision defects were found and closed: a rule
+that checked whether `NaN` was rebound but not whether `Number` was; two rules
+that bound imported names without re-checking them at the call site, where
+`resolve` is a Promise executor's own parameter and `import-meta-resolve`'s
+second argument really is a URL; a `typeof` guard read as a reference; a
+bundler-loaded config read as a Node module; and four `path` functions that work
+fine on a URL. The sweep also turned up three real bugs in published code —
+`@tiptap/core`'s `ResizableNodeView` adds and removes a listener with two
+different `.bind(this)` results, the Chrome DevTools frontend bundled into
+`@react-native/debugger-frontend` does the same, and `@swc/helpers` ships a build
+script that reads `__dirname` from an ES module.
+
 ### Package-exports resolution — `node-doctor exports-check` (§185)
 
 - **`node-doctor exports-check [dir]`** (aliases `exports-map`, `dual-package`) —
