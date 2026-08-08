@@ -98,6 +98,99 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Diagnostics — signals, exit codes, and encoding (§196, §197, §202)
+
+Four new rules on the same criterion as the previous wave — the claim has to be an
+always-wrong fact about the runtime — with one addition to the method: **every
+runtime claim was confirmed by running Node**, not by reasoning about it. That
+caught two places where the received description of the bug was wrong.
+
+- **`no-uncatchable-signal-handler`** (Reliability, §196) — `SIGKILL` and
+  `SIGSTOP` are handled by the kernel, and the usual description of this bug is
+  "a handler that never fires". It is worse than that: `process.on("SIGKILL", …)`
+  reaches `uv_signal_start`, which fails, and the **`EINVAL` is thrown at the
+  point of registration**. The line crashes the process at exactly the moment it
+  is wiring up its shutdown path — at module scope, that is a boot failure. The
+  intent behind it is unreachable by construction, which is why orchestrators
+  send `SIGTERM` first and `SIGKILL` only after the grace period. Only the
+  registration methods on the global `process` with a literal signal name are
+  judged; `process.kill(pid, "SIGKILL")` sends the signal and is correct.
+
+- **`no-out-of-range-exit-code`** (Bugs, §197) — a process exit status is one
+  byte, so Node keeps `code & 0xFF`. `process.exit(256)` reports **success** to
+  the shell and to CI, so the pipeline goes green and the deploy proceeds;
+  `process.exit(300)` reports 44, a different failure entirely. Both confirmed by
+  running them. The code must be a numeric literal, and `process.exit(-1)` is
+  deliberately not reported — it masks to 255, a nonzero failure, which is what
+  everyone who writes it means.
+
+- **`no-string-length-as-content-length`** (Bugs, §202) — `String.length` counts
+  UTF-16 code units; `Content-Length` counts bytes. They agree for ASCII, which
+  is why this survives every test written in English, and when they disagree the
+  header is always too small: the client stops reading mid-body, truncating the
+  response or desynchronising a keep-alive connection so the remaining bytes are
+  parsed as the next one. An emoji in a display name is enough. The operand must
+  be provably a string — a literal, `JSON.stringify(…)`, `String(…)`, a
+  `.toString()`-family call — because a bare identifier could be a Buffer, whose
+  `.length` IS the byte count and is correct.
+
+- **`no-chunk-string-concat`** (Bugs, §202) — the commonest body-collection
+  snippet in circulation. A `data` chunk is a Buffer sized by the network, so
+  `+=` decodes each one on its own and a character straddling the seam becomes
+  replacement characters. Verified end-to-end against a real HTTP server: a body
+  split across two TCP segments arrives as
+  `{"name":"café \uFFFD\uFFFD\uFFFD naïve"}`.
+  It does **not** surface as a parse failure, which is how this bug is usually
+  described — `U+FFFD` is legal inside a JSON string, so `JSON.parse` succeeds
+  and the corrupted value is written to the database. Silent data loss on a
+  fraction of requests, not an error anybody gets paged for. Any mention of an
+  encoding in the file (`setEncoding`, a stream option, an explicit
+  `toString("hex")`) drops the claim, and the accumulator must be provably
+  initialised to a string.
+
+Gated on a corpus sweep of **544,000 real files** across twenty-six project trees
+and an adversarial hunt of 318 cases, whose 43 claimed false positives were every
+one reproduced by hand. All 43 are now closed.
+
+The hunt's most valuable finding is that two of these rules asserted runtime
+behaviour that is true on the main thread and **false inside a Worker** — neither
+discoverable from the documentation, both settled by ten lines of Node:
+
+- `process.on("SIGKILL", …)` does **not** throw in a worker thread. Workers never
+  install the hook that reaches `uv_signal_start`, so registration is a plain
+  `EventEmitter.on` and the listener is merely dead. The finding is entirely
+  about the crash, so a file that touches `worker_threads` is no longer judged —
+  as are a `try`/`catch` around the registration (the throw is caught and the
+  process survives), a file that replaces the global with
+  `globalThis.process = fake`, an `import process = require(…)` binding the scope
+  resolver cannot see, and a test pinning the documented throw.
+- A worker's exit code never reaches `wait(2)`. It is a plain JavaScript number
+  handed to the parent's `exit` event, so `process.exit(1001)` in a Worker really
+  does deliver 1001 and nothing is masked.
+
+The other two rules were narrowed on the same principle:
+
+- `no-string-length-as-content-length` now decides a LITERAL by **arithmetic** —
+  computing both counts and comparing — so a canned `"Not Found"` body, a hex
+  digest and a base64 token, all of which are pure ASCII, are correct code and
+  stay silent. Everything decided by a method NAME came out: `String(n)`,
+  `Date#toISOString()` and `join()` over numbers all produce ASCII, and telling
+  them apart from a non-ASCII case needs the value, not the name. `set` and
+  `header` came out too — a `Map` of column widths keyed by a header name is not
+  a response.
+- `no-chunk-string-concat` now **proves the receiver** instead of assuming it.
+  Eighteen of the hunt's claims were streams whose chunks are already strings —
+  `Readable.from(["a"])`, any `objectMode` stream, `split2()`, `through2.obj()`,
+  a `serialport` `ReadlineParser`, an `iconv-lite` `decodeStream`,
+  `Readable.fromWeb` over a `TextDecoderStream` — and `+=` is correct on every
+  one. The rule now fires only on `process.stdin`, a `net`/`tls` socket, an
+  `http`/`https` request or response, a `child_process` handle's
+  `.stdout`/`.stderr`, or an `fs.createReadStream` opened with no encoding, each
+  traced to the builtin it came from.
+
+Across 2,962 first-party source files in twenty projects, all four rules are
+silent.
+
 ### Diagnostics — five always-wrong facts (§194, §199, §201, §204)
 
 Five new rules, chosen on one criterion: the claim has to be an always-wrong fact

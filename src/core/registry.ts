@@ -31,12 +31,15 @@ import { noUnclonableWorkerMessage } from "../diagnostics/async/no-unclonable-wo
 import { requireFetchTimeout } from "../diagnostics/async/require-fetch-timeout.ts";
 // bugs
 import { noBigintPrecisionLoss } from "../diagnostics/bugs/no-bigint-precision-loss.ts";
+import { noChunkStringConcat } from "../diagnostics/bugs/no-chunk-string-concat.ts";
 import { noConstantCondition } from "../diagnostics/bugs/no-constant-condition.ts";
 import { noDirnameInEsm } from "../diagnostics/bugs/no-dirname-in-esm.ts";
 import { noFloatingPromiseInTry } from "../diagnostics/bugs/no-floating-promise-in-try.ts";
 import { noNanComparison } from "../diagnostics/bugs/no-nan-comparison.ts";
+import { noOutOfRangeExitCode } from "../diagnostics/bugs/no-out-of-range-exit-code.ts";
 import { noOversizedTimerDelay } from "../diagnostics/bugs/no-oversized-timer-delay.ts";
 import { noShadowedRoute } from "../diagnostics/bugs/no-shadowed-route.ts";
+import { noStringLengthAsContentLength } from "../diagnostics/bugs/no-string-length-as-content-length.ts";
 import { noThrowLiteral } from "../diagnostics/bugs/no-throw-literal.ts";
 import { noUnreachableCleanupAfterExit } from "../diagnostics/bugs/no-unreachable-cleanup-after-exit.ts";
 import { noUnreachableCode } from "../diagnostics/bugs/no-unreachable-code.ts";
@@ -112,6 +115,7 @@ import { noMissingWebsocketErrorHandler } from "../diagnostics/reliability/no-mi
 import { noRetryAmplification } from "../diagnostics/reliability/no-retry-amplification.ts";
 import { noThrowInFinally } from "../diagnostics/reliability/no-throw-in-finally.ts";
 import { noUnboundedModuleCache } from "../diagnostics/reliability/no-unbounded-module-cache.ts";
+import { noUncatchableSignalHandler } from "../diagnostics/reliability/no-uncatchable-signal-handler.ts";
 import { noUnclearedModuleInterval } from "../diagnostics/reliability/no-uncleared-module-interval.ts";
 import { noUnhandledPipeError } from "../diagnostics/reliability/no-unhandled-pipe-error.ts";
 import { noUnreleasedResource } from "../diagnostics/reliability/no-unreleased-resource.ts";
@@ -180,12 +184,15 @@ export const DIAGNOSTICS: Diagnostic[] = [
   requireFetchTimeout,
   // bugs
   noBigintPrecisionLoss,
+  noChunkStringConcat,
   noConstantCondition,
   noDirnameInEsm,
   noFloatingPromiseInTry,
   noNanComparison,
+  noOutOfRangeExitCode,
   noOversizedTimerDelay,
   noShadowedRoute,
+  noStringLengthAsContentLength,
   noThrowLiteral,
   noUnreachableCleanupAfterExit,
   noUnreachableCode,
@@ -261,6 +268,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noRetryAmplification,
   noThrowInFinally,
   noUnboundedModuleCache,
+  noUncatchableSignalHandler,
   noUnclearedModuleInterval,
   noUnhandledPipeError,
   noUnreleasedResource,

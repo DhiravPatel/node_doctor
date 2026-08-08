@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 150,
-  "defaultOn": 100,
+  "total": 154,
+  "defaultOn": 104,
   "optIn": 50,
   "byCategory": {
     "Performance": 12,
     "Security": 60,
     "Maintainability": 15,
-    "Reliability": 40,
-    "Bugs": 23
+    "Reliability": 41,
+    "Bugs": 26
   },
   "categoryWeights": {
     "Security": 2,
@@ -583,6 +583,22 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Give every cache entry an expiry: `redis.set(key, value, 'EX', 60)` / `redis.setex(key, 60, value)`, or the client's TTL option (`cache.set(key, value, { ttl: 300 })`). Without one the entry never expires — memory grows without bound and stale data is served indefinitely."
+    },
+    {
+      "id": "no-chunk-string-concat",
+      "title": "Byte-stream chunks concatenated onto a string, splitting multibyte characters",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "encoding",
+        "streams"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Collect the chunks and decode once: `const chunks = []; stream.on(\"data\", (c) => chunks.push(c)); … Buffer.concat(chunks).toString(\"utf8\")`. Or call `stream.setEncoding(\"utf8\")` first, which installs a decoder that carries a partial character across the boundary. `+=` decodes each chunk on its own, so a character split by the boundary becomes replacement characters — and because `U+FFFD` is legal inside a JSON string, nothing throws and the corrupted value is stored."
     },
     {
       "id": "no-circular-imports",
@@ -1342,6 +1358,22 @@
       "recommendation": "Restrict the CIDR to the networks that actually need access (a VPC range, a bastion, an office block). If the service is genuinely public, terminate it behind a load balancer or WAF rather than opening the instance's security group."
     },
     {
+      "id": "no-out-of-range-exit-code",
+      "title": "Exit code outside 0–255 is masked to a different status",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "cli",
+        "correctness",
+        "process"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use a code in `0..255`. A process exit status is one byte, so Node keeps only `code & 0xFF` — `process.exit(256)` reports SUCCESS to the shell and to CI, and `process.exit(300)` reports 44."
+    },
+    {
       "id": "no-overbroad-iam-policy",
       "title": "IAM policy allows every action on every resource",
       "category": "Security",
@@ -1693,6 +1725,22 @@
       "recommendation": "Drop the `g`/`y` flag for a membership check (`/^\\d+$/` instead of `/^\\d+$/g`) — a stateless regex gives the same answer every call. If you truly need the flag, reset `re.lastIndex = 0` before each `.test()`, or match against a fresh literal."
     },
     {
+      "id": "no-string-length-as-content-length",
+      "title": "Content-Length set from a character count, not a byte count",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "encoding",
+        "http"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use `Buffer.byteLength(body)`. `String.prototype.length` counts UTF-16 code units, and `Content-Length` counts bytes — the two agree only for ASCII, and when they disagree the header is too small, so the client truncates the body or desynchronises a keep-alive connection."
+    },
+    {
       "id": "no-swallowed-error-empty-catch",
       "title": "Empty catch swallows the error",
       "category": "Bugs",
@@ -1908,6 +1956,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Bound the fan-out instead of removing the parallelism: wrap each task with a concurrency limiter (`p-limit`), e.g. `collection.map((x) => limit(() => work(x)))`, so at most N run at once."
+    },
+    {
+      "id": "no-uncatchable-signal-handler",
+      "title": "Handler registered for a signal that cannot be caught",
+      "category": "Reliability",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "lifecycle",
+        "signals"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Move the cleanup to `SIGTERM` (and `SIGINT` for a local Ctrl-C). `SIGKILL` and `SIGSTOP` are handled by the kernel and cannot be caught — Node throws `EINVAL` from `uv_signal_start` at the point of registration, so this line crashes the process rather than protecting it."
     },
     {
       "id": "no-unchecked-required-env",
