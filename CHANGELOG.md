@@ -98,6 +98,170 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Diagnostics — five always-wrong facts (§194, §199, §201, §204)
+
+Five new rules, chosen on one criterion: the claim has to be an always-wrong fact
+about the language or the runtime, not an inference about the data. All five are
+`error`, enabled by default, and gated on a **466,000-file corpus sweep** across
+eighteen real projects and their dependency trees.
+
+- **`no-nan-comparison`** (Bugs, §201) — `NaN` is the only value not equal to
+  itself, so every comparison against it has a constant answer. `=== NaN` is a
+  validation branch that never runs, so the `NaN` flows onward and surfaces three
+  layers away as a `null` in JSON or an `Invalid Date`; `!== NaN` is a guard that
+  never rejects anything while reading like a check that was performed. Both
+  shapes are silent, and they fail in opposite directions.
+  A file that declares its **own `Number`** — a value namespace, an interpreter
+  class, a schema object — is comparing object identity and is never reported;
+  applying this rule's advice inside such a file is a `TypeError`. TypeScript
+  `namespace`/`enum` declarations are matched by syntax because the scope
+  resolver does not record them. A test file is inert: `expect(NaN === NaN)`
+  pins the constant down on purpose and has no branch at all.
+
+- **`no-oversized-timer-delay`** (Bugs, §204) — Node stores a timer delay in a
+  signed 32-bit int, so anything above 2,147,483,647 ms (24.85 days) is clamped
+  to **1 ms**: the session expiry meant for next month runs on the next tick, and
+  a monthly `setInterval` becomes a 1 ms hot loop. `1000 * 60 * 60 * 24 * 30`
+  reads as obviously correct, which is why it survives review, and nothing but
+  production ever waits long enough to notice.
+  The delay must fold from numeric literals and `+ - * / **` ALONE — a variable,
+  a config read or a call is never folded, however plainly its name says
+  `THIRTY_DAYS` — and the callee must be a global timer or a `node:timers`
+  import that still resolves to that import at the call site.
+
+- **`no-dirname-in-esm`** (Bugs, §199) — `__dirname`/`__filename` are CommonJS
+  wrapper parameters, so in an ES module the first line that reads one throws
+  `ReferenceError` at module evaluation, before any of the module's own code
+  runs. This is the commonest breakage when a package flips `"type": "module"`,
+  and a lazily-imported route file can carry it to production untouched.
+  The module system is **proven, never inferred**: a `.mjs`/`.mts` extension, or
+  `import.meta` in the file (which does not parse in CommonJS), or a `.js` file
+  in a `"type": "module"` package that really has `import`/`export`. A `.ts` file
+  is not judged that last way — its emitted format is a `tsconfig` question.
+  Silent on: a local `__dirname` (the `fileURLToPath` shim), a `typeof __dirname`
+  guard anywhere in the file, a tool **config** (`*.config.js`, which the tool's
+  own loader bundles with `__dirname` defined), and a **bundler marker**
+  (`import.meta.env`, `import.meta.hot`, which do not exist in Node at all).
+  Only a *reference* counts — an interface member, a class field, a re-export
+  specifier, an import alias and a TypeScript parameter property merely spell it.
+
+- **`no-url-as-filesystem-path`** (Bugs, §199) — `import.meta.url` is a `file://`
+  URL string, not a path. Narrowed to the four `node:path` members that actually
+  break it: `join` and `normalize` collapse the scheme's slashes, `resolve` and
+  `relative` measure against `process.cwd()`. `basename`, `dirname`, `extname`
+  and `parse` are pure segment arithmetic that works correctly on a URL, so a
+  module name for a logger or a sibling URL for a dynamic import is never
+  reported. `fs` is judged in argument 0 only, and `fileURLToPath(…)`/`new URL(…)`
+  exclude themselves by construction.
+
+- **`no-literal-listener-removal`** (Reliability, §194) — `removeListener`/`off`/
+  `removeEventListener` match by reference identity, so a function literal
+  written at the removal site removes nothing. `.bind(…)` is the subtler half:
+  it returns a NEW function every time it runs, so the bound listener added and
+  the bound listener removed are two different objects with identical source
+  text. The listener stays attached holding everything it closes over, until
+  `MaxListenersExceededWarning` shows up attributed to something else.
+  A test file is inert — the harm is a long-lived process, which a test does not
+  have, and every real-world instance found was a suite asserting the no-op.
+
+Hardened against an adversarial hunt whose **42 claimed false positives were each
+reproduced by hand** (the hunt's own verification pass lost 26 of 47 agents to
+infrastructure errors, so its verdicts were not trusted). Between the hunt and
+the corpus sweep, six genuine precision defects were found and closed: a rule
+that checked whether `NaN` was rebound but not whether `Number` was; two rules
+that bound imported names without re-checking them at the call site, where
+`resolve` is a Promise executor's own parameter and `import-meta-resolve`'s
+second argument really is a URL; a `typeof` guard read as a reference; a
+bundler-loaded config read as a Node module; and four `path` functions that work
+fine on a URL. The sweep also turned up three real bugs in published code —
+`@tiptap/core`'s `ResizableNodeView` adds and removes a listener with two
+different `.bind(this)` results, the Chrome DevTools frontend bundled into
+`@react-native/debugger-frontend` does the same, and `@swc/helpers` ships a build
+script that reads `__dirname` from an ES module.
+
+### Package-exports resolution — `node-doctor exports-check` (§185)
+
+- **`node-doctor exports-check [dir]`** (aliases `exports-map`, `dual-package`) —
+  a `package.json` `exports` map is a resolution program, and every way it can be
+  wrong fails for a *consumer* while succeeding for the author, who has the whole
+  source tree and never loads through the map. Seven problems: a target that is
+  not on disk (`ERR_MODULE_NOT_FOUND`, and `npm publish` does not check), a
+  `require` condition pointing at ESM (`ERR_REQUIRE_ESM` for every CommonJS
+  consumer while ESM consumers work, so it passes the author's own test), an
+  `import` condition pointing at `.cjs`, a `types` condition ordered after
+  `default` (never reached: the package silently resolves to `any`), `types`
+  after any other runtime condition, `main` and `exports["."]` resolving to
+  different files, and a wildcard that matches nothing.
+  The bar is the runtime's own bar, so anything the resolver treats as "maybe" is
+  a silence. A file's module system comes from its extension first, then from
+  **ESM syntax, which is conclusive either way** — whether the nearest `type`
+  field says `module` or `commonjs`, `require()` cannot load that file, which is
+  exactly the claim. A bundled file with neither import/export nor `require` is
+  *unknown* and judged not at all. Conditions are tracked **structurally** as the
+  map is walked, so a subpath named `./require` is never read as a condition.
+  Bare-specifier targets belong to the package they name, `null` targets are
+  deliberate blocks, `types`/`typings` targets are never judged for module system,
+  and a `.` export carrying only `types` cannot disagree with `main` — it names no
+  runtime file. Exits 1 on any finding. Zero findings on this project's own
+  manifest.
+
+### Diagnostics — detached child processes (§195)
+
+- **`no-detached-child-without-unref`** (Reliability, warn, opt-in) —
+  `detached: true` without `unref()`. Detaching puts the child in its own process
+  group so it can outlive the parent, but the parent's event loop still holds a
+  reference to it: the parent **cannot exit** until the child does. A CLI that
+  spawns a detached background worker and then finishes its work simply hangs —
+  no error, no output, and in CI a job that runs to its timeout. It is the exact
+  opposite of what the author asked for.
+  The claim is "this handle is never unref'd", so every way it could be is a
+  silence. The spawner must be **proven by import** (`spawn` is also `cross-spawn`,
+  test helpers, and userland process pools), `detached` must be **literally**
+  `true` — a variable, a ternary, or a spread *after* the key that could overwrite
+  it all abstain — and the result must be bound to a plain local. `unref()`
+  anywhere on that binding ends the claim: a later line, a callback, a guard, a
+  `finally`, optional chaining, or a computed member that could *be* it. A binding
+  that escapes (returned, passed, stored, aliased) may be unref'd out of sight and
+  is never reported.
+
+### Hallucinated-API detection — `node-doctor api-check` (§206)
+
+- **`node-doctor api-check [dir]`** (aliases `hallucinated`, `check-api`) — a
+  member used on a package that the package does not export. `import { readJson }
+  from "fs-extra"` when the export is `readJSON` is **not a compile error** in
+  JavaScript: the import is `undefined` and the failure is a `TypeError` on the
+  first request that reaches the line. It is the commonest way agent-written code
+  is wrong, and no existing check sees it — the type checker only if the package
+  ships types *and* the project is strict, the linter never, the test suite only
+  if that path is covered.
+  Reuses §175's export-surface comparison and §155's `complete` flag. **Abstains
+  for the whole package** the moment the surface is not fully readable — a
+  partially-read surface makes every absent name suspect — with a stated reason
+  for each: not installed (so "I did not look" never reads as "clean"), an
+  unfollowable `export *`, a runtime-built `module.exports`, a types-only entry
+  (a `.d.ts` is a claim about the runtime, not the runtime), a **dual ESM/CJS
+  package whose entries export different names**, and any computed access.
+  Aliased imports are checked under their source name, a local binding shadows
+  the namespace import it collides with, and members off a *default* import are
+  not the named-export set. Exits 1 on a finding. Zero false claims across this
+  project's 407 files.
+
+### Diagnostics — worker-thread clone boundary (§190)
+
+- **`no-unclonable-worker-message`** (Bugs, error, opt-in) — a function literal
+  in a `postMessage` payload. `postMessage` runs the structured clone algorithm,
+  which throws `DataCloneError` on a function — synchronously, at the call, on
+  whichever path carries the callback.
+  The algorithm's rules are mostly undecidable from syntax (a `Map` clones, a
+  `Proxy` throws, a class instance loses its prototype), so the rule claims only
+  the decidable case. The receiver must be a **proven worker-thread port** — a
+  binding from `new Worker(…)` imported from `node:worker_threads`, or
+  `parentPort` — because `postMessage` is also on a `BroadcastChannel`, a
+  `MessagePort`, a browser `window` and userland emitters, and the browser's has
+  a different remedy. A bare identifier in the payload is never flagged, and the
+  walk stops at any nested function's body, which is not part of the cloned
+  structure. Zero findings across this project's 430 files.
+
 ### Diagnostics — peer-consistency (§164)
 
 - **`no-peer-inconsistent-handler`** (Reliability, opt-in, `confidence: medium`) —

@@ -240,6 +240,19 @@ const patternNames = (node: AstNode | undefined): string[] => {
  * (bounded, cycle-safe). Sets `complete = false` when any re-export target
  * cannot be resolved or parsed — the caller then refuses removal claims.
  */
+/**
+ * Every name a module exports, plus whether the surface is COMPLETE.
+ *
+ * `complete: false` is the abstention signal and the reason this is worth
+ * sharing: it means some way the module writes its exports could not be
+ * followed — an unresolvable `export *`, an opaque `module.exports`, a parse
+ * failure — so an "X is not exported" claim built on it would be a guess.
+ * Exported for §206, which asks exactly that question of an installed package.
+ */
+export const readExportSurface = async (
+  file: string,
+): Promise<{ names: Set<string>; complete: boolean }> => extractExports(file, new Set(), 0);
+
 const extractExports = async (
   file: string,
   seen: Set<string>,

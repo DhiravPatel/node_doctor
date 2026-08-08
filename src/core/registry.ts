@@ -22,20 +22,26 @@ import { grpcInsecureCredentials } from "../diagnostics/api/grpc-insecure-creden
 import { noAsyncArrayCallback } from "../diagnostics/async/no-async-array-callback.ts";
 import { noAsyncExecutor } from "../diagnostics/async/no-async-executor.ts";
 import { noAwaitInLoopOverIndependentWork } from "../diagnostics/async/no-await-in-loop-over-independent-work.ts";
+import { noDetachedChildWithoutUnref } from "../diagnostics/async/no-detached-child-without-unref.ts";
 import { noMissingCatchOnAsyncIife } from "../diagnostics/async/no-missing-catch-on-async-iife.ts";
 import { noRaceWithoutTimeout } from "../diagnostics/async/no-race-without-timeout.ts";
 import { noSwallowedErrorEmptyCatch } from "../diagnostics/async/no-swallowed-error-empty-catch.ts";
 import { noUnboundedPromiseAll } from "../diagnostics/async/no-unbounded-promise-all.ts";
+import { noUnclonableWorkerMessage } from "../diagnostics/async/no-unclonable-worker-message.ts";
 import { requireFetchTimeout } from "../diagnostics/async/require-fetch-timeout.ts";
 // bugs
 import { noBigintPrecisionLoss } from "../diagnostics/bugs/no-bigint-precision-loss.ts";
 import { noConstantCondition } from "../diagnostics/bugs/no-constant-condition.ts";
+import { noDirnameInEsm } from "../diagnostics/bugs/no-dirname-in-esm.ts";
 import { noFloatingPromiseInTry } from "../diagnostics/bugs/no-floating-promise-in-try.ts";
+import { noNanComparison } from "../diagnostics/bugs/no-nan-comparison.ts";
+import { noOversizedTimerDelay } from "../diagnostics/bugs/no-oversized-timer-delay.ts";
 import { noShadowedRoute } from "../diagnostics/bugs/no-shadowed-route.ts";
 import { noThrowLiteral } from "../diagnostics/bugs/no-throw-literal.ts";
 import { noUnreachableCleanupAfterExit } from "../diagnostics/bugs/no-unreachable-cleanup-after-exit.ts";
 import { noUnreachableCode } from "../diagnostics/bugs/no-unreachable-code.ts";
 import { noUnstableOffsetPagination } from "../diagnostics/bugs/no-unstable-offset-pagination.ts";
+import { noUrlAsFilesystemPath } from "../diagnostics/bugs/no-url-as-filesystem-path.ts";
 // config
 import { noNonNullEnvAccess } from "../diagnostics/config/no-nonnull-env-access.ts";
 // db
@@ -98,6 +104,7 @@ import { noInfiniteRetryWithoutBackoff } from "../diagnostics/reliability/no-inf
 import { noInvalidCronExpression } from "../diagnostics/reliability/no-invalid-cron-expression.ts";
 import { noInvertedTimeoutBudget } from "../diagnostics/reliability/no-inverted-timeout-budget.ts";
 import { noListenerAddedPerRequest } from "../diagnostics/reliability/no-listener-added-per-request.ts";
+import { noLiteralListenerRemoval } from "../diagnostics/reliability/no-literal-listener-removal.ts";
 import { noLivenessCheckWithDependency } from "../diagnostics/reliability/no-liveness-check-with-dependency.ts";
 import { noLostAsyncContext } from "../diagnostics/reliability/no-lost-async-context.ts";
 import { noMissingStreamErrorHandler } from "../diagnostics/reliability/no-missing-stream-error-handler.ts";
@@ -164,20 +171,26 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noAsyncArrayCallback,
   noAsyncExecutor,
   noAwaitInLoopOverIndependentWork,
+  noDetachedChildWithoutUnref,
   noMissingCatchOnAsyncIife,
   noRaceWithoutTimeout,
   noSwallowedErrorEmptyCatch,
   noUnboundedPromiseAll,
+  noUnclonableWorkerMessage,
   requireFetchTimeout,
   // bugs
   noBigintPrecisionLoss,
   noConstantCondition,
+  noDirnameInEsm,
   noFloatingPromiseInTry,
+  noNanComparison,
+  noOversizedTimerDelay,
   noShadowedRoute,
   noThrowLiteral,
   noUnreachableCleanupAfterExit,
   noUnreachableCode,
   noUnstableOffsetPagination,
+  noUrlAsFilesystemPath,
   // config
   noNonNullEnvAccess,
   // db
@@ -240,6 +253,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noInvalidCronExpression,
   noInvertedTimeoutBudget,
   noListenerAddedPerRequest,
+  noLiteralListenerRemoval,
   noLivenessCheckWithDependency,
   noLostAsyncContext,
   noMissingStreamErrorHandler,

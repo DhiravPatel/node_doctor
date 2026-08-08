@@ -169,6 +169,14 @@ export type {
 // which resolve from outside the registry. Facts, never an accusation.
 export { buildSupplyChainReport } from "./core/supply-chain.ts";
 export type { SupplyChainReport, InstallScript, NonRegistrySource, CheckState } from "./core/supply-chain.ts";
+// §206 — Hallucinated-API detection: a member used on a package that the
+// package does not export — a runtime TypeError that no type check catches.
+export { buildPackageApiReport } from "./core/package-api.ts";
+export type { PackageApiReport, UnknownMember, SkippedPackage } from "./core/package-api.ts";
+// §185 — the `exports` map checked against the files on disk: dead targets and
+// ESM/CJS mismatches that resolve fine for the author and throw for consumers.
+export { buildExportsCheckReport } from "./core/exports-map.ts";
+export type { ExportsCheckReport, ExportFinding, ExportProblem } from "./core/exports-map.ts";
 // §77 — OpenAPI Generation From Code: a spec derived from the actual routes, so
 // it cannot drift from the code that serves it.
 export { buildOpenApiDocument } from "./core/openapi.ts";

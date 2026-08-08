@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 143,
-  "defaultOn": 95,
-  "optIn": 48,
+  "total": 150,
+  "defaultOn": 100,
+  "optIn": 50,
   "byCategory": {
     "Performance": 12,
     "Security": 60,
     "Maintainability": 15,
-    "Reliability": 38,
-    "Bugs": 18
+    "Reliability": 40,
+    "Bugs": 23
   },
   "categoryWeights": {
     "Security": 2,
@@ -731,6 +731,38 @@
       "recommendation": "Replace the deprecated API with its modern equivalent. These calls keep working until the runtime upgrade that removes them, at which point they become an outage rather than a warning."
     },
     {
+      "id": "no-detached-child-without-unref",
+      "title": "Detached child process is never unref'd, so the parent cannot exit",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "async",
+        "lifecycle",
+        "reliability"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Call `child.unref()` after spawning. `detached: true` lets the child outlive the parent, but the parent's event loop still holds a reference to it — so the parent hangs until the child exits, which is the opposite of what detaching was for."
+    },
+    {
+      "id": "no-dirname-in-esm",
+      "title": "__dirname / __filename in an ES module is a ReferenceError",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "esm",
+        "modules"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Derive the directory from the module's own URL: `import { fileURLToPath } from \"node:url\"; const here = dirname(fileURLToPath(import.meta.url));` — or `import.meta.dirname` on Node 20.11+. `__dirname` and `__filename` are CommonJS wrapper parameters and do not exist in an ES module."
+    },
+    {
       "id": "no-disabled-tls-verification",
       "title": "TLS certificate verification disabled",
       "category": "Security",
@@ -1048,6 +1080,22 @@
       "recommendation": "Register listeners once at startup, or use `emitter.once(...)` inside the handler and remove it with `removeListener` when the request completes."
     },
     {
+      "id": "no-literal-listener-removal",
+      "title": "Listener removed by a function that was never added",
+      "category": "Reliability",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "events",
+        "memory"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Hold the listener in a variable and pass that same reference to both calls: `const onData = …; emitter.on(\"data\", onData); emitter.off(\"data\", onData);`. Removal matches by reference identity, so a function literal — or a fresh `.bind(…)` — never matches what was added."
+    },
+    {
       "id": "no-liveness-check-with-dependency",
       "title": "Liveness probe checks a downstream dependency",
       "category": "Reliability",
@@ -1203,6 +1251,21 @@
       "recommendation": "Rename the mocked member to match the real export, or delete it. A mock that stubs a name the module no longer exports keeps the suite green while testing a stub of something that does not exist — the coverage number does not move, and the confidence is false."
     },
     {
+      "id": "no-nan-comparison",
+      "title": "Comparison against NaN, whose result is constant",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "numeric"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use `Number.isNaN(value)` — or `Object.is(value, NaN)`. `NaN` is not equal to itself, so `=== NaN` is always false and `!== NaN` is always true: one guard never runs and the other never stops anything."
+    },
+    {
       "id": "no-node-builtin-on-edge",
       "title": "Node built-in used in an edge-runtime project",
       "category": "Reliability",
@@ -1292,6 +1355,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Scope the statement: list the specific actions the principal needs and the specific resource ARNs they apply to. `Action: \"*\"` with `Resource: \"*\"` is administrator access — grant it deliberately and never to a service role."
+    },
+    {
+      "id": "no-oversized-timer-delay",
+      "title": "Timer delay overflows 32 bits, so the timer fires immediately",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "numeric",
+        "timers"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Node stores a timer delay in a signed 32-bit int, so anything above 2147483647 ms (24.85 days) is clamped to 1 ms — the callback runs on the next tick instead of next month. Schedule it with a cron/queue, or re-arm a shorter timer until the deadline is reached."
     },
     {
       "id": "no-path-traversal",
@@ -1863,6 +1942,22 @@
       "recommendation": "Store the handle and `clearInterval(handle)` on shutdown, or call `handle.unref()` so the interval does not by itself keep the process alive."
     },
     {
+      "id": "no-unclonable-worker-message",
+      "title": "Function posted across the worker boundary cannot be cloned",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "async",
+        "concurrency",
+        "crash"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Remove the function from the payload and coordinate over messages instead: post the data, and reply with `worker.once(\"message\", …)`. `postMessage` runs the structured clone algorithm, which throws `DataCloneError` on a function — synchronously, at the call, on whichever path carries the callback."
+    },
+    {
       "id": "no-unhandled-pipe-error",
       "title": "Piped stream has no error handler",
       "category": "Reliability",
@@ -1996,6 +2091,22 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Give every `skip`/`OFFSET` query a stable, unique sort key (e.g. `orderBy: { id: 'asc' }` or `ORDER BY id`), or switch to keyset/cursor pagination. Without a deterministic order, rows inserted or deleted between page fetches shift the window, so pages silently drop and duplicate records."
+    },
+    {
+      "id": "no-url-as-filesystem-path",
+      "title": "import.meta.url used where a filesystem path is required",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "esm",
+        "filesystem"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Convert it first: `import { fileURLToPath } from \"node:url\"` and pass `fileURLToPath(import.meta.url)`, or hand `fs` a `new URL(…)` object rather than the string. `import.meta.url` is a `file://` URL, and `node:path` treats it as an ordinary relative segment."
     },
     {
       "id": "no-vm-run-untrusted",

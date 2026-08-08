@@ -54,8 +54,13 @@ const RUNNER_SOURCES = new Set([
   "assert/strict",
 ]);
 
-/** Path shapes that conventionally mark a test file. */
-const TEST_PATH = /(^|\/)(__tests__|__specs__|test|tests|spec|specs)\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
+/**
+ * Path shapes that conventionally mark a test file. Exported for rules whose
+ * harm model is about a process's LIFETIME rather than a test's content: those
+ * can act on the path alone, where a rule that makes a claim *about* the test
+ * needs the stronger `isTestFile` proof.
+ */
+export const TEST_PATH = /(^|\/)(__tests__|__specs__|test|tests|spec|specs)\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
 
 /** The functions that declare a test case. */
 const TEST_DECLARATORS = new Set(["it", "test", "fit", "xit", "specify"]);

@@ -38,6 +38,8 @@ export type Command =
   | "i18n"
   | "node-upgrade"
   | "supply-chain"
+  | "api-check"
+  | "exports-check"
   | "version";
 
 // "rules" is accepted as a legacy alias for "diagnostics"; "observe" for
@@ -67,6 +69,10 @@ const COMMAND_ALIASES: Record<string, Command> = {
   "node-version": "node-upgrade",
   deps: "supply-chain",
   "install-scripts": "supply-chain",
+  hallucinated: "api-check",
+  "check-api": "api-check",
+  "exports-map": "exports-check",
+  "dual-package": "exports-check",
 };
 
 const COMMANDS = new Set<string>([
@@ -126,6 +132,12 @@ const COMMANDS = new Set<string>([
   "supply-chain",
   "deps",
   "install-scripts",
+  "api-check",
+  "hallucinated",
+  "check-api",
+  "exports-check",
+  "exports-map",
+  "dual-package",
   "version",
   "rules",
 ]);

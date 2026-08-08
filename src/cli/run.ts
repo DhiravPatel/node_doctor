@@ -24,7 +24,7 @@ import { installGitHook } from "../install/git-hook.ts";
 import { scanProject } from "../core/scan.ts";
 import type { ScanReport } from "../core/scan.ts";
 import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
-import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver, renderOpenApi, renderArchitecture, renderChurn, renderReviewRouting, renderReadiness, renderChangeShape, renderI18n, renderNodeUpgrade, renderSupplyChain } from "../report/terminal.ts";
+import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver, renderOpenApi, renderArchitecture, renderChurn, renderReviewRouting, renderReadiness, renderChangeShape, renderI18n, renderNodeUpgrade, renderSupplyChain, renderPackageApi, renderExportsCheck } from "../report/terminal.ts";
 import { scanAgentContext, applyContextHygiene } from "../core/agent-context.ts";
 import { isWorkspaceRoot, scanWorkspaces, workspaceFindings, discoverWorkspaces } from "../core/workspaces.ts";
 import { toJson, toJsonError } from "../report/json.ts";
@@ -64,6 +64,8 @@ import { buildChangeShapeReport } from "../core/change-shape.ts";
 import { buildI18nReport } from "../core/i18n.ts";
 import { buildNodeUpgradeReport, UPGRADE_TARGETS } from "../core/node-upgrade.ts";
 import { buildSupplyChainReport } from "../core/supply-chain.ts";
+import { buildPackageApiReport } from "../core/package-api.ts";
+import { buildExportsCheckReport } from "../core/exports-map.ts";
 import { buildImpactGraph, computeImpact } from "../core/impact.ts";
 import { collectAttackPaths } from "../core/attack-paths.ts";
 import { loadCodeowners, groupByOwner, scorePrRisk } from "../core/ownership.ts";
@@ -329,6 +331,8 @@ Usage:
   node-doctor i18n [dir]                 Locale integrity: missing keys, broken placeholders, dead translations
   node-doctor node-upgrade [--target N]  What breaks on a Node upgrade, and what the runtime now ships natively
   node-doctor supply-chain [dir]         What runs at install time, and what did not come from the registry
+  node-doctor api-check [dir]            Members called on a package that the package does not export
+  node-doctor exports-check [dir]        Package exports map vs the files on disk: dead targets, ESM/CJS mismatches
   node-doctor context [dir] [--write]    Find files an AI agent must not read; --write fences them off
   node-doctor deslop [directory]         Dead-code scan (unused files/exports/deps)
   node-doctor explain <diagnostic-id>          Explain a diagnostic and its fix
@@ -1819,6 +1823,41 @@ const runSupplyChain = async (args: ParsedArgs): Promise<number> => {
   return 0;
 };
 
+/**
+ * §206 — a member used on a package that the package does not export. In
+ * JavaScript that is not a compile error: the import is `undefined` and the
+ * failure is a TypeError on the first request that reaches the line.
+ */
+const runApiCheck = async (args: ParsedArgs): Promise<number> => {
+  const { dir, config } = await resolveScanTarget(args);
+  const report = await buildPackageApiReport(dir, { config });
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(report) : JSON.stringify(report, null, 2)) + "\n");
+  } else {
+    process.stdout.write(renderPackageApi(report, { color: useColor(args) }));
+  }
+  // A name the package does not export is a runtime TypeError waiting to happen.
+  return report.unknownMembers.length > 0 ? 1 : 0;
+};
+
+/**
+ * §185 — the `exports` map, checked against the files on disk.
+ *
+ * Exit 1 on any finding: every one of them is an import that throws for a
+ * consumer and resolves fine for the author, which is exactly the class of
+ * break that ships.
+ */
+const runExportsCheck = async (args: ParsedArgs): Promise<number> => {
+  const { dir, config } = await resolveScanTarget(args);
+  const report = await buildExportsCheckReport(dir, { config });
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(report) : JSON.stringify(report, null, 2)) + "\n");
+  } else {
+    process.stdout.write(renderExportsCheck(report, { color: useColor(args) }));
+  }
+  return report.findings.length > 0 ? 1 : 0;
+};
+
 const runFix = async (args: ParsedArgs, version: string): Promise<number> => {
   const dir = resolve(args.positionals[0] ?? ".");
   const only = await resolveOnly(args, dir);
@@ -1916,6 +1955,10 @@ export const main = async (argv: string[]): Promise<number> => {
         return await runArchitecture(args);
       case "churn":
         return await runChurn(args);
+      case "api-check":
+        return await runApiCheck(args);
+      case "exports-check":
+        return await runExportsCheck(args);
       case "supply-chain":
         return await runSupplyChain(args);
       case "node-upgrade":
