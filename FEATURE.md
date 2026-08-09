@@ -1166,10 +1166,20 @@ A third extension, covering **net-new, differentiated** capabilities beyond the 
 
 # Part XXVII — AI-Native Code Governance
 
-*If agents write the code, the codebase needs governance built for that fact.* Deliberately **not shipped** in the current engine: every item here needs infrastructure the deterministic-offline core does not have — git-metadata attribution, the original ticket/PRD, an AI rule-generation layer, or a signing/audit chain. Flagged honestly rather than faked.
+*If agents write the code, the codebase needs governance built for that fact.* Mostly **not shipped**: §111–§113 each need infrastructure the deterministic-offline core does not have — the original ticket/PRD, an AI rule-generation layer, or a signing/audit chain — and are flagged honestly rather than faked. **§110 is the exception, and it is worth recording why.** Its stated blocker was git-metadata attribution, and that arrived as a side effect of §159/§160/§163 three parts later. The lesson generalises: a Vision entry is a statement about what the engine could do *at the time it was written*, and the ones blocked on infrastructure rather than on undecidability are worth re-reading whenever the infrastructure moves.
 
 ## 110. AI-Authored-Code Trust Boundary ★★ Flagship
-**Status: Vision** (git metadata + agent-hook attribution).
+**Status: Core** — `node-doctor ai-attribution` (aliases `ai-trust`, `authored-by`).
+
+**The blocker came off, and it came off without adding any infrastructure.** This was filed as Vision because it needs "git-metadata attribution"; §159/§160/§163 brought `git-history.ts` for their own reasons, and that turned out to be the entire dependency. No model is called, no network is touched, and the output is byte-identical across runs — so a flagship the catalog had written off as needing an AI layer is in fact deterministic and offline.
+
+**What it measures, exactly.** Commits that **declare** AI assistance, through the conventions the agents themselves write: a `Co-Authored-By:` trailer naming a known agent identity — a git convention, not a vendor invention — or a generated-with marker in the body. `git blame` then attributes surviving LINES to those commits, so the report is about code still in the tree rather than about commits that happened.
+
+**What it does not measure, and the distinction is the point.** A trailer is a **claim**, not proof. An agent that is not configured to write one leaves no trace; a human can add one by hand. So every surface says "declared", never "written by", and the number is stated as a floor on AI involvement rather than a measurement of it. Rounding that off to "34% of your code is AI-written" would invent a precision it does not have — the same failure §111 and §112 were rejected for.
+
+**The report leads with the intersection, not the percentage.** "17% of this file was authored with AI assistance" is trivia; "this finding is on a line from a commit that declared AI assistance, and no human has touched it since" is a review decision. Blame therefore runs only over the files that carry findings — blaming a whole tree is minutes of work for a number nobody reads. A shallow checkout suppresses line attribution entirely and says so, because `git blame` would otherwise credit every pre-graft line to the boundary commit; the commit list survives. It exits 0 always: attribution describes provenance, it does not assert a defect.
+
+Two bugs were found by running it against this repository's own history rather than a fixture. A format string whose first byte is a raw NUL makes `git log` fail outright, so the record separator had to move to the end as git's own `%x00`. And porcelain blame emits one header per LINE, with the first of each group carrying an extra `<count>` field — honouring that count double-counts every group, which is how the first version reported 50,195 attributed lines for a 330-line file.
 
 ## 111. Spec / Intent Conformance ★★ Flagship
 **Status: Vision** (needs the task spec + an optional AI layer).

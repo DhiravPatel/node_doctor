@@ -1,0 +1,300 @@
+/**
+ * §110 — the AI-authored-code trust boundary, from git metadata alone.
+ *
+ * The catalog filed this as Vision because it needs "git-metadata attribution",
+ * which the engine did not have. It does now: §159/§160/§163 brought
+ * `git-history.ts`, and that is the whole dependency. No model is called, no
+ * network is touched, and the answer is byte-identical across runs.
+ *
+ * WHAT THIS MEASURES, EXACTLY. Commits that **declare** AI assistance, through
+ * the conventions the agents themselves write:
+ *
+ *   - a `Co-Authored-By:` trailer naming a known agent identity — this is what
+ *     Claude Code, Copilot and Cursor emit, and it is a git convention rather
+ *     than a vendor invention;
+ *   - a generated-with marker in the message body, which some tools write
+ *     instead of, or as well as, the trailer.
+ *
+ * And then `git blame` attributes surviving LINES to those commits, so the
+ * report is about code that is still in the tree rather than about commits that
+ * happened.
+ *
+ * WHAT IT DOES NOT MEASURE, AND THE DISTINCTION MATTERS. A trailer is a
+ * **claim**, not proof. An agent that is not configured to write one leaves no
+ * trace, and a human can add one by hand. So this report says "declared", never
+ * "written by" — the number is a floor on AI involvement, not a measurement of
+ * it, and every surface says so. A report that rounded that off to "34% of your
+ * code is AI-written" would be inventing a precision it does not have, which is
+ * the same failure the catalog rejected §111 and §112 for.
+ *
+ * THE POINT OF IT. Not the percentage — the INTERSECTION. "17% of this file was
+ * authored with AI assistance" is trivia. "This SQL-injection finding is on a
+ * line from a commit that declared AI assistance, and no human has touched it
+ * since" is a review decision. The report leads with that intersection and
+ * treats the totals as context for it.
+ */
+
+import { gitContext, gitStdout } from "./git-history.ts";
+import type { NodeDoctorConfig } from "./config.ts";
+
+/** A finding, reduced to what attribution needs. */
+export interface AttributableFinding {
+  diagnostic: string;
+  normalizedFilePath: string;
+  line: number;
+  severity: string;
+}
+
+export interface AiCommit {
+  /** Abbreviated sha, stable across runs for the same history. */
+  sha: string;
+  /** ISO-8601 date, so the report sorts and diffs deterministically. */
+  date: string;
+  subject: string;
+  /** Which signal identified it — the trailer's agent name, or the marker. */
+  signal: string;
+}
+
+export interface AiAttributedFile {
+  path: string;
+  /** Lines whose last-touching commit declared AI assistance. */
+  aiLines: number;
+  /** Lines `git blame` could attribute at all. */
+  blamedLines: number;
+}
+
+export interface AiAttributedFinding extends AttributableFinding {
+  /** The AI-assisted commit that last touched this line. */
+  commit: AiCommit;
+}
+
+export interface AiAttributionReport {
+  /** False when git could not be read; every count is then 0. */
+  available: boolean;
+  /** Why the history could not be read, when it could not. */
+  unavailableReason: string | null;
+  /**
+   * True when the checkout is shallow. `git blame` then attributes every
+   * pre-graft line to the boundary commit, so line counts are not meaningful
+   * and are suppressed — the commit list still is.
+   */
+  historyTruncated: boolean;
+  /** The commits that declared AI assistance, newest first. */
+  aiCommits: AiCommit[];
+  /** Per-file line attribution, for the files that were blamed. */
+  files: AiAttributedFile[];
+  /** The intersection this report exists for: findings on AI-assisted lines. */
+  findingsOnAiLines: AiAttributedFinding[];
+  summary: {
+    commitsScanned: number;
+    aiCommits: number;
+    filesBlamed: number;
+    aiLines: number;
+    blamedLines: number;
+    findingsChecked: number;
+    findingsOnAiLines: number;
+  };
+}
+
+/**
+ * Identities that appear in a `Co-Authored-By:` trailer when an agent wrote the
+ * commit. Matched against the trailer's display name and its email, so a rename
+ * of one does not lose the signal.
+ */
+const AGENT_IDENTITIES: ReadonlyArray<{ pattern: RegExp; name: string }> = [
+  { pattern: /\bclaude\b/i, name: "Claude" },
+  { pattern: /\bcopilot\b/i, name: "GitHub Copilot" },
+  { pattern: /\bcursor\b/i, name: "Cursor" },
+  { pattern: /\bdevin\b/i, name: "Devin" },
+  { pattern: /\baider\b/i, name: "Aider" },
+  { pattern: /\bcodex\b/i, name: "Codex" },
+  { pattern: /\bgemini[- ]?code[- ]?assist\b/i, name: "Gemini Code Assist" },
+  { pattern: /\bamazon[- ]?q\b|\bcodewhisperer\b/i, name: "Amazon Q" },
+];
+
+/** Markers some tools write into the body instead of, or as well as, a trailer. */
+const GENERATED_MARKERS: ReadonlyArray<{ pattern: RegExp; name: string }> = [
+  { pattern: /generated with .{0,40}claude code/i, name: "Claude Code" },
+  { pattern: /co-?authored[- ]with .{0,30}copilot/i, name: "GitHub Copilot" },
+  { pattern: /\bgenerated by (an? )?(ai|llm|agent)\b/i, name: "declared AI generation" },
+];
+
+/**
+ * Record and field separators, written as git's OWN `%x` escapes rather than as
+ * literal control bytes in argv — a format string that begins with a raw NUL
+ * makes `git log` fail outright, which cost a debugging round to find.
+ */
+const RECORD = "\u0000";
+const FIELD = "\u001f";
+
+/** Which signal, if any, marks this commit body as AI-assisted? */
+export const aiSignalOf = (body: string): string | null => {
+  for (const line of body.split(/\r?\n/)) {
+    const trailer = /^\s*co-authored-by\s*:\s*(.+)$/i.exec(line);
+    if (!trailer) continue;
+    const value = trailer[1] ?? "";
+    for (const { pattern, name } of AGENT_IDENTITIES) {
+      if (pattern.test(value)) return `Co-Authored-By: ${name}`;
+    }
+  }
+  for (const { pattern, name } of GENERATED_MARKERS) {
+    if (pattern.test(body)) return name;
+  }
+  return null;
+};
+
+/** Is this checkout shallow? `git blame` is then attributing to a graft point. */
+const isShallow = async (cwd: string): Promise<boolean> => {
+  const out = await gitStdout(cwd, ["rev-parse", "--is-shallow-repository"]);
+  return out?.trim() === "true";
+};
+
+/**
+ * Blame one file and return, per line, the abbreviated sha that last touched it.
+ * Uses `--porcelain` because its header lines are stable across git versions,
+ * unlike the human-readable format.
+ */
+const blameShas = async (cwd: string, repoRelativePath: string): Promise<string[] | null> => {
+  const stdout = await gitStdout(cwd, [
+    "blame",
+    "--porcelain",
+    "--no-abbrev",
+    "-w", // ignore whitespace-only changes, so a reformat does not reattribute
+    "--",
+    repoRelativePath,
+  ]);
+  if (stdout === null) return null;
+
+  const shas: string[] = [];
+  for (const line of stdout.split("\n")) {
+    // Porcelain emits ONE header per file line — `<sha> <origLine> <finalLine>`
+    // — and the first header of each group carries an extra `<count>` field.
+    // Measured on a 330-line file: 330 headers, 31 of them group heads. So the
+    // count must be IGNORED; honouring it double-counts every group.
+    const header = /^([0-9a-f]{40})\s+\d+\s+\d+(?:\s+\d+)?$/.exec(line);
+    if (header) shas.push(header[1] as string);
+  }
+  return shas;
+};
+
+export const buildAiAttributionReport = async (
+  rootDirectory: string,
+  options: { config?: NodeDoctorConfig; findings?: readonly AttributableFinding[]; maxCommits?: number } = {},
+): Promise<AiAttributionReport> => {
+  const empty = (reason: string | null): AiAttributionReport => ({
+    available: reason === null,
+    unavailableReason: reason,
+    historyTruncated: false,
+    aiCommits: [],
+    files: [],
+    findingsOnAiLines: [],
+    summary: {
+      commitsScanned: 0,
+      aiCommits: 0,
+      filesBlamed: 0,
+      aiLines: 0,
+      blamedLines: 0,
+      findingsChecked: options.findings?.length ?? 0,
+      findingsOnAiLines: 0,
+    },
+  });
+
+  const context = await gitContext(rootDirectory);
+  if (context.unavailable !== null) return empty(context.unavailable);
+
+  const maxCommits = options.maxCommits ?? 2000;
+  const log = await gitStdout(rootDirectory, [
+    "log",
+    `--max-count=${maxCommits}`,
+    // The record TERMINATES with NUL rather than leading with one: a format
+    // string whose first byte is a raw NUL makes `git log` fail outright.
+    "--format=%H%x1f%h%x1f%aI%x1f%s%x1f%b%x00",
+  ]);
+  if (log === null) return empty("git log could not be read");
+
+  /** Full sha → the commit, for every commit that declared AI assistance. */
+  const aiBySha = new Map<string, AiCommit>();
+  let commitsScanned = 0;
+  for (const record of log.split(RECORD)) {
+    if (record.trim() === "") continue;
+    commitsScanned++;
+    const [full, short, date, subject, body] = record.split(FIELD);
+    if (!full || !short) continue;
+    const signal = aiSignalOf(`${subject ?? ""}\n${body ?? ""}`);
+    if (signal === null) continue;
+    aiBySha.set(full.trim(), {
+      sha: short.trim(),
+      date: (date ?? "").trim(),
+      subject: (subject ?? "").trim(),
+      signal,
+    });
+  }
+
+  const aiCommits = [...aiBySha.values()].sort(
+    (a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.sha < b.sha ? -1 : 1),
+  );
+
+  const historyTruncated = await isShallow(rootDirectory);
+
+  // Blame only the files that carry findings. Blaming a whole tree is minutes of
+  // work for a number nobody reads; the intersection is what this is for.
+  const findings = options.findings ?? [];
+  const byFile = new Map<string, AttributableFinding[]>();
+  for (const finding of findings) {
+    const list = byFile.get(finding.normalizedFilePath);
+    if (list) list.push(finding);
+    else byFile.set(finding.normalizedFilePath, [finding]);
+  }
+
+  const files: AiAttributedFile[] = [];
+  const findingsOnAiLines: AiAttributedFinding[] = [];
+  let aiLines = 0;
+  let blamedLines = 0;
+
+  if (aiBySha.size > 0 && !historyTruncated) {
+    for (const path of [...byFile.keys()].sort()) {
+      // `normalizedFilePath` is scan-root-relative; git wants repo-relative.
+      const repoRelative = context.prefix ? `${context.prefix}${path}` : path;
+      const shas = await blameShas(rootDirectory, repoRelative);
+      if (shas === null) continue;
+
+      let fileAiLines = 0;
+      for (const sha of shas) if (aiBySha.has(sha)) fileAiLines++;
+      files.push({ path, aiLines: fileAiLines, blamedLines: shas.length });
+      aiLines += fileAiLines;
+      blamedLines += shas.length;
+
+      for (const finding of byFile.get(path) ?? []) {
+        const sha = shas[finding.line - 1];
+        const commit = sha === undefined ? undefined : aiBySha.get(sha);
+        if (commit) findingsOnAiLines.push({ ...finding, commit });
+      }
+    }
+  }
+
+  files.sort((a, b) => b.aiLines - a.aiLines || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  findingsOnAiLines.sort(
+    (a, b) =>
+      (a.normalizedFilePath < b.normalizedFilePath ? -1 : a.normalizedFilePath > b.normalizedFilePath ? 1 : 0) ||
+      a.line - b.line ||
+      (a.diagnostic < b.diagnostic ? -1 : 1),
+  );
+
+  return {
+    available: true,
+    unavailableReason: null,
+    historyTruncated,
+    aiCommits,
+    files: files.filter((f) => f.aiLines > 0),
+    findingsOnAiLines,
+    summary: {
+      commitsScanned,
+      aiCommits: aiCommits.length,
+      filesBlamed: files.length,
+      aiLines,
+      blamedLines,
+      findingsChecked: findings.length,
+      findingsOnAiLines: findingsOnAiLines.length,
+    },
+  };
+};

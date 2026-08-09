@@ -98,6 +98,38 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### AI-authored-code trust boundary — `node-doctor ai-attribution` (§110)
+
+- **`node-doctor ai-attribution [dir]`** (aliases `ai-trust`, `authored-by`) — a
+  §110 flagship the catalog had filed as **Vision**, shipped without adding any
+  infrastructure. Its stated blocker was "git-metadata attribution"; §159/§160/
+  §163 brought `git-history.ts` for their own reasons, and that was the entire
+  dependency. No model, no network, byte-identical across runs.
+  It measures commits that **declare** AI assistance — a `Co-Authored-By:`
+  trailer naming a known agent identity, or a generated-with marker — and then
+  `git blame` attributes surviving lines to them, so the report is about code
+  still in the tree rather than about commits that happened.
+  A trailer is a **claim, not proof**: an agent not configured to write one
+  leaves no trace, and a human can add one by hand. Every surface says
+  "declared", never "written by", and the number is stated as a floor on AI
+  involvement rather than a measurement of it — rounding that off to "34% of
+  your code is AI-written" would invent a precision it does not have.
+  The report leads with the **intersection** rather than the percentage: a
+  finding on a line from an AI-assisted commit that no human has touched since
+  is a review decision, where a per-file percentage is trivia. Blame therefore
+  runs only over the files carrying findings. A shallow checkout suppresses line
+  attribution and says so, because `git blame` would otherwise credit every
+  pre-graft line to the boundary commit. Exits 0 always — attribution describes
+  provenance, it does not assert a defect.
+
+Two bugs were caught by running it against this repository's own history instead
+of a fixture, and both are now regression tests. A `git log --format` string
+whose first byte is a raw NUL fails outright, so the record separator moved to
+the end as git's own `%x00`. And porcelain blame emits one header per LINE, the
+first of each group carrying an extra `<count>` field — honouring that count
+double-counts every group, which is how the first version reported 50,195
+attributed lines for a 330-line file.
+
 ### AI pack completed, and two facts from a full scoping pass (§109, §205, §188, §200)
 
 Five new rules. Three complete the AI pack's open items; two come from scoping

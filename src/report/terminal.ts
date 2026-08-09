@@ -702,6 +702,88 @@ export const renderPackageApi = (
  * Every finding here is a resolution that FAILS at runtime for a consumer, so
  * the report is a flat list ordered by how the map is written, not a score.
  */
+/**
+ * §110 — the AI-authored-code trust boundary.
+ *
+ * Leads with the INTERSECTION (findings on AI-assisted lines), because that is
+ * the review decision; the totals are context for it, not the point.
+ */
+export const renderAiAttribution = (
+  report: import("../core/ai-attribution.ts").AiAttributionReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  if (!report.available) {
+    lines.push(`  ${p.yellow("\u25cf")} ${p.bold("Not checked")} \u2014 ${report.unavailableReason}.`);
+    lines.push(p.dim("    Attribution comes from git metadata; without a work tree there is nothing to read."));
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  lines.push(
+    `  ${p.bold("AI attribution")}  ${p.dim(
+      `${report.summary.aiCommits} of ${report.summary.commitsScanned} commit(s) declared AI assistance`,
+    )}`,
+  );
+  lines.push(p.dim("    A trailer is a claim, not proof \u2014 this is a floor on AI involvement, not a measurement."));
+  lines.push("");
+
+  if (report.summary.aiCommits === 0) {
+    lines.push(p.green("  \u2714 No commit in the scanned history declares AI assistance."));
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  if (report.historyTruncated) {
+    lines.push(`  ${p.yellow("\u25cf")} Shallow checkout \u2014 line attribution suppressed.`);
+    lines.push(p.dim("      `git blame` would credit every pre-graft line to the boundary commit."));
+    lines.push("");
+  }
+
+  if (report.findingsOnAiLines.length > 0) {
+    lines.push(
+      `  ${p.red("\u2716")} ${p.bold(`${report.findingsOnAiLines.length} finding(s) on AI-assisted lines`)}`,
+    );
+    lines.push(p.dim("      Code no human has touched since, carrying a finding. Review these first."));
+    lines.push("");
+    for (const f of report.findingsOnAiLines.slice(0, 25)) {
+      lines.push(
+        `      ${p.cyan(`${f.normalizedFilePath}:${f.line}`)}  ${f.diagnostic}  ${p.dim(`\u2190 ${f.commit.sha} (${f.commit.signal})`)}`,
+      );
+    }
+    if (report.findingsOnAiLines.length > 25) {
+      lines.push(p.dim(`      \u2026 ${report.findingsOnAiLines.length - 25} more`));
+    }
+    lines.push("");
+  } else if (report.summary.findingsChecked > 0) {
+    lines.push(
+      p.green(`  \u2714 None of the ${report.summary.findingsChecked} finding(s) land on an AI-assisted line.`),
+    );
+    lines.push("");
+  }
+
+  if (report.files.length > 0) {
+    lines.push(p.dim(`  Line attribution across the ${report.summary.filesBlamed} file(s) carrying findings:`));
+    for (const f of report.files.slice(0, 12)) {
+      const share = f.blamedLines === 0 ? 0 : Math.round((f.aiLines / f.blamedLines) * 100);
+      lines.push(p.dim(`      ${f.path}  ${f.aiLines}/${f.blamedLines} lines (${share}%)`));
+    }
+    if (report.files.length > 12) lines.push(p.dim(`      \u2026 ${report.files.length - 12} more`));
+    lines.push("");
+  }
+
+  lines.push(p.dim(`  Commits that declared AI assistance (${report.aiCommits.length}):`));
+  for (const c of report.aiCommits.slice(0, 10)) {
+    lines.push(p.dim(`      ${c.sha}  ${c.date.slice(0, 10)}  ${c.subject.slice(0, 62)}`));
+  }
+  if (report.aiCommits.length > 10) lines.push(p.dim(`      \u2026 ${report.aiCommits.length - 10} more`));
+  lines.push("");
+
+  return lines.join("\n");
+};
+
 export const renderExportsCheck = (
   report: import("../core/exports-map.ts").ExportsCheckReport,
   options: { color?: boolean } = {},

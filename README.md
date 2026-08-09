@@ -280,6 +280,7 @@ node-doctor node-upgrade [--target N]           what breaks on a Node upgrade, a
 node-doctor supply-chain [directory]            what runs at install time, and what did not come from the registry
 node-doctor api-check [directory]               members called on a package that the package does not export
 node-doctor exports-check [directory]           package exports map vs the files on disk: dead targets, ESM/CJS mismatches
+node-doctor ai-attribution [directory]          which findings sit on lines from commits that declared AI assistance
 node-doctor paths [directory]                   source→sink attack paths (exploitability proof)
 node-doctor context [dir] [--write]             find files an AI agent must not read; --write fences them off
 node-doctor sbom [--framework spdx]             CycloneDX / SPDX bill of materials

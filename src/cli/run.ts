@@ -24,7 +24,7 @@ import { installGitHook } from "../install/git-hook.ts";
 import { scanProject } from "../core/scan.ts";
 import type { ScanReport } from "../core/scan.ts";
 import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
-import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver, renderOpenApi, renderArchitecture, renderChurn, renderReviewRouting, renderReadiness, renderChangeShape, renderI18n, renderNodeUpgrade, renderSupplyChain, renderPackageApi, renderExportsCheck } from "../report/terminal.ts";
+import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver, renderOpenApi, renderArchitecture, renderChurn, renderReviewRouting, renderReadiness, renderChangeShape, renderI18n, renderNodeUpgrade, renderSupplyChain, renderPackageApi, renderExportsCheck, renderAiAttribution } from "../report/terminal.ts";
 import { scanAgentContext, applyContextHygiene } from "../core/agent-context.ts";
 import { isWorkspaceRoot, scanWorkspaces, workspaceFindings, discoverWorkspaces } from "../core/workspaces.ts";
 import { toJson, toJsonError } from "../report/json.ts";
@@ -66,6 +66,7 @@ import { buildNodeUpgradeReport, UPGRADE_TARGETS } from "../core/node-upgrade.ts
 import { buildSupplyChainReport } from "../core/supply-chain.ts";
 import { buildPackageApiReport } from "../core/package-api.ts";
 import { buildExportsCheckReport } from "../core/exports-map.ts";
+import { buildAiAttributionReport } from "../core/ai-attribution.ts";
 import { buildImpactGraph, computeImpact } from "../core/impact.ts";
 import { collectAttackPaths } from "../core/attack-paths.ts";
 import { loadCodeowners, groupByOwner, scorePrRisk } from "../core/ownership.ts";
@@ -333,6 +334,7 @@ Usage:
   node-doctor supply-chain [dir]         What runs at install time, and what did not come from the registry
   node-doctor api-check [dir]            Members called on a package that the package does not export
   node-doctor exports-check [dir]        Package exports map vs the files on disk: dead targets, ESM/CJS mismatches
+  node-doctor ai-attribution [dir]      Which findings sit on lines from commits that declared AI assistance
   node-doctor context [dir] [--write]    Find files an AI agent must not read; --write fences them off
   node-doctor deslop [directory]         Dead-code scan (unused files/exports/deps)
   node-doctor explain <diagnostic-id>          Explain a diagnostic and its fix
@@ -1858,6 +1860,37 @@ const runExportsCheck = async (args: ParsedArgs): Promise<number> => {
   return report.findings.length > 0 ? 1 : 0;
 };
 
+/**
+ * §110 — AI attribution. Scans first so the report can lead with the
+ * intersection of findings and AI-assisted lines, which is the whole point;
+ * blame then runs only over the files that carry findings.
+ */
+const runAiAttribution = async (args: ParsedArgs): Promise<number> => {
+  const { dir } = await resolveScanTarget(args);
+  const scan = await scanProject({
+    rootDirectory: dir,
+    ignoredTags: new Set(args.ignoreTags),
+    parallel: args.parallel,
+    configPath: args.config ? resolve(args.config) : undefined,
+  });
+  const report = await buildAiAttributionReport(dir, {
+    findings: scan.findings.map((f) => ({
+      diagnostic: f.diagnostic,
+      normalizedFilePath: f.normalizedFilePath ?? "",
+      line: f.line,
+      severity: f.severity,
+    })),
+  });
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(report) : JSON.stringify(report, null, 2)) + "\n");
+  } else {
+    process.stdout.write(renderAiAttribution(report, { color: useColor(args) }));
+  }
+  // Attribution is a report, not a gate: it describes provenance rather than
+  // asserting a defect, so it never fails a build on its own.
+  return 0;
+};
+
 const runFix = async (args: ParsedArgs, version: string): Promise<number> => {
   const dir = resolve(args.positionals[0] ?? ".");
   const only = await resolveOnly(args, dir);
@@ -1959,6 +1992,8 @@ export const main = async (argv: string[]): Promise<number> => {
         return await runApiCheck(args);
       case "exports-check":
         return await runExportsCheck(args);
+      case "ai-attribution":
+        return await runAiAttribution(args);
       case "supply-chain":
         return await runSupplyChain(args);
       case "node-upgrade":

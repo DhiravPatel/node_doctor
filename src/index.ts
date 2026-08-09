@@ -177,6 +177,16 @@ export type { PackageApiReport, UnknownMember, SkippedPackage } from "./core/pac
 // ESM/CJS mismatches that resolve fine for the author and throw for consumers.
 export { buildExportsCheckReport } from "./core/exports-map.ts";
 export type { ExportsCheckReport, ExportFinding, ExportProblem } from "./core/exports-map.ts";
+// §110 — AI-authored-code trust boundary: which findings sit on lines from
+// commits that DECLARED AI assistance. Git metadata only — no model, no network.
+export { buildAiAttributionReport, aiSignalOf } from "./core/ai-attribution.ts";
+export type {
+  AiAttributionReport,
+  AiAttributedFile,
+  AiAttributedFinding,
+  AiCommit,
+  AttributableFinding,
+} from "./core/ai-attribution.ts";
 // §77 — OpenAPI Generation From Code: a spec derived from the actual routes, so
 // it cannot drift from the code that serves it.
 export { buildOpenApiDocument } from "./core/openapi.ts";
