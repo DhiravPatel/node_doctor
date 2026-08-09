@@ -148,9 +148,9 @@ caught two places where the received description of the bug was wrong.
   `toString("hex")`) drops the claim, and the accumulator must be provably
   initialised to a string.
 
-Gated on a corpus sweep of **544,000 real files** across twenty-six project trees
-and an adversarial hunt of 318 cases, whose 43 claimed false positives were every
-one reproduced by hand. All 43 are now closed.
+Gated on corpus sweeps totalling over **half a million real files** across
+twenty-six project trees, and an adversarial hunt of 318 cases whose 43 claimed
+false positives were every one reproduced by hand. All 43 are now closed.
 
 The hunt's most valuable finding is that two of these rules asserted runtime
 behaviour that is true on the main thread and **false inside a Worker** — neither
@@ -187,6 +187,15 @@ The other two rules were narrowed on the same principle:
   `http`/`https` request or response, a `child_process` handle's
   `.stdout`/`.stderr`, or an `fs.createReadStream` opened with no encoding, each
   traced to the builtin it came from.
+  That costs real recall, measured rather than assumed. On a 525,810-file corpus
+  the shipped rule reports 28 findings across four packages —
+  `@electron/windows-sign`, `json5`, `pstree.remy` and `simple-update-notifier`.
+  A stream that arrives as an opaque function parameter — how Metro, Next and
+  Cloudinary all write it — cannot be traced to a builtin inside one file, so
+  those are no longer reported; neither is a transpiled interop shape nor a
+  `cross-spawn` handle. They are real bugs this rule will not find, and they are
+  the price of never reporting the eighteen string-emitting stream shapes the
+  hunt produced.
 
 Across 2,962 first-party source files in twenty projects, all four rules are
 silent.

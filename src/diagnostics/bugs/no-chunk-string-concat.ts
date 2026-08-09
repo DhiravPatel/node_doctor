@@ -44,7 +44,9 @@ import { collectDescendants } from "../../core/walk.ts";
  *   - `process.stdin`, a `net` socket, an `http`/`https` request or response, a
  *     `child_process` handle's `.stdout`/`.stderr`, or an `fs.createReadStream`
  *     opened with no encoding. Each is a byte stream by construction, traced to
- *     the builtin it came from.
+ *     the builtin it came from. A name assigned across branches — the CLI shape
+ *     `let s; if (file) s = createReadStream(file); else s = process.stdin;` —
+ *     counts only when EVERY branch hands it a byte stream.
  *   - The accumulator must be initialised to a STRING LITERAL. `+=` onto an
  *     unknown binding proves nothing.
  *   - The right-hand side must be the handler's own chunk parameter, bare or
@@ -54,6 +56,20 @@ import { collectDescendants } from "../../core/walk.ts";
  *   - Any `setEncoding` in the file, or an encoding passed where the stream is
  *     opened, drops the claim: a decoder that spans chunks makes every chunk a
  *     string already.
+ *
+ * WHAT THIS COSTS, MEASURED. Proving the receiver is what makes the rule safe,
+ * and it is not free. On a 525,810-file corpus this reports 28 findings across
+ * four packages, all of them a `child_process` handle, a `process.stdin` read or
+ * an unencoded `createReadStream`. A stream that arrives as an opaque function
+ * parameter —
+ * `export async function parseBody(req) { req.on("data", …) }`, which is how
+ * Metro, Next and Cloudinary all write it — cannot be traced to a builtin from
+ * inside one file, and is not reported. Neither is a transpiled interop shape
+ * (`_fs2.default.createReadStream(…)`), nor a `cross-spawn` handle, which is a
+ * real `ChildProcess` from a package this rule does not know. Those are real
+ * bugs this rule will not find. They are the price of never reporting the
+ * eighteen string-emitting stream shapes the hunt produced, and on a
+ * precision-first bar that is the right side to err on.
  */
 
 /** Encodings whose decoding is stateful, so a split chunk corrupts. */
@@ -159,13 +175,30 @@ export const noChunkStringConcat = defineDiagnostic({
       }
     }
 
+    /** The module a `require(…)` call names, if it is one this rule tracks. */
+    const requiredFamily = (node: AstNode | null | undefined): string | null => {
+      if (!node || node.type !== "CallExpression") return null;
+      if ((node.callee as AstNode | undefined)?.name !== "require") return null;
+      const source = getStaticStringValue(((node.arguments as AstNode[] | undefined) ?? [])[0]);
+      return source === null ? null : familyOf(source);
+    };
+
     for (const decl of collectDescendants(ctx.program, (n) => n.type === "VariableDeclarator", undefined, true)) {
       const init = decl.init as AstNode | undefined;
-      if (init?.type !== "CallExpression") continue;
-      if ((init.callee as AstNode | undefined)?.name !== "require") continue;
-      const source = getStaticStringValue(((init.arguments as AstNode[] | undefined) ?? [])[0]);
-      const family = source === null ? null : familyOf(source);
-      if (family !== null) bind(family, decl.id as AstNode);
+      const id = decl.id as AstNode | undefined;
+      const family = requiredFamily(init);
+      if (family !== null) {
+        bind(family, id);
+        continue;
+      }
+      // `const spawn = require("child_process").spawn` — a member read off the
+      // require, which is as common as destructuring it.
+      if (init?.type !== "MemberExpression" || init.computed) continue;
+      const memberFamily = requiredFamily(init.object as AstNode);
+      const memberName = (init.property as AstNode | undefined)?.name;
+      if (memberFamily !== null && typeof memberName === "string" && id?.type === "Identifier") {
+        members.set(id.name as string, { family: memberFamily, name: memberName });
+      }
     }
 
     /** Which builtin function does this call reach — `<family>.<name>` — if any? */
@@ -203,20 +236,57 @@ export const noChunkStringConcat = defineDiagnostic({
     /** Names bound to a `child_process` handle, whose `.stdout`/`.stderr` are byte pipes. */
     const childHandles = new Set<string>();
 
-    for (const decl of collectDescendants(ctx.program, (n) => n.type === "VariableDeclarator", undefined, true)) {
-      const id = decl.id as AstNode | undefined;
-      if (id?.type !== "Identifier") continue;
-      const hit = builtinCall(decl.init as AstNode);
-      if (!hit) continue;
-      if (hit.family === "fs" && hit.name === "createReadStream" && !readStreamHasEncoding(decl.init as AstNode)) {
-        byteStreams.add(id.name as string);
-      } else if (hit.family === "net" && SOCKET_FACTORIES.has(hit.name)) {
-        byteStreams.add(id.name as string);
-      } else if (hit.family === "http" && HTTP_REQUESTERS.has(hit.name)) {
-        byteStreams.add(id.name as string);
-      } else if (hit.family === "child" && SPAWNERS.has(hit.name)) {
-        childHandles.add(id.name as string);
+    /** What kind of stream, if any, does this expression produce? */
+    type Source = "bytes" | "child" | "other";
+    const sourceOf = (value: AstNode | null | undefined): Source => {
+      if (!value) return "other";
+      // `readStream = process.stdin` in one branch of a CLI's input selection.
+      if (staticMemberPath(value) === "process.stdin") return "bytes";
+      const hit = builtinCall(value);
+      if (!hit) return "other";
+      if (hit.family === "fs" && hit.name === "createReadStream") {
+        return readStreamHasEncoding(value) ? "other" : "bytes";
       }
+      if (hit.family === "net" && SOCKET_FACTORIES.has(hit.name)) return "bytes";
+      if (hit.family === "http" && HTTP_REQUESTERS.has(hit.name)) return "bytes";
+      if (hit.family === "child" && SPAWNERS.has(hit.name)) return "child";
+      return "other";
+    };
+
+    /**
+     * Every value a name is given, so a binding assigned across branches —
+     * `let s; if (file) s = createReadStream(file); else s = process.stdin;` —
+     * counts only when EVERY branch hands it a byte stream.
+     */
+    const assigned = new Map<string, Source[]>();
+    const record = (name: string, source: Source): void => {
+      const list = assigned.get(name);
+      if (list) list.push(source);
+      else assigned.set(name, [source]);
+    };
+
+    for (const node of collectDescendants(
+      ctx.program,
+      (n) => n.type === "VariableDeclarator" || n.type === "AssignmentExpression",
+      undefined,
+      true,
+    )) {
+      if (node.type === "VariableDeclarator") {
+        const id = node.id as AstNode | undefined;
+        const init = node.init as AstNode | undefined;
+        // A bare `let s;` declares nothing about the value; the assignments do.
+        if (id?.type === "Identifier" && init) record(id.name as string, sourceOf(init));
+        continue;
+      }
+      if (node.operator !== "=") continue;
+      const target = node.left as AstNode | undefined;
+      if (target?.type === "Identifier") record(target.name as string, sourceOf(node.right as AstNode));
+    }
+
+    for (const [name, sources] of assigned) {
+      if (sources.length === 0) continue;
+      if (sources.every((k) => k === "bytes")) byteStreams.add(name);
+      else if (sources.every((k) => k === "child")) childHandles.add(name);
     }
 
     // A callback parameter that the builtin hands a byte stream.
