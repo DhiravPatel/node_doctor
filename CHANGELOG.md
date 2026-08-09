@@ -98,6 +98,71 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### AI pack completed, and two facts from a full scoping pass (§109, §205, §188, §200)
+
+Five new rules. Three complete the AI pack's open items; two come from scoping
+every remaining `⚙️ Now` section in the catalog, which mostly established that
+they cannot ship.
+
+- **`no-unbounded-agent-loop`** (Reliability, §109, `requires: ai`) — a
+  syntactically infinite loop containing a proven model call, whose only exit is
+  the model deciding to stop. A tool that keeps returning an error the model
+  keeps trying to fix runs until the request times out or the spend cap does.
+  The claim is the narrow syntactic one — *this loop counts nothing* — so any
+  counter at all silences it.
+
+- **`require-llm-token-limit`** (Performance, §109, `requires: ai`, **opt-in**) —
+  a model call with no output cap. Opt-in deliberately: a token cap is a policy
+  choice, not a language fact, so it is not held to the always-wrong bar the
+  default-enabled rules meet. Claims about an absent key, so it is made only
+  where every key is visible — an object literal, no spread.
+
+- **`no-unimplemented-stub`** (Maintainability, §205) — a function body with zero
+  statements whose comment admits it was never written. It returns `undefined`
+  silently, passes type checking, and passes a test written against the same
+  misunderstanding.
+
+- **`no-namespace-object-write`** (Bugs, §188-adjacent) — `import * as NS` binds
+  a sealed module namespace object, and ES module code is always strict, so
+  `NS.member = x` is an unconditional `TypeError`. It arrives with a migration:
+  `require("node:fs").readFile = wrapped` is legal CommonJS and is how a
+  generation of APM shims was written.
+
+- **`no-sparse-array-iteration`** (Bugs, §200-adjacent) — `new Array(5)` creates
+  five holes, not five `undefined`s, and every callback-taking method on
+  `Array.prototype` skips holes. `new Array(5).map((_, i) => i)` returns five
+  holes; `new Array(3).forEach(seed)` runs the callback zero times. Both
+  measured. `.length` is still the number the author expected, which is why it
+  survives review.
+
+**The scoping pass rejected thirty of thirty-seven sub-cases**, each with the
+specific thing it would need to know that syntax does not say, all recorded in
+FEATURE.md. Three rejections corrected the catalog's own premise: `export *`
+chains do not defeat modern bundlers, `fs.watch` firing twice is not the
+invariant assumed, and an absent `.map` file does not make a stack trace
+unreadable. Notably `Buffer.allocUnsafe` was rejected despite the disclosure
+being real — 7 of 20 non-pooled 64KB allocations came back holding previous
+contents when measured — because "was this buffer filled before it escaped" is
+flow analysis, not syntax.
+
+`no-namespace-object-write` carries the same class of trap the Worker findings
+did, and it is why the rule proves the module system rather than assuming it:
+**loaded from a CommonJS caller — sloppy mode — the identical write on the
+identical sealed object does not throw, it silently does nothing.**
+`Object.isSealed` is `true` in both worlds; only the caller's strictness decides.
+
+`no-unimplemented-stub` was corrected by a 76,701-file corpus sweep before it
+shipped. Its first version matched the bare words `implement`, `stub` and
+`placeholder` anywhere in a comment, and fired on correct code explaining
+itself — Next's `voidCatch()` ("the underlying **implementation** to forward
+errors") and React Navigation's `removeListener` ("**placeholder** screens").
+Matching a domain word in prose is the style-linter failure §205 explicitly
+warns against, so a conventional tag must now be written as a tag. The sweep also
+established that an inline callback argument is never residue: `req.on("error",
+() => {})` is a required idiom, and Next ships exactly that with a
+`// TODO: log socket errors?` beside it. Findings fell 47 → 19, and the 19 are
+genuine.
+
 ### Diagnostics — signals, exit codes, and encoding (§196, §197, §202)
 
 Four new rules on the same criterion as the previous wave — the claim has to be an

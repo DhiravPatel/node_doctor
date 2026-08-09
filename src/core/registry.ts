@@ -13,6 +13,8 @@ import { mcpToolUnrestrictedCapability } from "../diagnostics/ai/mcp-tool-unrest
 import { noLlmOutputInSink } from "../diagnostics/ai/no-llm-output-in-sink.ts";
 import { noPromptInjection } from "../diagnostics/ai/no-prompt-injection.ts";
 import { noSystemPromptLeak } from "../diagnostics/ai/no-system-prompt-leak.ts";
+import { noUnboundedAgentLoop } from "../diagnostics/ai/no-unbounded-agent-loop.ts";
+import { requireLlmTokenLimit } from "../diagnostics/ai/require-llm-token-limit.ts";
 // api
 import { graphqlIntrospectionInProduction } from "../diagnostics/api/graphql-introspection-in-production.ts";
 import { graphqlMissingDepthLimit } from "../diagnostics/api/graphql-missing-depth-limit.ts";
@@ -35,10 +37,12 @@ import { noChunkStringConcat } from "../diagnostics/bugs/no-chunk-string-concat.
 import { noConstantCondition } from "../diagnostics/bugs/no-constant-condition.ts";
 import { noDirnameInEsm } from "../diagnostics/bugs/no-dirname-in-esm.ts";
 import { noFloatingPromiseInTry } from "../diagnostics/bugs/no-floating-promise-in-try.ts";
+import { noNamespaceObjectWrite } from "../diagnostics/bugs/no-namespace-object-write.ts";
 import { noNanComparison } from "../diagnostics/bugs/no-nan-comparison.ts";
 import { noOutOfRangeExitCode } from "../diagnostics/bugs/no-out-of-range-exit-code.ts";
 import { noOversizedTimerDelay } from "../diagnostics/bugs/no-oversized-timer-delay.ts";
 import { noShadowedRoute } from "../diagnostics/bugs/no-shadowed-route.ts";
+import { noSparseArrayIteration } from "../diagnostics/bugs/no-sparse-array-iteration.ts";
 import { noStringLengthAsContentLength } from "../diagnostics/bugs/no-string-length-as-content-length.ts";
 import { noThrowLiteral } from "../diagnostics/bugs/no-throw-literal.ts";
 import { noUnreachableCleanupAfterExit } from "../diagnostics/bugs/no-unreachable-cleanup-after-exit.ts";
@@ -92,6 +96,7 @@ import { noFlakyTestPattern } from "../diagnostics/maintainability/no-flaky-test
 import { noMockOfMissingExport } from "../diagnostics/maintainability/no-mock-of-missing-export.ts";
 import { noRedundantTryCatchRethrow } from "../diagnostics/maintainability/no-redundant-try-catch-rethrow.ts";
 import { noTautologicalMockAssertion } from "../diagnostics/maintainability/no-tautological-mock-assertion.ts";
+import { noUnimplementedStub } from "../diagnostics/maintainability/no-unimplemented-stub.ts";
 import { preferNodeProtocolImports } from "../diagnostics/maintainability/prefer-node-protocol-imports.ts";
 // modernization
 import { noDeprecatedNodeApi } from "../diagnostics/modernization/no-deprecated-node-api.ts";
@@ -166,6 +171,8 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noLlmOutputInSink,
   noPromptInjection,
   noSystemPromptLeak,
+  noUnboundedAgentLoop,
+  requireLlmTokenLimit,
   // api
   graphqlIntrospectionInProduction,
   graphqlMissingDepthLimit,
@@ -188,10 +195,12 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noConstantCondition,
   noDirnameInEsm,
   noFloatingPromiseInTry,
+  noNamespaceObjectWrite,
   noNanComparison,
   noOutOfRangeExitCode,
   noOversizedTimerDelay,
   noShadowedRoute,
+  noSparseArrayIteration,
   noStringLengthAsContentLength,
   noThrowLiteral,
   noUnreachableCleanupAfterExit,
@@ -245,6 +254,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noMockOfMissingExport,
   noRedundantTryCatchRethrow,
   noTautologicalMockAssertion,
+  noUnimplementedStub,
   preferNodeProtocolImports,
   // modernization
   noDeprecatedNodeApi,

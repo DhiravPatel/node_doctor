@@ -1156,7 +1156,11 @@ A third extension, covering **net-new, differentiated** capabilities beyond the 
 **Status: Core** — `no-system-prompt-leak`. A system-prompt binding echoed back to the caller, logged, or reflected in an error.
 
 ## 109. AI Cost & Runaway-Loop Guards
-**Status: Core** — `ai-call-in-loop`. An LLM call inside a loop: a latency, cost, and rate-limit blowup. (Unbounded-agent-loop and missing-token-limit checks remain **Planned**.)
+**Status: Core** — `ai-call-in-loop`, `no-unbounded-agent-loop`, `require-llm-token-limit`. An LLM call inside a loop: a latency, cost, and rate-limit blowup.
+
+**The two remaining checks shipped.** `no-unbounded-agent-loop` is `ai-call-in-loop`'s sibling: there the loop's size is set by the input, here by nothing at all. A syntactically infinite loop — `while (true)`, `for (;;)`, `do … while (true)` — containing a proven model call, whose only exit is the model deciding to stop. A tool that keeps returning an error the model keeps trying to fix, or a success criterion it never satisfies, runs until the request times out or the spend cap does. The claim is deliberately the narrow syntactic one, *this loop counts nothing*: any counter at all silences it, because whether an existing counter is compared correctly is a different question and one this cannot answer.
+
+`require-llm-token-limit` is **opt-in**, and the reason is worth stating: a token cap is a policy choice, not a language fact, so it does not meet the always-wrong bar the default-enabled rules are held to. Without one the ceiling is the provider's default for the model in use — a number the provider sets, changes, and varies per model, so the same code implicitly capped at 4k today is capped at 64k after a model swap. The claim is about an ABSENT key, so it is made only where every key is visible: an object literal, no spread. One claim was cut for being unverifiable offline — Anthropic's Messages API documents `max_tokens` as *required*, which would make its absence an error rather than a cost risk, but confirming that needs a live API call this analyzer cannot make.
 
 ---
 
@@ -1861,9 +1865,15 @@ Where the emitted JavaScript does not mean what the TypeScript said: `useDefineF
 Server-only values reaching a client bundle: a module reading `process.env.DATABASE_URL` transitively reachable from a client entry point, a server-only package pulled into a shared utility, `"use server"`/`"use client"` boundary violations. The blast-radius graph already computes reachability; this points it at the bundler's entry points instead of the request handlers. The failure mode is a secret in a file served to browsers.
 
 ## 188. Tree-Shaking Defeat Detection ★
-**Status: Planned** · ⚙️ Now
+**Status: Adjacent case shipped; the section itself rejected** · `no-namespace-object-write`
 
 Patterns that silently disable dead-code elimination: a missing or wrong `sideEffects` field, a top-level statement with an observable effect in a library entry, `export *` chains that defeat static analysis, and a namespace import used for exactly one member.
+
+**All four catalogued sub-cases were scoped and rejected**, and the reasons are worth keeping. *A missing or wrong `sideEffects` field* requires proving a module has no observable effect, which is the whole-program analysis this engine refuses. *A top-level statement with an observable effect in a library entry* needs to know both that the file IS a library entry and that the statement HAS an effect; syntax supplies neither. *`export *` chains* rest on a false premise — bundlers resolve them. *A namespace import used for exactly one member* is a style preference, and fails the bar the same way `parseInt` without a radix did.
+
+**What did ship is adjacent to the last of those, and is a fact rather than a preference.** `import * as NS` binds a module namespace exotic object whose `[[Set]]` returns `false` for every key, and ES module code is always strict — so a write to one of its properties is an unconditional `TypeError`. It arrives with a migration: `require("node:fs").readFile = wrapped` is legal CommonJS and is how a generation of APM shims was written, and the mechanical ESM translation of it throws.
+
+The scoping found a trap that makes the ESM proof mandatory rather than tidy, and it is the same shape as the Worker findings a wave earlier: **loaded by a CommonJS caller — sloppy mode — the identical write on the identical object does not throw. It silently does nothing.** `Object.isSealed` is `true` in both worlds, so the object cannot tell you which one it is in; only the caller's strictness decides. Reporting a crash that does not happen would be the false positive, so this reuses `no-dirname-in-esm`'s proof ladder unchanged, and adds two silences of its own: a **test file** (a runner's module mock hands over a plain mutable object, so `mod.fn = vi.fn()` genuinely works) and `Object.assign(NS, src)` (which copies nothing and throws nothing when `src` is empty — value analysis, so not claimed).
 
 ## 189. Source-Map & Debug-Artifact Hygiene ★
 **Status: Planned** · ⚙️ Now
@@ -1965,9 +1975,13 @@ A relative `fs` path resolved against `process.cwd()` rather than the module, `_
 # Part XLVII — Primitive-Failure Reasoning
 
 ## 200. Allocation-Failure & Limit Reasoning ★
-**Status: Planned** · ⚙️ Now
+**Status: Adjacent case shipped; the section itself rejected** · `no-sparse-array-iteration`
 
 `Buffer.allocUnsafe` with a caller-controlled size, a string built past the engine's maximum length, `JSON.parse` of an unbounded body at the allocation layer, an array pre-allocated from an untrusted count, and a regex on input with no length bound.
+
+**All five were scoped and rejected.** *`Buffer.allocUnsafe` with a caller-controlled size* was the most promising and is worth recording in full: the disclosure is real — 7 of 20 non-pooled 64KB allocations came back holding the previous contents when measured — but `allocUnsafe` is correct when the buffer is immediately filled, and "was this fully written before it escaped" is exactly the flow analysis this engine does not do. *A string past the engine's maximum*, *an unbounded `JSON.parse`*, *an array from an untrusted count* and *a regex with no length bound* all need a value or a rate that the file does not contain; "no length bound" is not a syntactic property.
+
+**What did ship is a fact about holes rather than about size.** `new Array(5)` creates five **holes**, not five `undefined`s, and every callback-taking method on `Array.prototype` skips holes — so `new Array(5).map((_, i) => i)` returns five holes and `new Array(3).forEach(seed)` runs the callback **zero** times. Both measured. It reads as obviously correct, which is why it survives review, and it fails quietly: `.length` is the number the author expected, and `JSON.stringify` renders the holes as `null`. Only a single positive-integer **literal** counts, because `new Array(n)` might be `new Array(0)` — and `fill`, `join` and `keys` visit holes, so `new Array(n).fill(0)`, the standard fix, is silent by construction.
 
 ## 201. Numeric-Boundary & Coercion Correctness ★ Differentiator
 **Status: Partially shipped** · `no-nan-comparison`
@@ -2012,9 +2026,15 @@ The non-timezone half of §116, provable where the timezone half is not: `Date.n
 *The final lens, and the most on-thesis: what the **shape** of the code says about how it was produced. Agents write recognizable code, and its failure modes are recognizable too.*
 
 ## 205. Agent-Artifact Detection ★★ Flagship
-**Status: Planned** · ⚙️ Now
+**Status: Partially shipped** · `no-unimplemented-stub`
 
 Residue that ships because nobody read the diff: a `// TODO: implement` in a merged function body, a stub returning a hardcoded literal where an implementation belongs, commented-out alternatives left beside the chosen one, an obviously-templated docstring describing a different function. **A placeholder identifier is naming taste, not a defect** — the rule must fire only on unambiguous residue, or it becomes a style linter.
+
+**The unambiguous form shipped**, and the section's own warning turned out to be the hard part rather than the easy one. `no-unimplemented-stub` fires on a function body with **zero statements** whose comment admits it was never written — the author stating the fact, and the rule repeating it. It returns `undefined` silently: nothing throws, nothing logs, and the caller gets a value that is falsy now and `NaN` once it reaches arithmetic.
+
+The first version matched the bare words `implement`, `stub` and `placeholder` anywhere in a comment, and a corpus sweep found it firing on correct code explaining itself — Next's `voidCatch()`, whose comment says it expects "the underlying **implementation** to forward errors", and React Navigation's `removeListener`, which mentions "**placeholder** screens". Matching a domain word in prose is exactly the style-linter failure this section warns about, so a conventional tag now has to be written *as* a tag, at the start of the comment. The same sweep produced a third silence: an **inline callback argument** is never judged, because `req.on("error", () => {})` is a required idiom — the empty body is what stops an unhandled `error` event killing the process — and Next ships precisely that with a `// TODO: log socket errors?` beside it.
+
+**Not shipped, with reasons.** *A stub returning a hardcoded literal* cannot be told from a legitimate constant function. *Commented-out alternatives* is a claim about what commented text means. *A templated docstring describing a different function* is §178's territory, and its four unprovable sub-cases are already recorded there.
 
 ## 206. Hallucinated-API Detection ★★ Flagship
 **Status: Core** (`node-doctor api-check`, aliases `hallucinated` / `check-api`) · 🔧 Needs depth for the rest
@@ -2063,6 +2083,10 @@ The wave was gated on a corpus sweep of **466,000 real files** across eighteen p
 
 The lesson of this wave is narrower than the last one and more useful: **an always-wrong fact is always wrong only in the context you checked it in.** Two of the four rules asserted runtime behaviour that is real on the main thread and false inside a Worker — `process.on("SIGKILL")` throws in one and not the other, and `process.exit(1001)` is masked in one and delivered intact in the other. Neither is discoverable by reading the documentation; both took ten lines of Node to settle. The same wave also corrected the catalog's own description of two bugs: a `SIGKILL` handler does not silently never fire, it throws where you register it; and a chunk-split multibyte character does not surface as a parse failure, it parses fine and silently stores corrupted text. Running the runtime rather than reasoning about it is now the standing rule for any claim about what Node does.
 
-Next: **§193 backpressure** and **§200 allocation limits** are the two remaining ⚙️ Now sections with decidable cases left in them. §205 agent-artifact detection is still the most on-thesis and still needs the sharpest scoping in the set.
+**The remaining ⚙️ Now sections were then scoped in full — §188, §189, §193, §200, §203, and the leftovers of §194/§198 — and the honest answer is that most of them cannot ship.** Thirty of thirty-seven sub-cases were rejected, each with the specific thing it would have to know that syntax does not say, and those reasons are recorded in the sections above so the catalog does not re-litigate them. Three of the rejections corrected the catalog's own premise: `export *` chains do not defeat modern bundlers, `fs.watch` firing twice is not the invariant the section assumed, and an absent `.map` file does not make a stack trace unreadable.
+
+What survived is not what the catalog expected. The two rules that shipped from those six sections are both **adjacent** to a listed sub-case rather than one of them — a write to a sealed module namespace object (§188), and iteration over a pre-sized array's holes (§200). Five further candidates passed the decidability bar but were declined on yield: `setSourceMapsEnabled` in an ES module, `await` on a `Writable.write()`, callback-form `pipeline()` with a non-function tail, a function literal in a `process.send` payload, and a DOM-style options object passed to `EventEmitter.on` — the last of which is a genuine always-wrong fact (Node ignores the third argument entirely, so `{ once: true }` silently does nothing and the listener leaks) but needs a receiver proof that costs more than the fifteen instances in half a million files are worth. Any of them can be revisited; none of them is a gap.
+
+Next: the AI pack is where the remaining depth is. §110–§113 stay **Vision** — they need git-metadata attribution, the original spec, or a signing chain, none of which the deterministic offline core has — and §205's shipped case is one of four, with the other three recorded above as unprovable.
 
 **§207 copy-paste divergence and §209 abstraction-level are the two most likely to fail a precision hunt**, and if they do they should not ship. **§205 agent-artifact detection** is the most on-thesis but needs the sharpest scoping in the set: `// TODO: implement` in a merged body is a fact, and a variable named `data2` is taste — a rule that cannot tell them apart is a style linter wearing a correctness badge. The same discipline governs as it has for 206 sections.

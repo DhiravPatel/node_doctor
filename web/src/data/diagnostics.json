@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 154,
-  "defaultOn": 104,
-  "optIn": 50,
+  "total": 159,
+  "defaultOn": 108,
+  "optIn": 51,
   "byCategory": {
-    "Performance": 12,
+    "Performance": 13,
     "Security": 60,
-    "Maintainability": 15,
-    "Reliability": 41,
-    "Bugs": 26
+    "Maintainability": 16,
+    "Reliability": 42,
+    "Bugs": 28
   },
   "categoryWeights": {
     "Security": 2,
@@ -1267,6 +1267,22 @@
       "recommendation": "Rename the mocked member to match the real export, or delete it. A mock that stubs a name the module no longer exports keeps the suite green while testing a stub of something that does not exist — the coverage number does not move, and the confidence is false."
     },
     {
+      "id": "no-namespace-object-write",
+      "title": "Write to a module namespace object, which is sealed",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "esm",
+        "modules"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "A module namespace object is sealed, and ES module code is strict, so assigning to one of its properties throws. Build a new object instead (`{ ...ns, fn: wrapped }`), or reach the mutable CommonJS export object through `createRequire(import.meta.url)` if you really are monkeypatching."
+    },
+    {
       "id": "no-nan-comparison",
       "title": "Comparison against NaN, whose result is constant",
       "category": "Bugs",
@@ -1666,6 +1682,21 @@
       "recommendation": "For an authenticated or personalized response, set `Cache-Control: private, no-store` (or drop `public`/`s-maxage`) so a CDN/shared proxy cannot store and re-serve it. If it must be shared-cacheable, key it per user with `Vary: Authorization`."
     },
     {
+      "id": "no-sparse-array-iteration",
+      "title": "Iterating a pre-sized array, whose holes are skipped",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "arrays",
+        "correctness"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use `Array.from({ length: n }, (_, i) => …)`, or materialise the holes first with `new Array(n).fill(0)`. `new Array(n)` produces holes rather than `undefined`s, and every callback-taking method on `Array.prototype` skips holes — so the callback never runs and the result is another array of holes."
+    },
+    {
       "id": "no-sql-template-interpolation",
       "title": "SQL built by string interpolation",
       "category": "Security",
@@ -1927,6 +1958,24 @@
       "recommendation": "Anchor the pattern at the start (`/^https:\\/\\/trusted\\.com$/`) so it matches the whole input, not a substring — or, better, parse the value (`new URL(target).host`) and compare the host against an explicit allowlist instead of matching a regex."
     },
     {
+      "id": "no-unbounded-agent-loop",
+      "title": "Agent loop with no step bound",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "ai",
+        "cost",
+        "reliability"
+      ],
+      "requires": [
+        "ai"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Bound the loop with a step budget — `for (let step = 0; step < MAX_STEPS; step++)`, or a counter that throws when it is exceeded. An agent loop whose only exit is the model deciding to stop runs until the request times out or the spend cap does, and a tool that keeps returning an error the model keeps trying to fix will get there."
+    },
+    {
       "id": "no-unbounded-module-cache",
       "title": "Module-scope cache with no eviction",
       "category": "Reliability",
@@ -2036,6 +2085,22 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Use `stream.pipeline(source, destination, callback)` instead of `.pipe()` — it forwards errors, destroys every stream in the chain, and calls back once. If you must keep `.pipe()`, register an `error` listener on the source: `src.on(\"error\", next)`. Bare `.pipe()` does not forward errors, so a failing source leaves the destination open — a leaked file descriptor and a request that hangs until the client gives up."
+    },
+    {
+      "id": "no-unimplemented-stub",
+      "title": "Function body is empty apart from a comment saying it is unfinished",
+      "category": "Maintainability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "agent-artifact",
+        "correctness",
+        "maintainability"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Implement it, or make the gap loud — `throw new Error(\"applyDiscount is not implemented\")` fails on the first call instead of returning `undefined` into arithmetic three layers away. An empty body that a comment admits is unfinished passes type checking, passes a test written against the same misunderstanding, and ships."
     },
     {
       "id": "no-unnormalized-identity-comparison",
@@ -2306,6 +2371,24 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Always pass an explicit allowlist, e.g. `jwt.verify(token, key, { algorithms: ['RS256'] })`. Without it, an RS256 verifier can be confused into accepting an HS256 token signed with the public key."
+    },
+    {
+      "id": "require-llm-token-limit",
+      "title": "Model call with no output-token limit",
+      "category": "Performance",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "ai",
+        "cost",
+        "performance"
+      ],
+      "requires": [
+        "ai"
+      ],
+      "disabledWhen": [],
+      "optIn": true,
+      "recommendation": "Set an output cap — `max_tokens` on the OpenAI and Anthropic clients, `maxTokens` on the Vercel AI SDK, `maxOutputTokens` on Google's. Without one the ceiling is the model's default maximum, which differs per model and changes under you: the same code implicitly capped at 4k today is capped at 64k after a model swap, and the difference arrives as a bill."
     },
     {
       "id": "require-pagination-limit",
