@@ -1,11 +1,11 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 160,
-  "defaultOn": 109,
+  "total": 161,
+  "defaultOn": 110,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
-    "Security": 60,
+    "Security": 61,
     "Maintainability": 16,
     "Reliability": 43,
     "Bugs": 28
@@ -1156,6 +1156,22 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Capture the store into a local BEFORE registering the listener (`const ctx = als.getStore(); emitter.on(evt, () => use(ctx))`), or bind the callback to the current context with `als.bind(fn)` / `new AsyncResource(name).runInAsyncScope(fn)` so it runs in the registration-time context instead of the emit-time context."
+    },
+    {
+      "id": "no-mass-assignment",
+      "title": "Whole request body written into a record (mass assignment)",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "authz",
+        "injection",
+        "security"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Pick the fields explicitly — `const { email, name } = req.body` — or validate into a known shape (`schema.parse(req.body)`) before the write. Passing the whole body lets the caller set every column the model has, including the ones no form shows: `role`, `credits`, `emailVerified`, `tenantId`."
     },
     {
       "id": "no-math-random-for-token",

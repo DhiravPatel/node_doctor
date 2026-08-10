@@ -48,7 +48,31 @@ const HTTP_DECORATORS = new Set([
   "Options",
   "Head",
   "All",
+  // GraphQL, decorator form (Nest, TypeGraphQL). A resolver runs per request
+  // exactly as an HTTP handler does, and `@ResolveField` runs per PARENT ROW —
+  // which is what makes an N+1 there worse than in a REST handler, not better.
+  "Query",
+  "Mutation",
+  "Subscription",
+  "ResolveField",
+  "ResolveProperty",
+  "FieldResolver",
 ]);
+
+/**
+ * The root keys of a GraphQL resolver map — `{ Query: { user() {} } }`.
+ *
+ * Without this the engine is close to SILENT on a GraphQL backend: there is no
+ * registration call to find, so `no-query-in-loop`, `no-sync-io-in-request-path`
+ * and every other request-path rule never sees a resolver at all. Recognizing
+ * the map costs one extension point and covers all of them at once.
+ *
+ * Only the three root operation types are matched, and only when the value is an
+ * object of functions. A type-level resolver map (`{ User: { posts() {} } }`)
+ * needs the schema to identify, and guessing that any capitalized key is a
+ * GraphQL type would sweep in every ordinary namespace object in the file.
+ */
+const GRAPHQL_ROOT_TYPES = new Set(["Query", "Mutation", "Subscription"]);
 
 /** Object-route properties whose function values are handlers. */
 const ROUTE_HANDLER_KEYS = new Set(["handler", "preHandler", "onRequest", "preValidation"]);
@@ -213,7 +237,25 @@ export const collectRequestHandlers = (program: AstNode, scope: ScopeResolver): 
         }
       }
 
-      // Decorator handlers (Nest/Adonis).
+      // GraphQL resolver map: `{ Query: { user() {…} }, Mutation: { … } }`.
+      // The property value must be an object literal whose own values are
+      // functions — that shape is a resolver map and very little else.
+      if (node.type === "ObjectExpression") {
+        for (const prop of (node.properties as AstNode[] | undefined) ?? []) {
+          if (prop.type !== "Property" || prop.computed) continue;
+          const key = prop.key as AstNode | undefined;
+          const keyName = key?.type === "Identifier" ? (key.name as string) : (key?.value as string | undefined);
+          if (typeof keyName !== "string" || !GRAPHQL_ROOT_TYPES.has(keyName)) continue;
+          const value = prop.value as AstNode | undefined;
+          if (value?.type !== "ObjectExpression") continue;
+          for (const field of (value.properties as AstNode[] | undefined) ?? []) {
+            if (field.type !== "Property") continue;
+            handlersFromArg(field.value as AstNode, scope, handlers);
+          }
+        }
+      }
+
+      // Decorator handlers (Nest/Adonis), and GraphQL decorators.
       if (node.type === "MethodDefinition" || node.type === "PropertyDefinition") {
         const decorators = (node.decorators as AstNode[]) ?? [];
         for (const dec of decorators) {

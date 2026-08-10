@@ -152,6 +152,12 @@ Capability tokens are derived per framework and gate framework-specific rules.
 - Proto validation.
 - Service definition validation.
 
+**GraphQL resolvers are now recognized as request handlers.** Before this the engine was close to silent on a GraphQL backend: `collectRequestHandlers` knew method-call registrations, the Fastify object form, HTTP decorators and convention exports, and nothing about a resolver — so `no-query-in-loop`, `no-sync-io-in-request-path`, `no-large-json-parse-in-request-path` and `no-error-leak-to-client` all missed it entirely.
+
+Two shapes are matched: a resolver map's `Query`/`Mutation`/`Subscription` fields, and the `@Query`/`@Mutation`/`@ResolveField` decorators. One extension point covering every request-path rule at once, which is why it was worth more than any single new diagnostic. `@ResolveField` matters most — it runs per PARENT ROW, so an N+1 there is worse than in a REST handler, not better.
+
+Deliberately narrow: only the three root operation types, and only when the value is an object of functions. A type-level resolver map (`{ User: { posts() {} } }`) needs the schema to identify, and treating any capitalized key as a GraphQL type would sweep in every ordinary namespace object in the file.
+
 ## 4. Route Analysis
 **Status: Core (partial)** — route registration + `node-doctor surface` mapping are Core; `no-duplicate-route-definition` (opt-in) and `no-shadowed-route` (a static route made unreachable by an earlier parameter route on the same Express router, order-based-matching only) ship today. The rest below build on registration detection.
 
@@ -202,6 +208,12 @@ Capability tokens are derived per framework and gate framework-specific rules.
 - Admin route exposure.
 - Permission validation (client-forgeable authz fields).
 - Role conflicts / privilege escalation paths.
+
+**Mass assignment shipped** — `no-mass-assignment` (Security, error). Handing an ORM the entire request body lets the caller set **every column the model has**, not just the ones the form showed them: `POST {"email":"…","role":"ADMIN"}`. It survives tests, because a test posts the fields the form posts and every one is legitimate; it survives type-checking, because `req.body` is `any` and the ORM's `data` accepts a partial.
+
+The rule asks exactly one question, and it is syntactic: does the request body OBJECT reach a write un-narrowed? It never asks what a FIELD MEANS — "this handler trusts `req.body.isAdmin`" would need to know that `isAdmin` is privileged, which is a claim about a name.
+
+**The first version got the source model wrong, and a corpus sweep caught it: 743 findings across 106,851 files.** It treated any request-DERIVED binding as the body, so `mongoHelper.create(session)` — where `session` was assembled field by field from request fields — was reported. That assembled object is the CORRECT pattern this rule recommends, and a rule that punishes its own fix is worse than no rule. The value must now be the body *syntactically*: `req.body`/`.query`/`.params` written out, a binding whose initializer is exactly that, or a spread of either. No taint involvement at all. Re-swept: 743 → 0, with every true-positive shape still firing.
 
 ## 7. Security Scanner
 **Status: Core** for SQL injection, command injection, path/directory traversal, unsafe `eval`/`Function`/`child_process`/shell; **Planned** for the remainder of OWASP coverage.

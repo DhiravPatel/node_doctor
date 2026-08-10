@@ -137,6 +137,7 @@ import { noFunctionConstructorWithInput } from "../diagnostics/security/no-funct
 import { noHardcodedSecretLiteral } from "../diagnostics/security/no-hardcoded-secret-literal.ts";
 import { noJwtDecodeAsVerify } from "../diagnostics/security/no-jwt-decode-as-verify.ts";
 import { noJwtNoneAlgorithm } from "../diagnostics/security/no-jwt-none-algorithm.ts";
+import { noMassAssignment } from "../diagnostics/security/no-mass-assignment.ts";
 import { noMathRandomForToken } from "../diagnostics/security/no-math-random-for-token.ts";
 import { noNondeterministicStableKey } from "../diagnostics/security/no-nondeterministic-stable-key.ts";
 import { noNosqlObjectInjection } from "../diagnostics/security/no-nosql-object-injection.ts";
@@ -296,6 +297,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noHardcodedSecretLiteral,
   noJwtDecodeAsVerify,
   noJwtNoneAlgorithm,
+  noMassAssignment,
   noMathRandomForToken,
   noNondeterministicStableKey,
   noNosqlObjectInjection,

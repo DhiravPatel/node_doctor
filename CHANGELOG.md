@@ -98,6 +98,44 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### GraphQL coverage and mass assignment (§3, §6)
+
+Both came out of a full audit of the catalog's 63 `Planned` markers against the
+actual codebase — **51 unblocked, 55 already shipped, 26 partial, 66 genuinely
+blocked**. The catalog had drifted much further than spot-checks suggested.
+
+- **GraphQL resolvers are now request handlers.** The engine was close to silent
+  on a GraphQL backend: `collectRequestHandlers` knew method-call registrations,
+  the Fastify object form, HTTP decorators and convention exports, and nothing
+  about a resolver. Matching a resolver map's `Query`/`Mutation`/`Subscription`
+  fields and the `@Query`/`@Mutation`/`@ResolveField` decorators makes **every**
+  request-path rule cover GraphQL at once — `no-query-in-loop`,
+  `no-sync-io-in-request-path`, `no-large-json-parse-in-request-path`,
+  `no-error-leak-to-client`. `@ResolveField` runs per parent row, so an N+1
+  there is worse than in a REST handler.
+  Deliberately narrow: only the three root operation types, and only when the
+  value is an object of functions. Treating any capitalized key as a GraphQL
+  type would sweep in every namespace object in the file.
+
+- **`no-mass-assignment`** (Security, error) — the whole request body written
+  into a record, so the caller sets every column the model has:
+  `POST {"email":"…","role":"ADMIN"}`. Privilege escalation with no exploit
+  required. It survives tests (they post the fields the form posts) and type
+  checking (`req.body` is `any`).
+  It asks one syntactic question — does the body OBJECT reach a write
+  un-narrowed — and never what a field MEANS, because "`isAdmin` is privileged"
+  is a claim about a name.
+
+**The first version of `no-mass-assignment` was wrong, and the corpus caught it:
+743 findings across 106,851 files.** It treated any request-DERIVED binding as
+the body, so `mongoHelper.create(session)` — where `session` was assembled field
+by field from request fields — was reported. That assembled object is the
+correct pattern the rule recommends; a rule that punishes its own fix is worse
+than no rule. The value must now be the body *syntactically*: `req.body` written
+out, a binding whose initializer is exactly that, or a spread of either. No taint
+involvement. Re-swept: **743 to 0**, with every true-positive shape still firing,
+and all three real-world false positives kept as regression tests.
+
 ### Finding blame — `node-doctor blame` (§42)
 
 - **`node-doctor blame [dir]`** (aliases `finding-age`, `age`) — how old is each
