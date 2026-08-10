@@ -712,6 +712,63 @@ export const renderPackageApi = (
  * §104 — why two reports differ. Leads with the verdict, because "did the code
  * change or did the tool change" is the entire question being asked.
  */
+/**
+ * §42 — finding blame. Leads with what is NEW, because "is this new?" is the
+ * question a finding list cannot answer and the one triage asks first.
+ */
+export const renderFindingBlame = (
+  report: import("../core/finding-blame.ts").FindingBlameReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  if (!report.available) {
+    lines.push(`  ${p.yellow("\u25cf")} ${p.bold("Not checked")} \u2014 ${report.unavailableReason}.`);
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  const s = report.summary;
+  lines.push(
+    `  ${p.bold("Finding age")}  ${p.dim(
+      `${s.attributed}/${s.findingsChecked} attributed \u00b7 median ${s.medianAgeDays ?? "-"}d \u00b7 oldest ${s.oldestAgeDays ?? "-"}d`,
+    )}`,
+  );
+  lines.push(p.dim("    `git blame` reports the LAST touch, so an age is a lower bound on how long a finding has existed."));
+  lines.push("");
+
+  if (report.recent.length > 0) {
+    lines.push(`  ${p.red("\u2716")} ${p.bold(`${report.recent.length} finding(s) on lines touched in the last ${s.recentDays} days`)}`);
+    lines.push(p.dim("      New debt, not old debt. Triage these first."));
+    lines.push("");
+    for (const f of report.recent.slice(0, 20)) {
+      const who = f.commit ? `${f.commit.sha} ${f.commit.author}` : f.uncommitted ? "uncommitted" : "unattributed";
+      lines.push(
+        `      ${p.cyan(`${f.normalizedFilePath}:${f.line}`)}  ${f.diagnostic}  ${p.dim(`${f.ageDays}d ago \u00b7 ${who}`)}`,
+      );
+    }
+    if (report.recent.length > 20) lines.push(p.dim(`      \u2026 ${report.recent.length - 20} more`));
+    lines.push("");
+  } else if (s.findingsChecked > 0) {
+    lines.push(p.green(`  \u2714 No finding sits on a line touched in the last ${s.recentDays} days.`));
+    lines.push("");
+  }
+
+  if (s.uncommitted > 0) {
+    lines.push(p.dim(`  ${s.uncommitted} finding(s) are on uncommitted lines \u2014 your working tree, not history.`));
+    lines.push("");
+  }
+
+  if (report.authors.length > 0) {
+    lines.push(p.dim("  Who last touched the finding-bearing lines (not blame in the moral sense):"));
+    for (const a of report.authors.slice(0, 8)) lines.push(p.dim(`      ${a.author}  ${a.findings}`));
+    lines.push("");
+  }
+
+  return lines.join("\n");
+};
+
 export const renderDrift = (
   report: import("../core/drift.ts").DriftReport,
   options: { color?: boolean } = {},

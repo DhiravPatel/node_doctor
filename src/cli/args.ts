@@ -42,6 +42,7 @@ export type Command =
   | "exports-check"
   | "ai-attribution"
   | "drift"
+  | "blame"
   | "version";
 
 // "rules" is accepted as a legacy alias for "diagnostics"; "observe" for
@@ -73,6 +74,8 @@ const COMMAND_ALIASES: Record<string, Command> = {
   "install-scripts": "supply-chain",
   hallucinated: "api-check",
   "check-api": "api-check",
+  "finding-age": "blame",
+  "age": "blame",
   "why-changed": "drift",
   "explain-drift": "drift",
   "ai-trust": "ai-attribution",
@@ -144,6 +147,9 @@ const COMMANDS = new Set<string>([
   "exports-check",
   "ai-attribution",
   "drift",
+  "blame",
+  "finding-age",
+  "age",
   "why-changed",
   "explain-drift",
   "ai-trust",

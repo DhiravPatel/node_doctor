@@ -24,7 +24,7 @@ import { installGitHook } from "../install/git-hook.ts";
 import { scanProject } from "../core/scan.ts";
 import type { ScanReport } from "../core/scan.ts";
 import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
-import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver, renderOpenApi, renderArchitecture, renderChurn, renderReviewRouting, renderReadiness, renderChangeShape, renderI18n, renderNodeUpgrade, renderSupplyChain, renderPackageApi, renderExportsCheck, renderAiAttribution, renderDrift } from "../report/terminal.ts";
+import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver, renderOpenApi, renderArchitecture, renderChurn, renderReviewRouting, renderReadiness, renderChangeShape, renderI18n, renderNodeUpgrade, renderSupplyChain, renderPackageApi, renderExportsCheck, renderAiAttribution, renderDrift, renderFindingBlame } from "../report/terminal.ts";
 import { scanAgentContext, applyContextHygiene } from "../core/agent-context.ts";
 import { isWorkspaceRoot, scanWorkspaces, workspaceFindings, discoverWorkspaces } from "../core/workspaces.ts";
 import { toJson, toJsonError } from "../report/json.ts";
@@ -68,6 +68,7 @@ import { buildPackageApiReport } from "../core/package-api.ts";
 import { buildExportsCheckReport } from "../core/exports-map.ts";
 import { buildAiAttributionReport } from "../core/ai-attribution.ts";
 import { explainDrift } from "../core/drift.ts";
+import { buildFindingBlameReport } from "../core/finding-blame.ts";
 import { buildImpactGraph, computeImpact } from "../core/impact.ts";
 import { collectAttackPaths } from "../core/attack-paths.ts";
 import { loadCodeowners, groupByOwner, scorePrRisk } from "../core/ownership.ts";
@@ -337,6 +338,7 @@ Usage:
   node-doctor exports-check [dir]        Package exports map vs the files on disk: dead targets, ESM/CJS mismatches
   node-doctor ai-attribution [dir]      Which findings sit on lines from commits that declared AI assistance
   node-doctor drift --baseline <f> --current <f>   Why two reports differ: the code, or the tool?
+  node-doctor blame [dir]               How old is each finding, and who last touched the line?
   node-doctor context [dir] [--write]    Find files an AI agent must not read; --write fences them off
   node-doctor deslop [directory]         Dead-code scan (unused files/exports/deps)
   node-doctor explain <diagnostic-id>          Explain a diagnostic and its fix
@@ -1863,6 +1865,36 @@ const runExportsCheck = async (args: ParsedArgs): Promise<number> => {
 };
 
 /**
+ * §42 — finding blame. Scans first, then blames only the files that carry
+ * findings; blaming a whole tree costs minutes for a number nobody reads.
+ */
+const runBlame = async (args: ParsedArgs): Promise<number> => {
+  const { dir } = await resolveScanTarget(args);
+  const scan = await scanProject({
+    rootDirectory: dir,
+    ignoredTags: new Set(args.ignoreTags),
+    parallel: args.parallel,
+    configPath: args.config ? resolve(args.config) : undefined,
+  });
+  const report = await buildFindingBlameReport(dir, {
+    now: Date.now(),
+    findings: scan.findings.map((f) => ({
+      diagnostic: f.diagnostic,
+      normalizedFilePath: f.normalizedFilePath ?? "",
+      line: f.line,
+      severity: f.severity,
+    })),
+  });
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(report) : JSON.stringify(report, null, 2)) + "\n");
+  } else {
+    process.stdout.write(renderFindingBlame(report, { color: useColor(args) }));
+  }
+  // Age describes findings; it does not add any. Never a gate on its own.
+  return 0;
+};
+
+/**
  * §104 — why two reports differ. Reads only the two artifacts, so it answers the
  * question offline, after the fact, from whatever CI kept.
  */
@@ -2029,6 +2061,8 @@ export const main = async (argv: string[]): Promise<number> => {
         return await runAiAttribution(args);
       case "drift":
         return await runDrift(args);
+      case "blame":
+        return await runBlame(args);
       case "supply-chain":
         return await runSupplyChain(args);
       case "node-upgrade":

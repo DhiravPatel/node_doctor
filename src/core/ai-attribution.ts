@@ -34,7 +34,7 @@
  * treats the totals as context for it.
  */
 
-import { gitContext, gitStdout } from "./git-history.ts";
+import { gitContext, gitStdout, blameFile } from "./git-history.ts";
 import type { NodeDoctorConfig } from "./config.ts";
 
 /** A finding, reduced to what attribution needs. */
@@ -149,33 +149,6 @@ const isShallow = async (cwd: string): Promise<boolean> => {
   return out?.trim() === "true";
 };
 
-/**
- * Blame one file and return, per line, the abbreviated sha that last touched it.
- * Uses `--porcelain` because its header lines are stable across git versions,
- * unlike the human-readable format.
- */
-const blameShas = async (cwd: string, repoRelativePath: string): Promise<string[] | null> => {
-  const stdout = await gitStdout(cwd, [
-    "blame",
-    "--porcelain",
-    "--no-abbrev",
-    "-w", // ignore whitespace-only changes, so a reformat does not reattribute
-    "--",
-    repoRelativePath,
-  ]);
-  if (stdout === null) return null;
-
-  const shas: string[] = [];
-  for (const line of stdout.split("\n")) {
-    // Porcelain emits ONE header per file line — `<sha> <origLine> <finalLine>`
-    // — and the first header of each group carries an extra `<count>` field.
-    // Measured on a 330-line file: 330 headers, 31 of them group heads. So the
-    // count must be IGNORED; honouring it double-counts every group.
-    const header = /^([0-9a-f]{40})\s+\d+\s+\d+(?:\s+\d+)?$/.exec(line);
-    if (header) shas.push(header[1] as string);
-  }
-  return shas;
-};
 
 export const buildAiAttributionReport = async (
   rootDirectory: string,
@@ -255,8 +228,9 @@ export const buildAiAttributionReport = async (
     for (const path of [...byFile.keys()].sort()) {
       // `normalizedFilePath` is scan-root-relative; git wants repo-relative.
       const repoRelative = context.prefix ? `${context.prefix}${path}` : path;
-      const shas = await blameShas(rootDirectory, repoRelative);
-      if (shas === null) continue;
+      const blame = await blameFile(rootDirectory, repoRelative);
+      if (blame === null) continue;
+      const shas = blame.lineShas;
 
       let fileAiLines = 0;
       for (const sha of shas) if (aiBySha.has(sha)) fileAiLines++;

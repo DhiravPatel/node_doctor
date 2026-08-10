@@ -594,17 +594,17 @@ Health score, dependency graph, API graph, architecture graph, database graph, r
 # Part XIII — Interfaces & Integrations
 
 ## 40. CLI
-**Status: Core** for project scan, diff/incremental scan, rule filtering, JSON output, verbose mode, CI mode; **Planned** for watch mode, HTML output, and the auto-fix command.
+**Status: Core** — every item below. The entry previously marked watch mode, HTML output and the auto-fix command as Planned; all three ship (`--watch`, `--html-out`, `node-doctor fix`), and the status was simply stale.
 
 - Project scan (full).
-- Watch mode *(Planned)*.
+- Watch mode — `--watch`.
 - Diff scan (only findings introduced vs a base).
 - Incremental scan (changed files / changed lines).
 - Rule filtering (by rule, tag, category, framework).
 - JSON output.
-- HTML output *(Planned)*.
+- HTML output — `--html-out`.
 - Verbose mode.
-- Auto fix command *(Planned; see §37 constraints)*.
+- Auto fix command — `node-doctor fix` (see §37 constraints).
 - CI mode (blocking levels, baseline delta, machine output).
 
 ## 41. IDE Integration
@@ -619,14 +619,22 @@ Health score, dependency graph, API graph, architecture graph, database graph, r
 - Hover explanations (rule + recommendation).
 
 ## 42. Git Integration
-**Status:** PR/commit/diff analysis and pre-commit/pre-push hooks are **Planned**; blame analysis is **Vision**.
+**Status: Core** for diff analysis, pre-commit hooks, and blame analysis; **Planned** for PR inline comments and pre-push hooks.
 
-- PR scanning (inline comments on introduced findings).
-- Commit scanning.
-- Diff analysis (baseline delta).
-- Blame analysis *(Vision)*.
-- Pre-commit hooks (staged-file scan).
-- Pre-push hooks.
+- PR scanning (inline comments on introduced findings) *(Planned)*.
+- Commit scanning — `--diff`, `--staged`, `--changed-files-from`.
+- Diff analysis (baseline delta) — `node-doctor delta`.
+- **Blame analysis** — `node-doctor blame` (aliases `finding-age`, `age`).
+- Pre-commit hooks — `node-doctor install --git-hook`.
+- Pre-push hooks *(Planned)*.
+
+**Blame analysis was filed as Vision and shipped without new infrastructure**, for the second time in this catalog: §159/§160/§163 brought `git-history.ts`, §110 added a porcelain blame parser, and that was the whole dependency. The parser now lives in `git-history.ts` and both consumers share it.
+
+**Why age is the useful axis.** A finding list answers "what is wrong". It does not answer the question triage asks first — **"is this new?"** A hardcoded credential introduced last Tuesday is an incident; the same finding untouched for three years is debt, and they deserve opposite responses. `churn` ranks by where change concentrates and `drift` explains why a report moved; neither dates a specific finding.
+
+**The precision story is one distinction.** `git blame` reports the commit that **last touched** a line, which is not the commit that introduced the finding — a reformat, a rename, or an unrelated edit re-attributes it, and a line moved wholesale by a refactor dates from the refactor. So every surface says "last touched", and an age is a **lower bound**. Claiming "introduced" would invent a precision blame does not have, exactly as §110 says "declared" rather than "written by". `-w` is passed so a whitespace-only reformat does not re-attribute, but that covers only the cheapest case.
+
+A **shallow checkout suppresses the report entirely** rather than dating every finding to the graft commit — `actions/checkout` clones with `--depth 1` by default, so that is the common case in CI, not an exotic one. An uncommitted line is reported as uncommitted rather than dated, and a file git cannot blame yields an unattributed finding rather than a wrong one.
 
 ## 47. Integrations
 **Status:** ecosystem interop varies; toolchain awareness is **Planned**, deep third-party platform interop is **Vision**.

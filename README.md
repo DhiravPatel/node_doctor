@@ -282,6 +282,7 @@ node-doctor api-check [directory]               members called on a package that
 node-doctor exports-check [directory]           package exports map vs the files on disk: dead targets, ESM/CJS mismatches
 node-doctor ai-attribution [directory]          which findings sit on lines from commits that declared AI assistance
 node-doctor drift --baseline <f> --current <f>  why two reports differ: the code, or the tool?
+node-doctor blame [directory]                   how old is each finding, and who last touched the line?
 node-doctor paths [directory]                   source→sink attack paths (exploitability proof)
 node-doctor context [dir] [--write]             find files an AI agent must not read; --write fences them off
 node-doctor sbom [--framework spdx]             CycloneDX / SPDX bill of materials

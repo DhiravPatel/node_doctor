@@ -150,8 +150,8 @@ export type {
 export { buildChangeShapeReport } from "./core/change-shape.ts";
 export type { ChangeShapeReport, ChangeNote, ChangePriority, ChangeShapeOptions } from "./core/change-shape.ts";
 // Shared git plumbing: running git safely + parsing a unified diff.
-export { gitRun, gitStdout, gitContext, rebaseToScanRoot, parseUnifiedDiff, diffFilePath } from "./core/git-history.ts";
-export type { GitResult, GitUnavailable, DiffLine, DiffHunk, FileDiff } from "./core/git-history.ts";
+export { gitRun, gitStdout, gitContext, rebaseToScanRoot, parseUnifiedDiff, diffFilePath, blameFile, UNCOMMITTED_SHA } from "./core/git-history.ts";
+export type { GitResult, GitUnavailable, DiffLine, DiffHunk, FileDiff, BlameCommit, BlameResult } from "./core/git-history.ts";
 // §181 — i18n & user-string integrity: keys referenced with no translation,
 // placeholders that no longer match, and (only when provable) dead entries.
 export { buildI18nReport } from "./core/i18n.ts";
@@ -177,6 +177,9 @@ export type { PackageApiReport, UnknownMember, SkippedPackage } from "./core/pac
 // ESM/CJS mismatches that resolve fine for the author and throw for consumers.
 export { buildExportsCheckReport } from "./core/exports-map.ts";
 export type { ExportsCheckReport, ExportFinding, ExportProblem } from "./core/exports-map.ts";
+// §42 — finding blame: how old is each finding, and who last touched the line?
+export { buildFindingBlameReport } from "./core/finding-blame.ts";
+export type { FindingBlameReport, BlamedFinding, BlameableFinding, AuthorSummary } from "./core/finding-blame.ts";
 // §104 — why two reports differ: the code, or the tool? Reads only the two
 // artifacts, which is what the provenance record was recorded for.
 export { explainDrift } from "./core/drift.ts";

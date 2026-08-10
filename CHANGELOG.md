@@ -98,6 +98,37 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Finding blame — `node-doctor blame` (§42)
+
+- **`node-doctor blame [dir]`** (aliases `finding-age`, `age`) — how old is each
+  finding, and who last touched the line? Filed as **Vision** and shipped
+  without new infrastructure, for the second time in this catalog: §159/§160/
+  §163 brought `git-history.ts`, §110 added a porcelain blame parser, and that
+  was the whole dependency.
+  A finding list answers "what is wrong". It does not answer the question triage
+  asks first — **"is this new?"** A hardcoded credential introduced last Tuesday
+  is an incident; the same finding untouched for three years is debt. The report
+  leads with what landed inside the recent window and sorts oldest-first, so the
+  tail is what changed.
+  **The precision story is one distinction:** `git blame` reports the commit
+  that LAST TOUCHED a line, not the one that introduced the finding — a reformat
+  or a refactor re-attributes it. So every surface says "last touched" and an
+  age is a **lower bound**; claiming "introduced" would invent a precision blame
+  does not have. A **shallow checkout suppresses the report** rather than dating
+  every finding to the graft commit, which matters because `actions/checkout`
+  clones `--depth 1` by default. An uncommitted line is reported as uncommitted
+  rather than dated, and an unblameable file yields an unattributed finding
+  rather than a wrong one. Exits 0 always.
+
+- **`blameFile`** is now shared git plumbing in `git-history.ts`, parsing
+  sha, author, timestamp and subject in a single pass — so no follow-up
+  `git log` is needed. `ai-attribution` was moved onto it and its 11 tests pass
+  unchanged, which is what makes the extraction safe rather than hopeful.
+
+Two stale statuses corrected alongside: §40 marked watch mode, HTML output and
+the auto-fix command as Planned when all three ship, and §42 marked diff
+analysis and pre-commit hooks as Planned for the same reason.
+
 ### Two false positives in shipped rules, found by a scoping pass that shipped nothing
 
 An adversarial pass scoped four candidate AI-security rules and **rejected all
