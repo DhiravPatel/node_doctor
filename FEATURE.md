@@ -1192,6 +1192,19 @@ The model-taint model that §105 and §107 share now lives in one place (`collec
 
 Two bugs were found by running it against this repository's own history rather than a fixture. A format string whose first byte is a raw NUL makes `git log` fail outright, so the record separator had to move to the end as git's own `%x00`. And porcelain blame emits one header per LINE, with the first of each group carrying an extra `<count>` field — honouring that count double-counts every group, which is how the first version reported 50,195 attributed lines for a 330-line file.
 
+### Scoped and rejected: four AI-security candidates
+
+Recorded so the catalog does not re-litigate them. All four were prototyped and measured, not argued from first principles.
+
+- **Indirect prompt injection** (retrieved content — a vector hit, a fetched page, a file — mixed into prompt instructions). The tempting sibling of §105, and it does not work. Caller-taint has a ROOT: `req`/`ctx` are conventional entry points taint can propagate from. Retrieval has none — it is defined by what a call MEANS, not how it is spelled — so the source set is either too generic (`query`, `search`, `invoke`, `json`, `readFile`: measured 4 false positives on 4 correct files) or too narrow (`similaritySearch` and friends matched 1 of 5 real retrieval spellings). Worse, the decisive fact is not in the file at all: two byte-identical prompts differ only in whether the corpus is user-uploaded or the company's own handbook, and that is fixed in the ingest pipeline. `mixesTaintIntoText` cannot be reused either — its literal-text requirement means "instructions and data got welded together" for caller data, but for retrieved data the surrounding literal text is usually the **delimiter**, so a hardened file fires. And there is no correct shape to steer toward: moving documents from `system` to a `user` turn restores no boundary, because the document's author was never the caller. §105 already covers the common case anyway, since caller taint propagates through the retrieval call.
+- **A secret sent to the model provider.** The name regex would BE the finding here, where in `secret-in-env-fallback` it is only a filter on a defect an entropy check has already proven — a structural difference, not one of degree. Measured 7 false positives in 12 negatives with the house's own regex, because prompts are product prose in which "token" and "password" appear constantly and innocently. Decisive on its own: `openai.chat.completions.create` is syntactically identical whether it reaches api.openai.com, an Azure zero-retention tenant, Bedrock inside a VPC, or Ollama on localhost — so the harm is not merely unproven, it is **false** for a real slice of deployments.
+- **A model deciding an authorization outcome.** The overlap with §107 is genuinely absent (measured — §107 needs taint in the sink's arguments, and a guard has it only in the condition), so this would have been new coverage. It fails on the second half: "this branch does something privileged" is not a syntactic property. Four oracles were built and measured; the only zero-false-positive configuration fires exclusively on a hardcoded `DELETE FROM` literal, which describes a test fixture.
+- **A streamed response with no error path.** Neither half is an always-wrong fact. Verified by running it: `for await` installs its own `error` listener and destroys the stream on failure, so the unhandled-`error`-event argument that justifies `no-missing-stream-error-handler` provably does not apply. What remains is an ordinary promise rejection, handled in the route-registration file — cross-file, and forbidden.
+
+**The pass shipped nothing and was worth running**: it found two false positives in already-shipped default-on rules, both now fixed and recorded in the CHANGELOG.
+
+---
+
 ## 111. Spec / Intent Conformance ★★ Flagship
 **Status: Vision** (needs the task spec + an optional AI layer).
 

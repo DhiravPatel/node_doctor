@@ -1,6 +1,6 @@
 import { defineDiagnostic } from "../../core/types.ts";
 import type { AstNode, Visitors } from "../../core/types.ts";
-import { getMethodName, isFunctionLike } from "../../core/ast.ts";
+import { getMethodName, isFunctionLike, runsPerIteration } from "../../core/ast.ts";
 import type { ScopeResolver } from "../../core/scope.ts";
 import { hasAiImport, isLlmCall } from "./signals.ts";
 
@@ -85,6 +85,10 @@ export const aiCallInLoop = defineDiagnostic({
         let cur: AstNode | null | undefined = node.parent;
         while (cur) {
           if (LOOP_STATEMENTS.has(cur.type)) {
+            // A call in the loop's HEAD runs once, not once per iteration —
+            // `for await (const chunk of await client…create({stream:true}))` is
+            // the canonical streaming idiom and makes exactly one call.
+            if (!runsPerIteration(node, cur)) return;
             // Silence a fixed fan-out over a small literal (for..of only carries an iterable).
             if (cur.type === "ForOfStatement") {
               const lit = iterableArrayLiteral(cur.right as AstNode, ctx.scope);

@@ -231,8 +231,11 @@ export const looksCallerControlled = (
   tainted: Set<string>,
 ): boolean => {
   if (!node) return false;
-  const isTaintedIdent = (n: AstNode): boolean =>
-    n.type === "Identifier" && (tainted.has(n.name) || REQUEST_ROOTS.has(n.name));
+  // `tainted` already carries this file's genuine request roots — `computeTaint`
+  // seeds them, applying the local-declaration exclusion as it goes. Re-deriving
+  // "is this a request root?" from the NAME here is what defeated that exclusion
+  // and made every `const context = …` look caller-controlled.
+  const isTaintedIdent = (n: AstNode): boolean => n.type === "Identifier" && tainted.has(n.name);
   if (isTaintedIdent(node)) return true;
   return findDescendant(node, isTaintedIdent, isFunctionLike) !== null;
 };
@@ -273,3 +276,40 @@ export const rootObjectName = (node: AstNode | null | undefined): string | null 
 /** Nearest enclosing statement that owns `node` (for "is there code after" checks). */
 export const enclosingStatement = (node: AstNode): AstNode | null =>
   findAncestor(node, (n) => typeof n.type === "string" && n.type.endsWith("Statement"));
+
+/**
+ * Does `node` sit in a part of `loop` that RE-RUNS each iteration?
+ *
+ * A loop's head is not the loop. `for await (const chunk of await llm.create(…))`
+ * evaluates that call exactly ONCE to obtain the iterable, and
+ * `for (let rows = await find(…); …)` evaluates its `init` exactly once. Both
+ * read, to a climb that only asks "is there a loop above me?", as though they
+ * ran per iteration — which is how two default-on rules came to report an
+ * `error` on the canonical streaming and cursor idioms.
+ *
+ * `test` and `update` on a `for` statement DO re-run, and stay in scope.
+ */
+export const runsPerIteration = (node: AstNode, loop: AstNode): boolean => {
+  // Find which direct child of the loop this node descends from.
+  let current: AstNode | null | undefined = node;
+  let child: AstNode | null = null;
+  for (let depth = 0; current && depth < 256; depth++) {
+    if (current.parent === loop) {
+      child = current;
+      break;
+    }
+    current = current.parent;
+  }
+  if (child === null) return true; // not actually inside it; leave the caller's logic alone
+
+  if (loop.type === "ForOfStatement" || loop.type === "ForInStatement") {
+    // `right` is the iterable expression, evaluated once. `left` is the binding.
+    return child !== (loop.right as AstNode) && child !== (loop.left as AstNode);
+  }
+  if (loop.type === "ForStatement") {
+    // `init` runs once; `test` and `update` re-run and remain in scope.
+    return child !== (loop.init as AstNode | null);
+  }
+  // `while` / `do…while`: the test re-runs, so everything inside does.
+  return true;
+};

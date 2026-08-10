@@ -68,6 +68,23 @@ export const computeTaint = (program: AstNode): Set<string> => {
 
   const isCallerRoot = (name: string): boolean => REQUEST_ROOTS.has(name) && !locallyDeclared.has(name);
 
+  /**
+   * Seed the set with the request roots this file GENUINELY has, so the answer
+   * lives in one place.
+   *
+   * `looksCallerControlled` used to re-derive "is this a request root?" from the
+   * name alone, which quietly defeated the exclusion above for all sixteen files
+   * that call it — a local `const context = lines.slice(0, 3).join("\n")` in a
+   * diff utility was reported as caller-controlled by thirteen security rules.
+   * Seeding here means the exclusion is applied once, by the code that knows
+   * about it, and every consumer inherits it.
+   */
+  walk(program, {
+    enter: (node) => {
+      if (node.type === "Identifier" && isCallerRoot(node.name)) tainted.add(node.name);
+    },
+  });
+
   const referencesCaller = (expr: AstNode | null | undefined): boolean => {
     if (!expr) return false;
     const isTaintedIdent = (n: AstNode): boolean =>

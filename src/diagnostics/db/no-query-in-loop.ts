@@ -1,6 +1,6 @@
 import { defineDiagnostic } from "../../core/types.ts";
 import type { AstNode } from "../../core/types.ts";
-import { getMethodName, getReceiverName, isFunctionLike } from "../../core/ast.ts";
+import { getMethodName, getReceiverName, isFunctionLike, runsPerIteration } from "../../core/ast.ts";
 import { QUERY_METHODS, DB_RECEIVER_HINTS } from "../../core/signals.ts";
 
 /**
@@ -46,7 +46,9 @@ const enclosingLoopInSameFunction = (node: AstNode): AstNode | null => {
   let cur: AstNode | null | undefined = node.parent;
   while (cur) {
     if (isFunctionLike(cur)) return null; // crossed into a nested function
-    if (LOOP_TYPES.has(cur.type)) return cur;
+    // The loop's HEAD is not the loop: a `for…of` iterable and a `for` `init`
+    // are each evaluated exactly once, so a query there is not an N+1.
+    if (LOOP_TYPES.has(cur.type)) return runsPerIteration(node, cur) ? cur : null;
     cur = cur.parent;
   }
   return null;

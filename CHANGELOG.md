@@ -98,6 +98,37 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Two false positives in shipped rules, found by a scoping pass that shipped nothing
+
+An adversarial pass scoped four candidate AI-security rules and **rejected all
+four**. The rejections are recorded in FEATURE.md; the useful output was two
+false positives it found in already-shipped, default-on rules while probing.
+Both were reproduced by hand before being fixed.
+
+- **A loop's HEAD is not the loop.** `ai-call-in-loop` and `no-query-in-loop`
+  both climbed to the nearest enclosing loop without asking WHICH part of it the
+  call sat in. A `for…of` iterable and a `for` statement's `init` are each
+  evaluated exactly once, so four idiomatic shapes were reported as running per
+  iteration — including `for await (const chunk of await client.chat.completions
+  .create({ stream: true, … }))`, the canonical streaming idiom, and
+  `for await (const row of prisma.user.findMany(…))`, a single cursor query
+  reported at **error** severity. Fixed with one shared predicate,
+  `runsPerIteration`. A `for` statement's `test` and `update` DO re-run and
+  still fire, as does anything in a loop body.
+
+- **A locally-declared request-root NAME is not caller data.** `computeTaint`
+  deliberately excludes a file's own `const context = …` from the request-root
+  set — its comment cites a diff utility's "lines of context" — but
+  `looksCallerControlled` re-derived the check from the NAME and defeated that
+  exclusion for all sixteen files that call it, thirteen of them security rules.
+  A diff utility's `const context = lines.slice(0, 3).join("\n")` interpolated
+  into a prompt was reported as untrusted input. The exclusion now lives in one
+  place: `computeTaint` seeds the taint set with the roots a file genuinely has,
+  and every consumer inherits the answer.
+  A **parameter** named `context` or `event` still counts as a request root, and
+  that is deliberate rather than an oversight — AWS Lambda's handler is
+  `(event, context)`, where `event` genuinely is the caller-controlled payload.
+
 ### Diagnostics — parsing model output (§107)
 
 - **`no-unguarded-llm-json-parse`** (Reliability, `requires: ai`) — `JSON.parse`
