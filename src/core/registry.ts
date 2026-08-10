@@ -14,6 +14,7 @@ import { noLlmOutputInSink } from "../diagnostics/ai/no-llm-output-in-sink.ts";
 import { noPromptInjection } from "../diagnostics/ai/no-prompt-injection.ts";
 import { noSystemPromptLeak } from "../diagnostics/ai/no-system-prompt-leak.ts";
 import { noUnboundedAgentLoop } from "../diagnostics/ai/no-unbounded-agent-loop.ts";
+import { noUnguardedLlmJsonParse } from "../diagnostics/ai/no-unguarded-llm-json-parse.ts";
 import { requireLlmTokenLimit } from "../diagnostics/ai/require-llm-token-limit.ts";
 // api
 import { graphqlIntrospectionInProduction } from "../diagnostics/api/graphql-introspection-in-production.ts";
@@ -172,6 +173,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noPromptInjection,
   noSystemPromptLeak,
   noUnboundedAgentLoop,
+  noUnguardedLlmJsonParse,
   requireLlmTokenLimit,
   // api
   graphqlIntrospectionInProduction,

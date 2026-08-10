@@ -1155,7 +1155,13 @@ A third extension, covering **net-new, differentiated** capabilities beyond the 
 **Status: Core** — `mcp-tool-unrestricted-capability` (`requires: mcp`). An MCP tool handler that runs a high-blast-radius operation (shell, filesystem write, raw SQL, `eval`) on model-controlled arguments.
 
 ## 107. LLM Output-Trust Violations ★ Differentiator
-**Status: Core** — `no-llm-output-in-sink`. Model output reaching an executor, a SQL string, an HTML response, or an outbound fetch without validation — the mirror of §105, where the model is the untrusted source.
+**Status: Core** — `no-llm-output-in-sink`, `no-unguarded-llm-json-parse`. Model output reaching an executor, a SQL string, an HTML response, or an outbound fetch without validation — the mirror of §105, where the model is the untrusted source.
+
+**The parse path shipped too, and it is the same untrusted-source argument one layer down.** A model returns TEXT; asking for JSON, even with a schema and a JSON mode, changes the odds and not the type. So `JSON.parse` on model output is parsing untrusted input, and every shape a model emits when it goes wrong throws — each of these measured rather than assumed: a response **truncated at the token cap** (`{"name":"Ada","bio":"a very long bi`), one wrapped in a ```` ```json ```` fence, one prefaced with "Sure! Here is the JSON:", a trailing comma, single quotes. Unhandled, the `SyntaxError` rejects the handler: a 500 at whatever rate the model happens to malform its answer, which is neither zero nor visible in the code. It is the failure mode `require-llm-token-limit` warns about, arriving one layer down.
+
+The claim is "this parse is unguarded", so both halves are proven: the argument must be model output traced to a recognized call or an alias of one — a bare identifier is never assumed to be model text — and there must be no enclosing `try`/`catch`. Whether that handler is *good* is not a claim this makes; that it exists is. A `try` with only a `finally` catches nothing and still fires; a `try` outside the function does not catch a throw from a later invocation of it, and also still fires.
+
+The model-taint model that §105 and §107 share now lives in one place (`collectModelBindings`, `isModelDerivedExpression`), extracted rather than copied — a duplicated taint definition is worse than a shared one that is wrong, because only the shared one gets fixed once.
 
 ## 108. System-Prompt & Secret Leakage
 **Status: Core** — `no-system-prompt-leak`. A system-prompt binding echoed back to the caller, logged, or reflected in an error.

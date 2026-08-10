@@ -10,6 +10,7 @@
  */
 
 import type { AstNode } from "../../core/types.ts";
+import { collectDescendants } from "../../core/walk.ts";
 import {
   getCalleeName,
   getMethodName,
@@ -144,4 +145,75 @@ export const unwrapAwait = (node: AstNode | null | undefined): AstNode | null =>
   let cur = unwrapChain(node ?? null);
   while (cur && cur.type === "AwaitExpression") cur = unwrapChain(cur.argument as AstNode);
   return cur;
+};
+
+/**
+ * Fields on a model result that carry the generated TEXT, across the SDKs.
+ * `const { text } = await generateText(…)` binds one of these.
+ */
+export const MODEL_RESULT_FIELDS = new Set(["text", "content", "output_text"]);
+
+/**
+ * Does the root of this expression chain resolve to a recognized LLM call?
+ *
+ * Walks down through `await`, member access and call chains, so
+ * `(await openai.chat.completions.create(…)).choices[0].message.content` is
+ * recognized as model-derived. Extracted from §107 so §107 and its siblings
+ * share one definition of "this value came from a model" rather than drifting
+ * apart — a duplicated taint model is worse than a shared one that is wrong,
+ * because only the shared one gets fixed once.
+ */
+export const isModelDerivedExpression = (node: AstNode | null | undefined): boolean => {
+  let cur = unwrapChain(node ?? null);
+  let hops = 0;
+  while (cur && hops++ < 64) {
+    if (isModelResultCall(cur)) return true;
+    switch (cur.type) {
+      case "AwaitExpression":
+        cur = unwrapChain(cur.argument as AstNode);
+        break;
+      case "MemberExpression":
+        cur = unwrapChain(cur.object as AstNode);
+        break;
+      case "CallExpression":
+        cur = unwrapChain(cur.callee as AstNode);
+        break;
+      default:
+        return false;
+    }
+  }
+  return false;
+};
+
+/**
+ * Every local name bound, directly or by alias, to model output in this file.
+ * One pass over the program in document order, so an alias of an alias resolves.
+ */
+export const collectModelBindings = (program: AstNode, rootObjectName: (n: AstNode | null) => string | null): Set<string> => {
+  const bindings = new Set<string>();
+  for (const decl of collectDescendants(program, (n: AstNode) => n.type === "VariableDeclarator", undefined, true)) {
+    const init = decl.init as AstNode | undefined;
+    if (!init) continue;
+    const expr = unwrapAwait(init);
+    const root = rootObjectName(expr);
+    const isModel = isModelDerivedExpression(expr) || (root !== null && bindings.has(root));
+    if (!isModel) continue;
+    const id = decl.id as AstNode | undefined;
+    if (id?.type === "Identifier") {
+      bindings.add(id.name as string);
+      continue;
+    }
+    if (id?.type !== "ObjectPattern") continue;
+    // `const { text } = await generateText(…)` — only the text-bearing fields.
+    for (const prop of (id.properties as AstNode[] | undefined) ?? []) {
+      if (prop.type !== "Property" || prop.computed) continue;
+      const key = prop.key as AstNode | undefined;
+      const value = prop.value as AstNode | undefined;
+      const keyName = key?.type === "Identifier" ? (key.name as string) : undefined;
+      if (keyName && MODEL_RESULT_FIELDS.has(keyName) && value?.type === "Identifier") {
+        bindings.add(value.name as string);
+      }
+    }
+  }
+  return bindings;
 };

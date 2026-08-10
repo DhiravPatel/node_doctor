@@ -1,13 +1,13 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 159,
-  "defaultOn": 108,
+  "total": 160,
+  "defaultOn": 109,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 60,
     "Maintainability": 16,
-    "Reliability": 42,
+    "Reliability": 43,
     "Bugs": 28
   },
   "categoryWeights": {
@@ -2069,6 +2069,24 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Remove the function from the payload and coordinate over messages instead: post the data, and reply with `worker.once(\"message\", …)`. `postMessage` runs the structured clone algorithm, which throws `DataCloneError` on a function — synchronously, at the call, on whichever path carries the callback."
+    },
+    {
+      "id": "no-unguarded-llm-json-parse",
+      "title": "JSON.parse of model output with no error handling",
+      "category": "Reliability",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "ai",
+        "correctness",
+        "reliability"
+      ],
+      "requires": [
+        "ai"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Wrap it in `try`/`catch` and decide what a malformed response should do, or use a schema-validating helper (`generateObject` on the Vercel AI SDK, a Zod `safeParse` on the parsed value). A model returns text: a JSON mode changes the odds, not the type, and a response truncated at the token cap is never valid JSON."
     },
     {
       "id": "no-unhandled-pipe-error",

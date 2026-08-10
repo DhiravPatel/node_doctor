@@ -98,6 +98,32 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Diagnostics — parsing model output (§107)
+
+- **`no-unguarded-llm-json-parse`** (Reliability, `requires: ai`) — `JSON.parse`
+  of model output with nothing to catch a `SyntaxError`. A model returns TEXT:
+  asking for JSON, even with a schema and a JSON mode, changes the odds and not
+  the type. Every shape a model emits when it goes wrong throws, and each was
+  measured rather than assumed — a response **truncated at the token cap**
+  (`{"name":"Ada","bio":"a very long bi`), one wrapped in a ```` ```json ````
+  fence, one prefaced with "Sure! Here is the JSON:", a trailing comma, single
+  quotes.
+  Unhandled, the throw rejects the handler: a 500 at whatever rate the model
+  malforms its answer, which is neither zero nor visible in the code. It is
+  `require-llm-token-limit`'s failure mode arriving one layer down.
+  Both halves of the claim are proven: the argument must be model output traced
+  to a recognized call or an alias of one — a bare identifier is never assumed
+  to be model text — and there must be no enclosing `try`/`catch`. A `try` with
+  only a `finally` catches nothing and still fires; a `try` outside the function
+  does not catch a throw from a later invocation of it, and also still fires.
+  Whether an existing handler is *good* is not a claim this makes.
+
+The model-taint model §105 and §107 share was **extracted rather than copied**
+(`collectModelBindings`, `isModelDerivedExpression` in the AI pack's `shared.ts`).
+A duplicated taint definition is worse than a shared one that is wrong, because
+only the shared one gets fixed once. `no-llm-output-in-sink` is unchanged and its
+165 tests pass against the extracted version.
+
 ### Report drift — `node-doctor drift` (§104)
 
 - **`node-doctor drift --baseline <f> --current <f>`** (aliases `why-changed`,
