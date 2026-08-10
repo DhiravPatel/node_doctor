@@ -96,6 +96,12 @@ export interface Provenance {
   toolVersion: string;
   /** Hash of the active diagnostic set (ids + effective severities). */
   rulesetHash: string;
+  /**
+   * The exact `id:severity` list `rulesetHash` is computed from, sorted. Present
+   * so the artifact is self-describing: `node-doctor drift` can then say WHICH
+   * rule was added, removed, or re-graded, rather than only that the set moved.
+   */
+  ruleset: string[];
   /** Hash of the resolved configuration. */
   configHash: string;
   /** Sorted capability tokens that gated the run. */
@@ -852,22 +858,20 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
     }
   }
 
-  // Provenance (§104): the inputs that determine this output.
-  const rulesetHash = createHash("sha256")
-    .update(
-      [
-        ...diagnostics.map((d) => `${d.id}:${effectiveSeverity.get(d.id) ?? d.severity}`),
-        ...activeText.map((d) => `${d.id}:${effectiveSeverity.get(d.id) ?? d.severity}`),
-      ]
-        .sort()
-        .join("\n"),
-    )
-    .digest("hex")
-    .slice(0, 16);
+  // Provenance (§104): the inputs that determine this output. The ruleset is
+  // recorded as the very list the hash is computed from, so the two can never
+  // disagree — and so `node-doctor drift` can name the rule that changed rather
+  // than only reporting that something did.
+  const ruleset = [
+    ...diagnostics.map((d) => `${d.id}:${effectiveSeverity.get(d.id) ?? d.severity}`),
+    ...activeText.map((d) => `${d.id}:${effectiveSeverity.get(d.id) ?? d.severity}`),
+  ].sort();
+  const rulesetHash = createHash("sha256").update(ruleset.join("\n")).digest("hex").slice(0, 16);
   const configHash = createHash("sha256").update(stableStringify(config)).digest("hex").slice(0, 16);
   const provenance: Provenance = {
     toolVersion: toolVersion(),
     rulesetHash,
+    ruleset,
     configHash,
     capabilities: [...project.capabilities].sort(),
   };

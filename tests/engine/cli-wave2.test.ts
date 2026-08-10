@@ -73,7 +73,7 @@ describe("issue url", () => {
 
 const oneFindingReport = (): ScanReport => ({
   schemaVersion: 2,
-  provenance: { toolVersion: "0.0.0", rulesetHash: "t", configHash: "t", capabilities: [] },
+  provenance: { toolVersion: "0.0.0", rulesetHash: "t", ruleset: [], configHash: "t", capabilities: [] },
   project: { name: "x", rootDirectory: "/x", capabilities: ["node"], analyzedFileCount: 1, totalLines: 10, files: [], complete: true, parseFailures: [], suppressedKeys: [] },
   diagnosticsRun: 1,
   diagnosticsAvailable: 1,

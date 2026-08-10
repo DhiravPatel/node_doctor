@@ -708,6 +708,42 @@ export const renderPackageApi = (
  * Leads with the INTERSECTION (findings on AI-assisted lines), because that is
  * the review decision; the totals are context for it, not the point.
  */
+/**
+ * §104 — why two reports differ. Leads with the verdict, because "did the code
+ * change or did the tool change" is the entire question being asked.
+ */
+export const renderDrift = (
+  report: import("../core/drift.ts").DriftReport,
+  options: { color?: boolean } = {},
+): string => {
+  const p = makePalette(options.color ?? true);
+  const lines: string[] = [""];
+
+  const sign = (n: number): string => (n > 0 ? `+${n}` : `${n}`);
+  lines.push(
+    `  ${p.bold("Report drift")}  ${p.dim(
+      `score ${report.score.baseline} \u2192 ${report.score.current} (${sign(report.score.delta)}) \u00b7 findings ${report.findings.baseline} \u2192 ${report.findings.current} (${sign(report.findings.delta)})`,
+    )}`,
+  );
+  lines.push("");
+
+  if (report.codeOnly) {
+    lines.push(p.green("  \u2714 The CODE changed \u2014 nothing else did."));
+  } else {
+    lines.push(`  ${p.yellow("\u25cf")} ${p.bold("The tool changed too, so the finding delta is not purely a code change")}`);
+  }
+  lines.push("");
+
+  for (const cause of report.causes) {
+    const tag = cause.cause === "code" ? p.green("code") : cause.cause === "incomplete-scan" ? p.red(cause.cause) : p.yellow(cause.cause);
+    lines.push(`      ${tag}`);
+    lines.push(`        ${cause.message}`);
+  }
+  lines.push("");
+
+  return lines.join("\n");
+};
+
 export const renderAiAttribution = (
   report: import("../core/ai-attribution.ts").AiAttributionReport,
   options: { color?: boolean } = {},

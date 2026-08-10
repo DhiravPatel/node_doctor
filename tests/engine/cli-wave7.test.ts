@@ -172,7 +172,7 @@ describe("markdown reporters", () => {
   test("renderReportMarkdown: score header + findings", () => {
     const report = {
       schemaVersion: 2,
-      provenance: { toolVersion: "0.0.0", rulesetHash: "t", configHash: "t", capabilities: [] },
+      provenance: { toolVersion: "0.0.0", rulesetHash: "t", ruleset: [], configHash: "t", capabilities: [] },
       project: { name: "svc", rootDirectory: "/x", capabilities: [], analyzedFileCount: 3, totalLines: 100, files: [], complete: true, parseFailures: [], suppressedKeys: [] },
       diagnosticsRun: 1,
       diagnosticsAvailable: 1,

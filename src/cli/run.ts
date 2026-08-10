@@ -24,7 +24,7 @@ import { installGitHook } from "../install/git-hook.ts";
 import { scanProject } from "../core/scan.ts";
 import type { ScanReport } from "../core/scan.ts";
 import { computeDelta, deltaHasBlocking } from "../core/delta.ts";
-import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver, renderOpenApi, renderArchitecture, renderChurn, renderReviewRouting, renderReadiness, renderChangeShape, renderI18n, renderNodeUpgrade, renderSupplyChain, renderPackageApi, renderExportsCheck, renderAiAttribution } from "../report/terminal.ts";
+import { renderReport, renderDelta, renderWorkspaceReport, renderImpact, renderAttackPaths, renderContextHygiene, renderObservability, renderDataMap, renderSchemaDrift, renderQueueTopology, renderApiSemver, renderOpenApi, renderArchitecture, renderChurn, renderReviewRouting, renderReadiness, renderChangeShape, renderI18n, renderNodeUpgrade, renderSupplyChain, renderPackageApi, renderExportsCheck, renderAiAttribution, renderDrift } from "../report/terminal.ts";
 import { scanAgentContext, applyContextHygiene } from "../core/agent-context.ts";
 import { isWorkspaceRoot, scanWorkspaces, workspaceFindings, discoverWorkspaces } from "../core/workspaces.ts";
 import { toJson, toJsonError } from "../report/json.ts";
@@ -67,6 +67,7 @@ import { buildSupplyChainReport } from "../core/supply-chain.ts";
 import { buildPackageApiReport } from "../core/package-api.ts";
 import { buildExportsCheckReport } from "../core/exports-map.ts";
 import { buildAiAttributionReport } from "../core/ai-attribution.ts";
+import { explainDrift } from "../core/drift.ts";
 import { buildImpactGraph, computeImpact } from "../core/impact.ts";
 import { collectAttackPaths } from "../core/attack-paths.ts";
 import { loadCodeowners, groupByOwner, scorePrRisk } from "../core/ownership.ts";
@@ -335,6 +336,7 @@ Usage:
   node-doctor api-check [dir]            Members called on a package that the package does not export
   node-doctor exports-check [dir]        Package exports map vs the files on disk: dead targets, ESM/CJS mismatches
   node-doctor ai-attribution [dir]      Which findings sit on lines from commits that declared AI assistance
+  node-doctor drift --baseline <f> --current <f>   Why two reports differ: the code, or the tool?
   node-doctor context [dir] [--write]    Find files an AI agent must not read; --write fences them off
   node-doctor deslop [directory]         Dead-code scan (unused files/exports/deps)
   node-doctor explain <diagnostic-id>          Explain a diagnostic and its fix
@@ -1861,6 +1863,37 @@ const runExportsCheck = async (args: ParsedArgs): Promise<number> => {
 };
 
 /**
+ * §104 — why two reports differ. Reads only the two artifacts, so it answers the
+ * question offline, after the fact, from whatever CI kept.
+ */
+const runDrift = async (args: ParsedArgs): Promise<number> => {
+  const baselinePath = args.baseline;
+  const currentPath = args.current;
+  if (!baselinePath || !currentPath) {
+    process.stderr.write("node-doctor drift: --baseline <file> and --current <file> are both required\n");
+    return 2;
+  }
+  const read = async (path: string): Promise<unknown> => JSON.parse(await readFile(resolve(path), "utf8"));
+  let baseline: unknown;
+  let current: unknown;
+  try {
+    baseline = await read(baselinePath);
+    current = await read(currentPath);
+  } catch (error) {
+    process.stderr.write(`node-doctor drift: ${(error as Error).message}\n`);
+    return 2;
+  }
+  const report = explainDrift(baseline as never, current as never);
+  if (args.json) {
+    process.stdout.write((args.jsonCompact ? JSON.stringify(report) : JSON.stringify(report, null, 2)) + "\n");
+  } else {
+    process.stdout.write(renderDrift(report, { color: useColor(args) }));
+  }
+  // A report about provenance, not a gate. It never fails a build on its own.
+  return 0;
+};
+
+/**
  * §110 — AI attribution. Scans first so the report can lead with the
  * intersection of findings and AI-assisted lines, which is the whole point;
  * blame then runs only over the files that carry findings.
@@ -1994,6 +2027,8 @@ export const main = async (argv: string[]): Promise<number> => {
         return await runExportsCheck(args);
       case "ai-attribution":
         return await runAiAttribution(args);
+      case "drift":
+        return await runDrift(args);
       case "supply-chain":
         return await runSupplyChain(args);
       case "node-upgrade":

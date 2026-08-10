@@ -98,6 +98,42 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Report drift — `node-doctor drift` (§104)
+
+- **`node-doctor drift --baseline <f> --current <f>`** (aliases `why-changed`,
+  `explain-drift`) — answers "why did this pass yesterday and fail today?" from
+  the two artifacts alone, offline and after the fact.
+  The provenance record had shipped some time ago; the catalog entry calling it
+  Planned was stale. What had genuinely never been built is the part that reads
+  it back. **Nothing consumed `provenance`**, so the question it was recorded
+  for still had to be answered by hand.
+  That question has one useful shape: **did the code change, or did the tool
+  change?** A finding diff cannot tell you — `delta` reports six new findings
+  identically whether they came from six new bugs or from one new rule, and a CI
+  failure means something very different in each case.
+  `drift` attributes the difference to the tool version, the **ruleset** (naming
+  the rules added, removed or re-graded), the config, the **capabilities**
+  (adding a Prisma dependency silently switches on every `requires: ["prisma"]`
+  rule, and nothing about that looks like a tooling change), or the coverage.
+  When none of those moved it says the code changed — the one case where the
+  finding delta means what it appears to mean. Exits 0 always.
+
+- **`provenance.ruleset`** — the report now records the exact `id:severity` list
+  its `rulesetHash` is computed from, so the artifact is self-describing and
+  `drift` can NAME the rule that changed rather than only reporting that
+  something did. Additive; `schemaVersion` is unchanged and the ratchet reads
+  provenance exactly as before.
+
+Two honesty rules it keeps. A scan that did not finish is reported as making the
+comparison **unsound** rather than merely different — a finding absent from an
+incomplete scan was not necessarily fixed. And an artifact predating the recorded
+rule list reports the comparison as **unavailable**, because treating a missing
+list as "unchanged" would be precisely the wrong answer.
+
+Four catalog statuses were corrected in the same pass: §104's provenance record
+was already shipped, and §189, §193, §203 and §208 are marked scoped-and-rejected
+rather than Planned, matching the pass that actually rejected them.
+
 ### AI-authored-code trust boundary — `node-doctor ai-attribution` (§110)
 
 - **`node-doctor ai-attribution [dir]`** (aliases `ai-trust`, `authored-by`) — a

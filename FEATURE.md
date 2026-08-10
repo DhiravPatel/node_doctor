@@ -1102,10 +1102,15 @@ Show how a codebase's health score ranks against anonymized ecosystem percentile
 Estimate the payoff of fixing a finding (latency saved, attack surface closed, memory reclaimed) so teams fix what matters most first.
 
 ## 104. Deterministic Replay & Provenance
-**Status: Core** for determinism; **Planned** for the provenance record.
+**Status: Core** — including the provenance record and, now, the question it exists to answer.
 
 - **Byte-identical, reproducible scans** — stable finding ids, deterministic sort order, and a content-hash cache probe keyed on the diagnostic set + config + capabilities. *(Core)*
-- **Provenance record** *(Planned)* — stamp each report with tool version + rule-set hash + config hash so "why did this pass yesterday and fail today" is answerable from the artifact alone. Critical for CI trust and audits.
+- **Provenance record** — every report carries the tool version, the ruleset hash, the config hash, the capability set, and the exact `id:severity` list the hash is computed from. This had in fact shipped some time ago; the catalog entry saying otherwise was simply stale, which is its own small lesson about auditing status rather than trusting it.
+- **`node-doctor drift --baseline <f> --current <f>`** (aliases `why-changed`, `explain-drift`) — the part that had genuinely never been built. **Nothing read the record back**, so the question it was recorded for still had to be answered by hand.
+
+That question has one useful shape: **did the code change, or did the tool change?** A finding diff cannot tell you — `delta` reports six new findings identically whether they came from six new bugs or from one new rule, and a CI failure means something very different in each case. `drift` attributes the difference to the tool version, the ruleset (naming the rules added, removed or re-graded, which is why the artifact now records the list and not just its hash), the config, the **capabilities** (adding a Prisma dependency silently switches on every `requires: ["prisma"]` rule, and nothing about that looks like a tooling change), or the coverage. When none of those moved, it says the code changed — the one case where the finding delta means what it appears to mean.
+
+Two honesty rules it keeps. A scan that did not finish is called out as making the comparison **unsound** rather than merely different: a finding absent from an incomplete scan was not necessarily fixed. And an artifact predating the recorded rule list reports that the comparison is **unavailable**, because treating a missing list as "unchanged" would be precisely the wrong answer.
 
 ---
 
@@ -1886,7 +1891,7 @@ Patterns that silently disable dead-code elimination: a missing or wrong `sideEf
 The scoping found a trap that makes the ESM proof mandatory rather than tidy, and it is the same shape as the Worker findings a wave earlier: **loaded by a CommonJS caller — sloppy mode — the identical write on the identical object does not throw. It silently does nothing.** `Object.isSealed` is `true` in both worlds, so the object cannot tell you which one it is in; only the caller's strictness decides. Reporting a crash that does not happen would be the false positive, so this reuses `no-dirname-in-esm`'s proof ladder unchanged, and adds two silences of its own: a **test file** (a runner's module mock hands over a plain mutable object, so `mod.fn = vi.fn()` genuinely works) and `Object.assign(NS, src)` (which copies nothing and throws nothing when `src` is empty — value analysis, so not claimed).
 
 ## 189. Source-Map & Debug-Artifact Hygiene ★
-**Status: Planned** · ⚙️ Now
+**Status: Scoped and rejected** — every sub-case, with reasons, in the scoping pass recorded at the end of this part
 
 Source maps shipped to production exposing original source, `.map` files referenced but absent (so every production stack trace is unreadable), inline base64 maps inflating the bundle, and a `sourceRoot` leaking absolute build-machine paths.
 
@@ -1916,7 +1921,7 @@ Code that is correct single-process and wrong under `cluster`/PM2: an in-memory 
 `SharedArrayBuffer` accessed without `Atomics`, `Atomics.wait` on the main thread (blocking the event loop entirely), a busy-wait over shared memory, and non-atomic read-modify-write on a shared counter.
 
 ## 193. Backpressure Across Async Iterators & Streams ★
-**Status: Planned** · ⚙️ Now
+**Status: Scoped and rejected** — every sub-case, with reasons, in the scoping pass recorded at the end of this part
 
 The write-side half §128 deliberately left: ignoring the `false` return of `.write()`, an async iterator consumed faster than it produces, `for await` over an unbounded source with no concurrency limit, and a `Readable` pushed to without checking `push()`'s return.
 
@@ -2016,7 +2021,7 @@ The layer below §145: `parseInt` without a radix, `Number()` on a value that ca
 **Not shipped, with reasons.** *A `latin1`/`utf8` mismatch* has to pair an encode with the decode that undoes it, across files. *base64url vs base64 in a token path* needs to know that the string reaches a URL, and the two alphabets differ in three characters that most payloads never contain. *`Buffer.compare` where `timingSafeEqual` is required* is already covered by §66's `no-timing-unsafe-secret-compare`; a provenance-based version (comparing the result of `createHmac(…).digest()`) would strengthen that rule rather than add a second one, and belongs there.
 
 ## 203. Filesystem-Primitive Failure Modes ★
-**Status: Planned** · ⚙️ Now
+**Status: Scoped and rejected** — every sub-case, with reasons, in the scoping pass recorded at the end of this part
 
 A write that is not atomic (no temp-then-rename), `EMFILE` from unbounded concurrent opens, a `readdir` on a directory being written, a `watch` firing twice per change, and a path assumed case-sensitive that is not on macOS/Windows.
 
@@ -2063,9 +2068,11 @@ Zero false claims across this project's own 407 files, with eleven of its twelve
 Two structurally-identical blocks differing in one token — the classic copy-paste bug, and the one agents produce most: the same handler duplicated with one `userId` left as `orgId`. §122 fingerprints duplicates; this reports the *divergence within* a near-duplicate, which is where the bug is.
 
 ## 208. Defensive-Bloat & Redundant-Guard Detection ★
-**Status: Planned** · ⚙️ Now
+**Status: Scoped and rejected**
 
 The opposite failure: a null check on a value that provably cannot be null, a `try`/`catch` around code that cannot throw, a type check on an already-narrowed value, a re-validation of input validated one frame up. Agents over-defend, and the noise hides the guards that matter.
+
+**All four need the analysis this engine refuses**, and the word doing the work in each is the same one: *provably*. "Cannot be null" is a type-and-flow fact, "cannot throw" is a whole-program fact, "already narrowed" is a control-flow fact, and "validated one frame up" is interprocedural. A rule that guessed at any of them would report correct defensive code as bloat — which is the more expensive error, because the guard it tells you to delete is the one that was doing something.
 
 ## 209. Inconsistent-Abstraction-Level Detection ★
 **Status: Planned** · 🔧 Needs depth

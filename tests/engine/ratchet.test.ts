@@ -48,7 +48,7 @@ const report = (findings: Finding[], score: number): ScanReport => ({
   schemaVersion: SCHEMA_VERSION,
   provenance: {
     toolVersion: "0.0.0-test",
-    rulesetHash: "ruleset",
+    rulesetHash: "ruleset", ruleset: [],
     configHash: "config",
     capabilities: ["node"],
   },
