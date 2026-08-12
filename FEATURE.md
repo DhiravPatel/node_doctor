@@ -382,7 +382,7 @@ Prisma, Sequelize, TypeORM, Mongoose, Knex, MikroORM, Objection.js, Drizzle ORM.
 # Part VI — Dependencies & Supply Chain
 
 ## 19. Dependency Analysis
-**Status:** unused/duplicate/circular detection is **Core** (via the import graph and `deslop`); vulnerability/license/supply-chain scoring is **Planned** (optional network integration, off by default to preserve offline-first).
+**Status:** unused/duplicate/circular detection and **license analysis** are **Core**; vulnerability scoring is **Planned** (optional network integration, off by default to preserve offline-first).
 
 - Unused packages (declared, never imported).
 - Duplicate packages / duplicate versions.
@@ -390,12 +390,21 @@ Prisma, Sequelize, TypeORM, Mongoose, Knex, MikroORM, Objection.js, Drizzle ORM.
 - Vulnerable packages (advisory feed / Socket.dev-style scoring, opt-in).
 - Deprecated packages.
 - Large dependencies (bundle/footprint flags).
-- License analysis.
+- **License analysis** — a section of `node-doctor supply-chain`.
 - Version conflicts across the workspace.
 
 ---
 
 # Part VII — Code Quality & Architecture
+
+**License analysis shipped**, and it needed no network: every package's terms are declared in its own manifest, which the supply-chain walk already reads. It reports the license distribution, the packages under a copyleft license, and the packages that declare nothing at all.
+
+Everything here is a DECLARED fact. The report never says you are violating anything — whether an obligation binds you depends on how you distribute, which a manifest cannot say — so copyleft is presented as *an obligation to decide about, not a defect*. Same discipline as §110's "declared AI assistance".
+
+Two precision rules came from running it against real dependency trees rather than fixtures, and both would have produced wrong claims:
+
+- **An SPDX `OR` is a CHOICE.** `jszip` ships `(MIT OR GPL-3.0-or-later)`; you take the MIT branch and owe nothing, so calling it copyleft is simply false. A dual license binds only when EVERY alternative binds; `AND` is the opposite, where one copyleft term is enough.
+- **An absent `license` field is not "unlicensed".** The terms may sit in a LICENSE file the field never names, so that is checked before anything is said — and a `private: true` package needs no license at all by npm's own convention, which is usually the workspace's own package rather than a dependency.
 
 ## 20. Code Quality
 **Status:** dead code, long functions, deep nesting and complexity are **Core** (the size/complexity checks are opt-in by default); duplicate-code detection is **Planned (near-term)**; some overlap with the dead-code scanner (`node-deslop`).

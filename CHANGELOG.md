@@ -98,6 +98,34 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### License analysis — `node-doctor supply-chain` (§19)
+
+- **Licenses are now a section of the supply-chain report** — the distribution
+  across the installed tree, the packages under a copyleft license, and the
+  packages that declare nothing at all. No network needed: every package's terms
+  are declared in its own manifest, which the supply-chain walk already read, so
+  this costs one extra `stat` per undeclared package and nothing else.
+  Everything reported is a DECLARED fact. The report never says you are
+  violating anything — whether an obligation binds you depends on how you
+  distribute, which a manifest cannot say — so copyleft is presented as *an
+  obligation to decide about, not a defect*.
+
+**Two precision rules came from running it against real dependency trees rather
+than fixtures**, and each would otherwise have produced a wrong claim:
+
+- **An SPDX `OR` is a CHOICE.** `jszip` ships `(MIT OR GPL-3.0-or-later)` — you
+  take the MIT branch and owe nothing, so reporting it as copyleft is false. A
+  dual license binds only when EVERY alternative binds; `AND` is the opposite,
+  where one copyleft term is enough.
+- **An absent `license` field is not "unlicensed".** The terms may sit in a
+  LICENSE file the field never names, so that is checked first, and a
+  `private: true` package needs no license by npm's own convention — that case
+  was the workspace's own package, not a dependency.
+
+After both fixes the two real trees report exactly what they should: an LGPL
+dependency and a genuinely termless `buffers@0.1.1`, with the dual-licensed and
+private packages correctly silent.
+
 ### GraphQL coverage and mass assignment (§3, §6)
 
 Both came out of a full audit of the catalog's 63 `Planned` markers against the

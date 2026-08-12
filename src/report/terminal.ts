@@ -996,6 +996,39 @@ export const renderSupplyChain = (
     p.dim("  These are facts, not accusations — a postinstall script is also how `esbuild` fetches its binary."),
   );
   lines.push("");
+  // Licenses: declared facts about the tree, never a verdict. Whether any
+  // obligation binds you depends on how you distribute, which a manifest
+  // cannot say — so this reports and does not accuse.
+  if (report.licenseCounts.length > 0 || report.undeclaredLicenses.length > 0) {
+    const top = report.licenseCounts.slice(0, 4).map((c) => `${c.license} \u00d7${c.packages}`).join(", ");
+    lines.push(`  ${p.bold("Licenses")}  ${p.dim(top || "none declared")}`);
+    lines.push("");
+
+    if (report.copyleftLicenses.length > 0) {
+      lines.push(`  ${p.yellow("\u25cf")} ${p.bold(`${report.copyleftLicenses.length} package(s) under a copyleft license`)}`);
+      lines.push(p.dim("      An obligation to decide about, not a defect. Whether it binds you depends on how you ship."));
+      for (const l of report.copyleftLicenses.slice(0, 10)) {
+        lines.push(`      ${p.cyan(l.package)}${l.version ? p.dim(`@${l.version}`) : ""}  ${l.license}`);
+      }
+      if (report.copyleftLicenses.length > 10) {
+        lines.push(p.dim(`      \u2026 ${report.copyleftLicenses.length - 10} more`));
+      }
+      lines.push("");
+    }
+
+    if (report.undeclaredLicenses.length > 0) {
+      lines.push(`  ${p.yellow("\u25cf")} ${p.bold(`${report.undeclaredLicenses.length} package(s) declare no license, and ship no LICENSE file`)}`);
+      lines.push(p.dim("      Nothing states the terms, so there are no terms to rely on."));
+      for (const l of report.undeclaredLicenses.slice(0, 10)) {
+        lines.push(`      ${p.cyan(l.package)}${l.version ? p.dim(`@${l.version}`) : ""}`);
+      }
+      if (report.undeclaredLicenses.length > 10) {
+        lines.push(p.dim(`      \u2026 ${report.undeclaredLicenses.length - 10} more`));
+      }
+      lines.push("");
+    }
+  }
+
   return lines.join("\n");
 };
 

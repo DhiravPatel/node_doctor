@@ -68,6 +68,26 @@ export interface NonRegistrySource {
 /** Whether each half of the report actually ran. */
 export type CheckState = "checked" | "not-installed" | "no-lockfile" | "unparsed";
 
+/**
+ * A package's DECLARED license, read from its own manifest.
+ *
+ * "Declared" is doing real work here, exactly as it does in §110's AI
+ * attribution. A missing `license` field does not mean the package is
+ * unlicensed — the terms may sit in a LICENSE file the field never names — so
+ * that case is reported as "declares none", with whether a LICENSE file exists
+ * alongside it, and never as a violation.
+ */
+export interface PackageLicense {
+  package: string;
+  version: string;
+  /** The SPDX expression as written, or null when the manifest declares none. */
+  license: string | null;
+  /** A LICENSE-shaped file sits in the package even though the field is absent. */
+  hasLicenseFile: boolean;
+  /** True when the expression names a strong-copyleft license. */
+  copyleft: boolean;
+}
+
 export interface SupplyChainReport {
   /** Did the install-script check run, and if not, why not. */
   installScriptCheck: CheckState;
@@ -75,12 +95,21 @@ export interface SupplyChainReport {
   sourceCheck: CheckState;
   installScripts: InstallScript[];
   nonRegistrySources: NonRegistrySource[];
+  /** Packages whose manifest declares no `license` field. */
+  undeclaredLicenses: PackageLicense[];
+  /** Packages under a strong-copyleft license — an obligation, not a defect. */
+  copyleftLicenses: PackageLicense[];
+  /** Every distinct declared expression, with how many packages use it. */
+  licenseCounts: Array<{ license: string; packages: number }>;
   summary: {
     /** Packages found in `node_modules`, 0 when it was not read. */
     packagesInspected: number;
     directDependencies: number;
     withInstallScripts: number;
     nonRegistry: number;
+    /** Packages whose license field is absent AND that ship no LICENSE file. */
+    undeclaredLicenses: number;
+    copyleftLicenses: number;
   };
 }
 
@@ -94,6 +123,57 @@ const readJson = async (path: string): Promise<Record<string, unknown> | null> =
   } catch {
     return null;
   }
+};
+
+/**
+ * Strong-copyleft families. Matched on the SPDX id, so `GPL-3.0-or-later`,
+ * `AGPL-3.0` and `LGPL-2.1` all land — and `LGPL` is included because its
+ * obligations differ from MIT's even though they are weaker than GPL's.
+ *
+ * This is a FACT about the declared expression, never a verdict: whether any of
+ * it binds you depends on how you distribute, which the manifest cannot say.
+ */
+const COPYLEFT_TERM = /\b(?:A?GPL|LGPL|EUPL|CECILL|OSL|CPAL|SSPL|RPL)\b/i;
+
+/**
+ * Does this SPDX expression impose a copyleft obligation?
+ *
+ * An `OR` is a CHOICE, and that distinction is the whole point: `jszip` ships
+ * `(MIT OR GPL-3.0-or-later)`, so you take the MIT branch and owe nothing —
+ * calling it "under a copyleft license" would be simply wrong. A dual license
+ * only binds when EVERY alternative binds. `AND` is the opposite: each term
+ * applies, so one copyleft term is enough.
+ */
+const isCopyleftExpression = (expression: string): boolean => {
+  const cleaned = expression.replace(/[()]/g, " ");
+  const alternatives = cleaned.split(/\s+OR\s+/i).map((a) => a.trim()).filter((a) => a !== "");
+  if (alternatives.length === 0) return false;
+  // Every branch of the choice must be copyleft for the obligation to be real.
+  return alternatives.every((alternative) =>
+    alternative
+      .split(/\s+AND\s+/i)
+      .some((term) => COPYLEFT_TERM.test(term)),
+  );
+};
+
+/** Files that carry license terms when the manifest field does not. */
+const LICENSE_FILES = ["LICENSE", "LICENSE.md", "LICENSE.txt", "LICENCE", "LICENCE.md", "COPYING", "COPYING.md"];
+
+/** The declared expression, however the manifest spells the field. */
+const declaredLicense = (pkg: Record<string, unknown>): string | null => {
+  const value = pkg.license ?? pkg.licenses;
+  if (typeof value === "string" && value.trim() !== "") return value.trim();
+  // The long-deprecated array form: `licenses: [{ type: "MIT" }]`.
+  if (Array.isArray(value)) {
+    const types = value
+      .map((entry) => (entry && typeof entry === "object" ? (entry as { type?: unknown }).type : entry))
+      .filter((t): t is string => typeof t === "string" && t.trim() !== "");
+    if (types.length > 0) return types.join(" OR ");
+  }
+  if (value && typeof value === "object" && typeof (value as { type?: unknown }).type === "string") {
+    return ((value as { type: string }).type).trim();
+  }
+  return null;
 };
 
 /** Every hoisted package directory under `node_modules`, including scoped ones. */
@@ -186,6 +266,7 @@ export const buildSupplyChainReport = async (rootDirectory: string): Promise<Sup
   let installScriptCheck: CheckState = "checked";
   const installScripts: InstallScript[] = [];
   let packagesInspected = 0;
+  const licenses: PackageLicense[] = [];
 
   try {
     const info = await stat(nodeModules);
@@ -199,9 +280,35 @@ export const buildSupplyChainReport = async (rootDirectory: string): Promise<Sup
       const pkg = await readJson(join(nodeModules, name, "package.json"));
       if (pkg === null) continue;
       packagesInspected += 1;
+
+      // Licenses, from the same manifest read — the walk is the expensive part.
+      const version = typeof pkg.version === "string" ? pkg.version : "";
+      const license = declaredLicense(pkg);
+      if (license === null) {
+        // Absent field is not "unlicensed": check for a LICENSE file before
+        // saying anything, so the report distinguishes "no terms anywhere" from
+        // "terms the field simply does not name".
+        let hasLicenseFile = false;
+        for (const candidate of LICENSE_FILES) {
+          try {
+            await stat(join(nodeModules, name, candidate));
+            hasLicenseFile = true;
+            break;
+          } catch {
+            /* keep looking */
+          }
+        }
+        // `private: true` needs no license by npm's own convention, and it is
+        // almost always the workspace's own package rather than a dependency.
+        if (pkg.private !== true) {
+          licenses.push({ package: name, version, license: null, hasLicenseFile, copyleft: false });
+        }
+      } else {
+        licenses.push({ package: name, version, license, hasLicenseFile: false, copyleft: isCopyleftExpression(license) });
+      }
+
       const scripts = pkg.scripts;
       if (scripts === null || typeof scripts !== "object") continue;
-      const version = typeof pkg.version === "string" ? pkg.version : "";
       for (const hook of INSTALL_HOOKS) {
         const command = (scripts as Record<string, unknown>)[hook];
         if (typeof command !== "string" || command.trim() === "") continue;
@@ -239,16 +346,40 @@ export const buildSupplyChainReport = async (rootDirectory: string): Promise<Sup
   );
   nonRegistrySources.sort((a, b) => (a.package < b.package ? -1 : 1));
 
+  // A missing field AND no LICENSE file is the only case with nothing to read.
+  // A field-less package that ships terms is a documentation gap, not a legal
+  // unknown, so it is not reported.
+  const undeclaredLicenses = licenses
+    .filter((l) => l.license === null && !l.hasLicenseFile)
+    .sort((a, b) => (a.package < b.package ? -1 : 1));
+  const copyleftLicenses = licenses
+    .filter((l) => l.copyleft)
+    .sort((a, b) => (a.package < b.package ? -1 : 1));
+
+  const counts = new Map<string, number>();
+  for (const l of licenses) {
+    if (l.license === null) continue;
+    counts.set(l.license, (counts.get(l.license) ?? 0) + 1);
+  }
+  const licenseCounts = [...counts.entries()]
+    .map(([license, packages]) => ({ license, packages }))
+    .sort((a, b) => b.packages - a.packages || (a.license < b.license ? -1 : 1));
+
   return {
     installScriptCheck,
     sourceCheck,
     installScripts,
     nonRegistrySources,
+    undeclaredLicenses,
+    copyleftLicenses,
+    licenseCounts,
     summary: {
       packagesInspected,
       directDependencies: direct.size,
       withInstallScripts: new Set(installScripts.map((s) => s.package)).size,
       nonRegistry: nonRegistrySources.length,
+      undeclaredLicenses: undeclaredLicenses.length,
+      copyleftLicenses: copyleftLicenses.length,
     },
   };
 };
