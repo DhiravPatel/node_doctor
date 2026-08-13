@@ -159,6 +159,7 @@ import { noUnsafeDeserialization } from "../diagnostics/security/no-unsafe-deser
 import { noUnsafeRegexpFromInput } from "../diagnostics/security/no-unsafe-regexp-from-input.ts";
 import { noVmRunUntrusted } from "../diagnostics/security/no-vm-run-untrusted.ts";
 import { noWeakCipher } from "../diagnostics/security/no-weak-cipher.ts";
+import { noWeakCryptoParameters } from "../diagnostics/security/no-weak-crypto-parameters.ts";
 import { noWeakHashForPassword } from "../diagnostics/security/no-weak-hash-for-password.ts";
 import { noXssInHtmlResponse } from "../diagnostics/security/no-xss-in-html-response.ts";
 import { requireJwtAlgorithmsAllowlist } from "../diagnostics/security/require-jwt-algorithms-allowlist.ts";
@@ -321,6 +322,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noUnsafeRegexpFromInput,
   noVmRunUntrusted,
   noWeakCipher,
+  noWeakCryptoParameters,
   noWeakHashForPassword,
   noXssInHtmlResponse,
   requireJwtAlgorithmsAllowlist,

@@ -89,11 +89,43 @@ const NARROWING_CALLS = new Set([
   "clean",
 ]);
 
+/**
+ * Wrappers TypeScript ERASES. `req.body as UserDto` compiles to `req.body` —
+ * the assertion performs no runtime check and produces the identical value, so
+ * it is not a narrowing and must not read as one.
+ *
+ * This mattered: the structural match below is deliberately exact (it is what
+ * fixed 743 false positives), and being exact meant every TypeScript spelling
+ * slipped past — `as T`, `as any`, `satisfies T`, `!`, `<T>x`, and each of them
+ * wrapped in parentheses. In a TypeScript codebase `create({ data: req.body as
+ * UserDto })` is the IDIOMATIC form, so the rule was close to blind exactly
+ * where the assertion makes the developer most confident it was validated.
+ */
+const TYPE_WRAPPERS = new Set([
+  "TSAsExpression",
+  "TSSatisfiesExpression",
+  "TSNonNullExpression",
+  "TSTypeAssertion",
+  "TSInstantiationExpression",
+  "ParenthesizedExpression",
+]);
+
+/** Strip every erased wrapper to reach the value that actually exists at runtime. */
+const unwrapErased = (node: AstNode | null | undefined): AstNode | null | undefined => {
+  let current = node;
+  for (let depth = 0; current && depth < 8; depth++) {
+    if (!TYPE_WRAPPERS.has(current.type as string)) return current;
+    current = (current.expression ?? current.argument) as AstNode | undefined;
+  }
+  return current;
+};
+
 /** The request members that are the caller's own object, whole. */
 const BODY_MEMBERS = new Set(["body", "query", "params"]);
 
 /** Is this literally `<requestRoot>.body` / `.query` / `.params`? */
-const isBodyMember = (node: AstNode | null | undefined): boolean => {
+const isBodyMember = (raw: AstNode | null | undefined): boolean => {
+  const node = unwrapErased(raw);
   if (!node || node.type !== "MemberExpression" || node.computed) return false;
   const object = node.object as AstNode | undefined;
   const property = (node.property as AstNode | undefined)?.name;
@@ -123,7 +155,8 @@ export const noMassAssignment = defineDiagnostic({
      * assembled from request FIELDS is a different object with the keys they
      * chose, which is the fix, not the bug.
      */
-    const isWholeBody = (node: AstNode | null | undefined, depth = 0): boolean => {
+    const isWholeBody = (raw: AstNode | null | undefined, depth = 0): boolean => {
+      const node = unwrapErased(raw);
       if (!node || depth > 4) return false;
       if (isBodyMember(node)) return true;
       if (node.type === "ObjectExpression") {

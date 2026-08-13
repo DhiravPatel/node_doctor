@@ -95,6 +95,29 @@ describe("no-mass-assignment — silent", () => {
   });
 });
 
+describe("no-mass-assignment — TypeScript assertions are erased", () => {
+  test("every assertion spelling still reaches the write", () => {
+    // `req.body as UserDto` compiles to `req.body`: the assertion performs no
+    // runtime check and produces the identical value. In a TypeScript codebase
+    // this is the IDIOMATIC form, so missing it left the rule close to blind
+    // exactly where the assertion makes the author most confident it was
+    // validated. All seven spellings bypassed the first version.
+    fires(`await prisma.user.create({ data: req.body as UserDto });`);
+    fires(`await prisma.user.create({ data: req.body as any });`);
+    fires(`await prisma.user.create({ data: req.body satisfies UserDto });`);
+    fires(`await prisma.user.create({ data: req.body! });`);
+    fires(`await prisma.user.create({ data: <UserDto>req.body });`);
+    fires(`const b = req.body as UserDto;\nawait prisma.user.create({ data: b });`);
+    fires(`await prisma.user.create({ data: { ...(req.body as UserDto) } });`);
+  });
+
+  test("an assertion is not a narrowing, but assembling still is", () => {
+    // Stripping the wrapper must not undo the fix that removed 743 findings.
+    silent(`const session = { id: req.body.id } as SessionDto;\nawait mongoHelper.create(session);`);
+    silent(`await prisma.user.create({ data: { email: req.body.email as string } });`);
+  });
+});
+
 describe("no-mass-assignment — determinism", () => {
   test("identical source yields identical findings", () => {
     const source = handler(`await prisma.user.create({ data: req.body });\nawait prisma.post.create({ data: req.body });`);

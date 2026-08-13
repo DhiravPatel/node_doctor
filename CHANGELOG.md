@@ -98,6 +98,36 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Weak crypto parameters, and a TypeScript evasion hole (§6, §7)
+
+- **`no-weak-crypto-parameters`** (Security, error) — two literal options that
+  weaken something already correct by default. Neither produces an error, a
+  warning, or a failing test: the handshake completes, the key generates, and
+  the weakness is invisible until somebody reads the parameter.
+  Both premises are pinned as executable facts, and they rest on **different
+  ground**, which the messages state. `tls.DEFAULT_MIN_VERSION` is `TLSv1.2` and
+  Node accepts a downgrade to `TLSv1` **without throwing** — the same shape as
+  `tar`'s `preservePaths`, an option that switches off a protection you already
+  had. The RSA floor is the opposite: Node generates a 512-bit key **without
+  objecting**, so the 2048-bit floor is a standards claim (NIST SP 800-57, 2013)
+  and is reported as one rather than as an error Node would raise.
+  Literal-only, and only an object passed as an argument is judged — a
+  standalone profile fixture is not a live TLS context. Swept over 111,566
+  files: 0 findings.
+
+- **`no-mass-assignment` had an evasion hole, now closed.** All seven TypeScript
+  assertion spellings bypassed it — `as T`, `as any`, `satisfies`, `!`, `<T>x`,
+  aliased, and spread-of-cast — leaving it close to blind on TypeScript, where
+  `create({ data: req.body as UserDto })` is the idiomatic form and the
+  assertion is exactly what makes the author confident the data was validated.
+  The cause was the precision fix that removed 743 false positives: making the
+  match exact let every erased wrapper through. The repair is the underlying
+  fact rather than a patch list — a TypeScript assertion is erased at compile
+  time, so `req.body as UserDto` IS `req.body`. The other taint-based security
+  rules (SQL, exec, eval, SSRF, open redirect) do not share the hole; they walk
+  descendants. Re-swept: 133,123 files, 0 findings, with every false-positive
+  shape from the original sweep still silent.
+
 ### Zip slip — `no-unsafe-archive-extraction` (§7)
 
 An audit of the existing security surface found the basics already covered by 61

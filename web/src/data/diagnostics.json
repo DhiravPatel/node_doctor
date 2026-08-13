@@ -1,11 +1,11 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 163,
-  "defaultOn": 112,
+  "total": 164,
+  "defaultOn": 113,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
-    "Security": 62,
+    "Security": 63,
     "Maintainability": 16,
     "Reliability": 43,
     "Bugs": 29
@@ -2330,6 +2330,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use an authenticated cipher with a random IV: `crypto.createCipheriv('aes-256-gcm', key, iv)`. DES/3DES and RC4 are broken, ECB leaks structure, and `createCipher` derives keys insecurely."
+    },
+    {
+      "id": "no-weak-crypto-parameters",
+      "title": "Cryptographic parameter set below the accepted floor",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "crypto",
+        "security",
+        "tls"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Leave `minVersion` unset — Node already defaults to TLSv1.2 — or set it to `TLSv1.2`/`TLSv1.3`. For key generation use a modulus of at least 2048 bits. Both of these are silent when wrong: the handshake completes and the key generates, so nothing fails until somebody reads the parameter."
     },
     {
       "id": "no-weak-hash-for-password",

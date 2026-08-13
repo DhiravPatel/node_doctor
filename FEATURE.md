@@ -251,6 +251,17 @@ Only entry properties verified against a shipped implementation are matched: `fi
 
 **Still absent at the basic tier, with reasons.** *XXE* is library-specific — Node ships no XML parser — and `libxmljs`'s `noent` semantics could not be verified offline. *CSRF protection*, *security headers* and *rate limiting* are all ABSENCE claims at project scope rather than facts at a call site, which is a different design from a per-file diagnostic and a different false-positive profile.
 
+**`no-weak-crypto-parameters` shipped** — two literal options that weaken something already correct by default, neither of which produces an error, a warning, or a failing test.
+
+Both premises were pinned as executable facts rather than asserted, and they rest on **different ground**, which the messages state:
+
+- **A TLS version below Node's own default.** `tls.DEFAULT_MIN_VERSION` is `TLSv1.2`, and Node accepts a downgrade to `TLSv1`/`TLSv1.1` **without throwing** — verified. The same shape as `tar`'s `preservePaths`: an option that switches off a protection you already had. TLS 1.0/1.1 were deprecated by RFC 8996 and dropped by every major browser in 2020, and re-enabling one to accommodate a single legacy client downgrades *every* connection. The legacy `secureProtocol` spelling is matched too.
+- **An RSA modulus below 2048.** Verified the other way: Node generates a 512-bit key **without objecting**, which is precisely why the floor has to come from the rule. This is a standards claim (NIST SP 800-57 retired 1024-bit RSA in 2013) rather than a runtime fact, and the message says so rather than letting a standards floor masquerade as an error Node would raise.
+
+Both are literal-only — `minVersion: cfg.tlsMin` and `modulusLength: bits` are the config's business — and only an object passed as an ARGUMENT is judged, so a standalone profile fixture is not a live TLS context. Swept over 111,566 files: 0 findings.
+
+**`no-mass-assignment` had an evasion hole, now closed.** All seven TypeScript assertion spellings bypassed it — `as T`, `as any`, `satisfies`, `!`, `<T>x`, aliased, and spread-of-cast — which left it close to blind on TypeScript, where `create({ data: req.body as UserDto })` is the idiomatic form and the assertion is exactly what makes the author confident the data was validated. The cause was the precision fix that removed 743 false positives: making the match exact let every erased wrapper through. The repair is the underlying fact rather than a patch list — a TypeScript assertion is erased at compile time, so `req.body as UserDto` IS `req.body`. Checked against the other taint-based security rules (SQL, exec, eval, SSRF, open redirect): none shares the hole, because they walk descendants. Re-swept: 133,123 files, 0 findings.
+
 ## 8. Input Validation
 **Status: Planned** (validator-library awareness); missing-validation detection is Core-adjacent.
 
