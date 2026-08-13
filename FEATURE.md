@@ -417,7 +417,7 @@ Prisma, Sequelize, TypeORM, Mongoose, Knex, MikroORM, Objection.js, Drizzle ORM.
 - Deprecated packages.
 - Large dependencies (bundle/footprint flags).
 - **License analysis** — a section of `node-doctor supply-chain`.
-- Version conflicts across the workspace.
+- **Version conflicts** — `no-conflicting-dependency-declaration` covers the one that is always a mistake; multiple installed versions of the same package are reported as facts by `supply-chain`.
 
 ---
 
@@ -431,6 +431,14 @@ Two precision rules came from running it against real dependency trees rather th
 
 - **An SPDX `OR` is a CHOICE.** `jszip` ships `(MIT OR GPL-3.0-or-later)`; you take the MIT branch and owe nothing, so calling it copyleft is simply false. A dual license binds only when EVERY alternative binds; `AND` is the opposite, where one copyleft term is enough.
 - **An absent `license` field is not "unlicensed".** The terms may sit in a LICENSE file the field never names, so that is checked before anything is said — and a `private: true` package needs no license at all by npm's own convention, which is usually the workspace's own package rather than a dependency.
+
+**`no-conflicting-dependency-declaration` shipped.** A package declared in both `dependencies` and `devDependencies` reads like a harmless duplicate, and npm prints no warning for it. Measured against real npm rather than assumed, twice: with **different** ranges the devDependencies range wins (`^7` + `^6` resolves `semver@6.3.1`), and with **identical** ranges it still resolves as dev. In both cases the lockfile entry carries `"dev": true`, and after `npm install --omit=dev` the package is **absent from `node_modules` entirely** — verified by looking for the directory afterwards.
+
+So the failure is production-only and total. Locally the package is installed, the tests pass, the types resolve; the deployed image runs `--omit=dev` and the first `require` gets `MODULE_NOT_FOUND`, for a dependency the manifest plainly calls a runtime one.
+
+Scope is stated in the rule rather than left implicit: the text scan excludes `node_modules`, so it only ever reads FIRST-PARTY manifests — which is exactly where the behaviour was measured. A published package's own dual declaration is a different question, since a consumer never installs its devDependencies at all, and the rule makes no claim about it because it never sees one. Across eight projects: 0 findings in 27 first-party manifests, with 14 instances in their dependency trees correctly out of scope.
+
+**Multiple installed VERSIONS of one package is not this rule's business**, and deliberately so — 28 of 482 packages in one real tree carry more than one version, which is ordinary npm behaviour rather than a defect.
 
 ## 20. Code Quality
 **Status:** dead code, long functions, deep nesting and complexity are **Core** (the size/complexity checks are opt-in by default); duplicate-code detection is **Planned (near-term)**; some overlap with the dead-code scanner (`node-deslop`).

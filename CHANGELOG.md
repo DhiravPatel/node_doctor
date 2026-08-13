@@ -98,6 +98,32 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Conflicting dependency declarations (§19)
+
+- **`no-conflicting-dependency-declaration`** (Reliability, error) — a package
+  declared in both `dependencies` and `devDependencies`. It reads like a
+  harmless duplicate, and npm prints no warning.
+  Measured against real npm rather than assumed, twice: with **different**
+  ranges the devDependencies range wins (`^7` + `^6` resolves `semver@6.3.1`),
+  and with **identical** ranges it still resolves as dev. In both cases the
+  lockfile carries `"dev": true`, and after `npm install --omit=dev` the package
+  is **absent from `node_modules` entirely** — verified by looking for the
+  directory afterwards.
+  The failure is therefore production-only and total: locally the package is
+  installed, the tests pass, the types resolve; the deployed image runs
+  `--omit=dev` and the first `require` gets `MODULE_NOT_FOUND`, for a dependency
+  the manifest plainly calls a runtime one.
+  `peerDependencies` and `optionalDependencies` overlapping `dependencies` are
+  both ordinary patterns and are never reported.
+
+Scope is stated in the rule rather than left implicit. The text scan excludes
+`node_modules`, so this only reads FIRST-PARTY manifests — exactly where the
+behaviour was measured. A published package's own dual declaration is a
+different question, since a consumer never installs its devDependencies, and the
+rule makes no claim about it because it never sees one. Across eight projects: 0
+findings in 27 first-party manifests, with the 14 instances in their dependency
+trees correctly out of scope.
+
 ### Weak crypto parameters, and a TypeScript evasion hole (§6, §7)
 
 - **`no-weak-crypto-parameters`** (Security, error) — two literal options that

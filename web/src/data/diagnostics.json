@@ -1,13 +1,13 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 164,
-  "defaultOn": 113,
+  "total": 165,
+  "defaultOn": 114,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 63,
     "Maintainability": 16,
-    "Reliability": 43,
+    "Reliability": 44,
     "Bugs": 29
   },
   "categoryWeights": {
@@ -658,6 +658,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Remove the key from the repo and rotate it now — a committed key is compromised. Store keys outside the repo (a secret manager, or an untracked gitignored path) and load them at runtime."
+    },
+    {
+      "id": "no-conflicting-dependency-declaration",
+      "title": "Package declared in both dependencies and devDependencies",
+      "category": "Reliability",
+      "severity": "error",
+      "scope": "text",
+      "tags": [
+        "correctness",
+        "dependencies",
+        "supply-chain"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Remove the `devDependencies` entry. npm resolves a package declared in both as a DEV dependency and marks it `dev: true` in the lockfile, so `npm install --omit=dev` drops it from the production image — and the first `require` of a dependency your manifest calls a runtime one fails with `MODULE_NOT_FOUND`."
     },
     {
       "id": "no-console-log-in-committed-code",

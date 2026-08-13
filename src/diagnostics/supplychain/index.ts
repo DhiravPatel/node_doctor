@@ -6,7 +6,11 @@
 
 import type { TextDiagnostic } from "../../core/text-scan.ts";
 import { noUnpinnedDependency } from "./no-unpinned-dependency.ts";
+import { noConflictingDependencyDeclaration } from "./no-conflicting-dependency-declaration.ts";
 
-export const SUPPLYCHAIN_DIAGNOSTICS: TextDiagnostic[] = [noUnpinnedDependency];
+export const SUPPLYCHAIN_DIAGNOSTICS: TextDiagnostic[] = [
+  noUnpinnedDependency,
+  noConflictingDependencyDeclaration,
+];
 
-export { noUnpinnedDependency };
+export { noUnpinnedDependency, noConflictingDependencyDeclaration };
