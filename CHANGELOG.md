@@ -98,6 +98,42 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Zip slip — `no-unsafe-archive-extraction` (§7)
+
+An audit of the existing security surface found the basics already covered by 61
+diagnostics — injection in four forms, XSS, SSRF, path traversal, four JWT rules,
+secrets, TLS, weak crypto, cookie flags, CORS, mass assignment. The one
+OWASP-classic genuinely absent was archive extraction.
+
+- **`no-unsafe-archive-extraction`** (Security, error) — an archive entry carries
+  its own path, and that path is attacker-chosen:
+  `join("/srv/app/uploads", "../../../etc/cron.d/pwn")` resolves to
+  `/etc/cron.d/pwn`, pinned as an executable test rather than asserted. The
+  upload arrives as a legitimate archive, the extraction succeeds, and the file
+  lands outside the directory the application believes it owns.
+
+  Two shapes, deliberately not held to the same standard. **The `tar` flag** was
+  read out of the installed library's own source rather than its docs:
+  `unpack.js` gates three separate protections on `preservePaths` — stripping
+  `/` from absolute paths, rejecting `..`, and refusing to extract through a
+  symlink. It is a literal, so the claim is exact. **The hand-rolled join** needs
+  all three of an entry-path property, a filesystem write, and no containment
+  check anywhere in the function; any `relative`/`startsWith`/`isAbsolute`
+  silences it, because whether a check is correct is not a claim this makes.
+
+  Only entry properties verified against a shipped implementation are matched:
+  `fileName` (yauzl's source) and `path` (tar's `read-entry.js`). `adm-zip`'s
+  `entryName` is documented but was not installed to check, and this analyzer
+  does not assert an API it cannot verify.
+
+Swept over 111,566 files: 0 findings, and every constructed shape still fires.
+
+**Not shipped, with reasons.** *XXE* is library-specific — Node ships no XML
+parser — and `libxmljs`'s `noent` semantics could not be verified offline.
+*CSRF*, *security headers* and *rate limiting* are absence claims at project
+scope rather than facts at a call site, which is a different design and a
+different false-positive profile.
+
 ### Bodiless statuses and pre-push hooks (§3, §42)
 
 - **`no-body-on-bodiless-status`** (Bugs, error) — a response body sent with 204,

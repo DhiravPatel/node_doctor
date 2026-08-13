@@ -154,6 +154,7 @@ import { noTaintedSinkViaHelper } from "../diagnostics/security/no-tainted-sink-
 import { noTimingUnsafeSecretCompare } from "../diagnostics/security/no-timing-unsafe-secret-compare.ts";
 import { noUnanchoredSecurityRegex } from "../diagnostics/security/no-unanchored-security-regex.ts";
 import { noUnnormalizedIdentityComparison } from "../diagnostics/security/no-unnormalized-identity-comparison.ts";
+import { noUnsafeArchiveExtraction } from "../diagnostics/security/no-unsafe-archive-extraction.ts";
 import { noUnsafeDeserialization } from "../diagnostics/security/no-unsafe-deserialization.ts";
 import { noUnsafeRegexpFromInput } from "../diagnostics/security/no-unsafe-regexp-from-input.ts";
 import { noVmRunUntrusted } from "../diagnostics/security/no-vm-run-untrusted.ts";
@@ -315,6 +316,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noTimingUnsafeSecretCompare,
   noUnanchoredSecurityRegex,
   noUnnormalizedIdentityComparison,
+  noUnsafeArchiveExtraction,
   noUnsafeDeserialization,
   noUnsafeRegexpFromInput,
   noVmRunUntrusted,

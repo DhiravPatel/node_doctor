@@ -1,11 +1,11 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 162,
-  "defaultOn": 111,
+  "total": 163,
+  "defaultOn": 112,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
-    "Security": 61,
+    "Security": 62,
     "Maintainability": 16,
     "Reliability": 43,
     "Bugs": 29
@@ -2226,6 +2226,22 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Release it in a `finally` so the error path cannot skip it: `const client = await pool.connect(); try { … } finally { client.release(); }`. A resource that is only released on the happy path is released until the first exception, and then never again."
+    },
+    {
+      "id": "no-unsafe-archive-extraction",
+      "title": "Archive extracted to a path its own entries control (zip slip)",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "filesystem",
+        "path-traversal",
+        "security"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Resolve the entry against the destination and confirm it stayed inside before writing: `const out = resolve(dest, entry.path); if (relative(dest, out).startsWith(\"..\")) throw new Error(\"unsafe entry\")`. With `tar`, simply do not set `preservePaths` — the default already strips absolute paths, rejects `..`, and refuses to extract through a symlink."
     },
     {
       "id": "no-unsafe-deserialization",

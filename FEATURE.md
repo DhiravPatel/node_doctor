@@ -240,6 +240,17 @@ Deterministic detection of injection and unsafe-primitive sinks, taint-aware whe
 - **Unsafe `child_process`** — `exec`/`spawn` with interpolation.
 - **Unsafe shell execution** — shell-invoking calls with metacharacter exposure.
 
+**Zip slip shipped** — `no-unsafe-archive-extraction`. An archive entry carries its own path, and that path is attacker-chosen: `join("/srv/app/uploads", "../../../etc/cron.d/pwn")` resolves to `/etc/cron.d/pwn`, pinned as an executable test rather than asserted. The upload arrives as a legitimate archive, the extraction succeeds, and the file lands outside the directory the application believes it owns.
+
+Two shapes, and they are deliberately not held to the same standard:
+
+- **The `tar` flag**, read out of the installed library's own source rather than its docs: `unpack.js` gates three separate protections on `preservePaths` — stripping `/` from absolute paths, rejecting an entry containing `..`, and refusing to extract through a symbolic link. Setting it re-enables the whole class at once, and it is a literal, so the claim is exact.
+- **The hand-rolled join**, which needs all three of: an entry-path property, reaching a filesystem WRITE, with no containment check anywhere in the enclosing function. Any `relative`/`startsWith`/`isAbsolute` is a silence — whether that check is *correct* is not a claim this makes; that one exists is.
+
+Only entry properties verified against a shipped implementation are matched: `fileName` (yauzl's source) and `path` (tar's `read-entry.js`). `adm-zip`'s `entryName` is documented but was not installed here to check, and this analyzer does not assert an API it cannot verify.
+
+**Still absent at the basic tier, with reasons.** *XXE* is library-specific — Node ships no XML parser — and `libxmljs`'s `noent` semantics could not be verified offline. *CSRF protection*, *security headers* and *rate limiting* are all ABSENCE claims at project scope rather than facts at a call site, which is a different design from a per-file diagnostic and a different false-positive profile.
+
 ## 8. Input Validation
 **Status: Planned** (validator-library awareness); missing-validation detection is Core-adjacent.
 
