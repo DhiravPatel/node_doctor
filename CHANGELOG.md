@@ -98,6 +98,37 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Bodiless statuses and pre-push hooks (§3, §42)
+
+- **`no-body-on-bodiless-status`** (Bugs, error) — a response body sent with 204,
+  205 or 304. HTTP defines those as bodiless and Node enforces it: verified
+  against a live server, the payload is silently discarded and the client
+  receives `""`.
+  Nothing fails on the server, which is why this survives — the breakage lands
+  in the CALLER's codebase, where `await res.json()` throws
+  `Unexpected end of JSON input`, or the field being read is `undefined`. The
+  line is written for a real reason ("there is no content, and here is what I
+  did") and those two halves contradict each other.
+  Both halves of the trigger are literal, so nothing is inferred.
+  `res.status(204).end()`, `.send()` with no argument, and `res.sendStatus(204)`
+  are the correct spellings and stay silent.
+
+- **`node-doctor install --git-hook pre-push`** — the flag now takes an optional
+  kind. The two hooks get **deliberately different** scans: `pre-commit` stays
+  staged-only, because a commit happens dozens of times a day and a full scan
+  there is a tax people uninstall rather than pay; `pre-push` scans the whole
+  project at `--blocking error`, because a push is rare and is the last point
+  before the code becomes somebody else's problem. Both stay advisory, both say
+  in a comment how to enforce, and a bare `--git-hook` behaves exactly as before.
+
+**A 133,123-file sweep found the one shape the unit cases missed.**
+`@adonisjs/cors` ends a preflight with `response.status(204).send(null)`, under
+a comment saying exactly that. A provably empty argument — `null`, `undefined`,
+`""` — is how people spell "no body" when the signature wants one, and it sends
+nothing, so there is nothing to discard. Kept as a regression test. That is the
+fourth consecutive wave where the corpus caught something the hand-written cases
+did not.
+
 ### License analysis — `node-doctor supply-chain` (§19)
 
 - **Licenses are now a section of the supply-chain report** — the distribution

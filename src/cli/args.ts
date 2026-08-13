@@ -241,6 +241,7 @@ export interface ParsedArgs {
   // install
   client?: string;
   gitHook: boolean; // `install --git-hook`
+  gitHookKind?: "pre-commit" | "pre-push"; // `--git-hook pre-push`
   agentHooks: boolean; // `install --agent-hooks`
   packageScript: boolean; // `install --package-script`
   skill?: string; // `install --skill improve-node`
@@ -461,6 +462,16 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
     }
     if (token === "--git-hook") {
       result.gitHook = true;
+      // An optional kind may follow: `--git-hook pre-push`. A bare flag keeps
+      // the pre-commit behaviour it has always had.
+      const next = argv[i + 1];
+      if (next === "pre-commit" || next === "pre-push") {
+        result.gitHookKind = next;
+        i += 1;
+      } else if (next !== undefined && !next.startsWith("-") && /^pre-/.test(next)) {
+        result.errors.push(`--git-hook must be one of: pre-commit, pre-push (got "${next}")`);
+        i += 1;
+      }
       continue;
     }
     if (token === "--agent-hooks") {

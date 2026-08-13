@@ -77,6 +77,7 @@ import { expressAsyncHandlerUnprotected } from "../diagnostics/http/express-asyn
 import { expressMissingReturnAfterResponse } from "../diagnostics/http/express-missing-return-after-response.ts";
 import { fastifyMissingSchema } from "../diagnostics/http/fastify-missing-schema.ts";
 import { nestMissingValidationPipe } from "../diagnostics/http/nest-missing-validation-pipe.ts";
+import { noBodyOnBodilessStatus } from "../diagnostics/http/no-body-on-bodiless-status.ts";
 import { noMissingBodySizeLimit } from "../diagnostics/http/no-missing-body-size-limit.ts";
 import { noSendAfterNext } from "../diagnostics/http/no-send-after-next.ts";
 import { noSharedCacheAuthenticatedResponse } from "../diagnostics/http/no-shared-cache-authenticated-response.ts";
@@ -237,6 +238,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   expressMissingReturnAfterResponse,
   fastifyMissingSchema,
   nestMissingValidationPipe,
+  noBodyOnBodilessStatus,
   noMissingBodySizeLimit,
   noSendAfterNext,
   noSharedCacheAuthenticatedResponse,

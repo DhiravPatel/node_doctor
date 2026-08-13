@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 161,
-  "defaultOn": 110,
+  "total": 162,
+  "defaultOn": 111,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 61,
     "Maintainability": 16,
     "Reliability": 43,
-    "Bugs": 28
+    "Bugs": 29
   },
   "categoryWeights": {
     "Security": 2,
@@ -568,6 +568,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Keep 64-bit ids as BigInt or convert losslessly with `String(x)` / `x.toString()`. `Number(x)` rounds any value above 2^53 to the nearest double, and `+x` throws `TypeError` on a BigInt."
+    },
+    {
+      "id": "no-body-on-bodiless-status",
+      "title": "Response body sent with a status that cannot carry one",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "api",
+        "correctness",
+        "http"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Either the body matters — use `200` — or it does not, and `res.status(204).end()` / `res.sendStatus(204)` says so. HTTP defines 204, 205 and 304 as bodiless and Node discards the payload, so the caller's `await res.json()` throws on an empty response."
     },
     {
       "id": "no-cache-without-ttl",

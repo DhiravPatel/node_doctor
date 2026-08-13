@@ -316,7 +316,7 @@ Usage:
   node-doctor delta --baseline <f> --current <f> [--blocking <level>]
   node-doctor install [--client <name>|all] [--skill improve-node]
                                          Install an agent skill (defaults to detected clients)
-  node-doctor install --git-hook         Install an advisory pre-commit hook
+  node-doctor install --git-hook [kind]  Install an advisory git hook (pre-commit | pre-push)
   node-doctor install --agent-hooks      Install post-edit hooks (Claude Code / Cursor)
   node-doctor install --package-script   Add a "doctor" script to package.json
   node-doctor ci                         Scaffold a GitHub Actions workflow
@@ -849,9 +849,13 @@ const runDelta = async (args: ParsedArgs): Promise<number> => {
 const runGitHook = async (args: ParsedArgs): Promise<number> => {
   const cwd = resolve(args.positionals[0] ?? ".");
   try {
-    const result = await installGitHook({ cwd });
-    process.stdout.write(`  ✓ ${result.action} pre-commit hook → ${result.path}\n`);
-    process.stderr.write("  It runs `node-doctor --staged --blocking warning` (advisory — never blocks the commit).\n");
+    const result = await installGitHook({ cwd, hook: args.gitHookKind });
+    process.stdout.write(`  ✓ ${result.action} ${result.hook} hook → ${result.path}\n`);
+    process.stderr.write(
+      result.hook === "pre-push"
+        ? "  It runs `node-doctor --blocking error` over the whole project (advisory — never blocks the push).\n"
+        : "  It runs `node-doctor --staged --blocking warning` (advisory — never blocks the commit).\n",
+    );
     return 0;
   } catch (err) {
     process.stderr.write(`node-doctor install --git-hook: ${err instanceof Error ? err.message : String(err)}\n`);

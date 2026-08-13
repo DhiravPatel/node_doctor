@@ -158,6 +158,10 @@ Two shapes are matched: a resolver map's `Query`/`Mutation`/`Subscription` field
 
 Deliberately narrow: only the three root operation types, and only when the value is an object of functions. A type-level resolver map (`{ User: { posts() {} } }`) needs the schema to identify, and treating any capitalized key as a GraphQL type would sweep in every ordinary namespace object in the file.
 
+**`no-body-on-bodiless-status` shipped.** HTTP defines 204, 205 and 304 as carrying no body, and Node enforces it — verified against a live server, the payload is silently discarded and the client receives `""`. Nothing fails on the server, which is why it survives: the breakage lands in the CALLER's codebase, where `await res.json()` throws `Unexpected end of JSON input` or the field being read is `undefined`.
+
+Both halves of the trigger are literal — a numeric status and an actual body argument — so nothing is inferred. A **corpus sweep of 133,123 files** then found the one shape the unit cases had missed: `@adonisjs/cors` ends a preflight with `response.status(204).send(null)`, under a comment saying exactly that. A provably empty argument (`null`, `undefined`, `""`) is how people spell "no body" when the signature wants one, and it sends nothing — so there is nothing to discard and no claim to make.
+
 ## 4. Route Analysis
 **Status: Core (partial)** — route registration + `node-doctor surface` mapping are Core; `no-duplicate-route-definition` (opt-in) and `no-shadowed-route` (a static route made unreachable by an earlier parameter route on the same Express router, order-based-matching only) ship today. The rest below build on registration detection.
 
@@ -647,7 +651,9 @@ Health score, dependency graph, API graph, architecture graph, database graph, r
 - Diff analysis (baseline delta) — `node-doctor delta`.
 - **Blame analysis** — `node-doctor blame` (aliases `finding-age`, `age`).
 - Pre-commit hooks — `node-doctor install --git-hook`.
-- Pre-push hooks *(Planned)*.
+- **Pre-push hooks** — `node-doctor install --git-hook pre-push`.
+
+**The two hooks get deliberately different scans**, because they run at different rates. `pre-commit` stays staged-only: a commit happens dozens of times a day, and a full scan there is a tax people uninstall rather than pay. `pre-push` scans the whole project at `--blocking error`, because a push is rare and is the last point before the code becomes somebody else's problem. Both stay advisory and say in a comment how to enforce; a bare `--git-hook` behaves exactly as it always has.
 
 **Blame analysis was filed as Vision and shipped without new infrastructure**, for the second time in this catalog: §159/§160/§163 brought `git-history.ts`, §110 added a porcelain blame parser, and that was the whole dependency. The parser now lives in `git-history.ts` and both consumers share it.
 
