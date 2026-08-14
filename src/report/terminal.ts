@@ -1526,6 +1526,25 @@ export const renderSchemaDrift = (
     ),
   );
   lines.push("");
+  // Facts about two files in the repository — the schema says what is indexed,
+  // the query says what it filters on. Deliberately not a defect claim: on a
+  // small table a sequential scan is correct and cheaper than an index, and
+  // nothing in either file says how many rows there are.
+  if (report.unindexedFilters.length > 0) {
+    lines.push(
+      `  ${p.yellow("\u25cf")} ${p.bold(`${report.unindexedFilters.length} filter(s) on a column with no declared index`)}`,
+    );
+    lines.push(p.dim("      A fact, not a defect \u2014 on a small table a scan is correct. Worth a look where the table grows."));
+    lines.push("");
+    for (const f of report.unindexedFilters.slice(0, 20)) {
+      lines.push(`      ${p.cyan(`${f.normalizedFilePath}:${f.line}`)}  ${f.model}.${f.field}`);
+    }
+    if (report.unindexedFilters.length > 20) {
+      lines.push(p.dim(`      \u2026 ${report.unindexedFilters.length - 20} more`));
+    }
+    lines.push("");
+  }
+
   return lines.join("\n");
 };
 

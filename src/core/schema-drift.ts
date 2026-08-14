@@ -62,6 +62,24 @@ export interface DriftFinding {
   suggestion: string | null;
 }
 
+/**
+ * A single-column `where` filter on a field the schema declares no index for.
+ *
+ * A FACT about two files in the repository — the schema says what is indexed,
+ * the query says what it filters on — and deliberately not a defect claim. On a
+ * small table a sequential scan is correct and cheaper than an index; nothing in
+ * either file says how many rows there are. It is reported so somebody who knows
+ * the table size can decide, in the same spirit as the licence section of
+ * `supply-chain`.
+ */
+export interface UnindexedFilter {
+  model: string;
+  field: string;
+  normalizedFilePath: string;
+  line: number;
+  column: number;
+}
+
 export interface DeadModelEntry {
   model: string;
   tableName: string;
@@ -79,11 +97,14 @@ export interface SchemaDriftReport {
   deadModels: DeadModelEntry[];
   /** Why dead-model detection was skipped, when it was. */
   deadModelDetection: "full" | "skipped-dynamic-access" | "skipped-unresolved-raw-sql";
+  /** Single-column `where` filters on fields with no declared index. */
+  unindexedFilters: UnindexedFilter[];
   summary: {
     filesScanned: number;
     modelsUsed: number;
     driftFindings: number;
     deadModels: number;
+    unindexedFilters: number;
   };
 }
 
@@ -189,6 +210,8 @@ const hasOpaqueParts = (obj: AstNode): boolean => {
 interface WalkContext {
   modelsByName: Map<string, PrismaModel>;
   report: (model: PrismaModel, key: string, section: string, node: AstNode) => void;
+  /** A known scalar field used as a single-column `where` filter. */
+  noteFilter: (model: PrismaModel, key: string, node: AstNode) => void;
   /** Credit a model as used — a relation traversal reads/writes the RELATED table too. */
   use: (modelName: string) => void;
 }
@@ -229,6 +252,9 @@ const walkWhere = (model: PrismaModel, node: AstNode | undefined, wctx: WalkCont
     if (fields.has(key)) {
       // A relation key nests quantifiers or a where-shape for the RELATED model.
       const rel = relatedModel(model, key, wctx);
+      // A SCALAR key here is a single-column filter; a relation key is a join,
+      // which is a different question with a different answer.
+      if (!rel) wctx.noteFilter(model, key, prop);
       if (rel && value?.type === "ObjectExpression" && !hasOpaqueParts(value)) {
         for (const sub of (value.properties as AstNode[] | undefined) ?? []) {
           const subKey = propertyKey(sub);
@@ -471,6 +497,7 @@ interface FileScan {
   dynamicAccess: boolean;
   unresolvedRaw: number;
   rawTables: Set<string>;
+  unindexedFilters: UnindexedFilter[];
 }
 
 const SOURCE_GLOB = "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}";
@@ -496,6 +523,7 @@ const scanFile = (
     normalizedFilePath,
     drift: [],
     usedModels: new Set(),
+    unindexedFilters: [],
     dynamicAccess: false,
     unresolvedRaw: 0,
     rawTables: new Set(),
@@ -513,6 +541,20 @@ const scanFile = (
         line: loc.line,
         column: loc.column,
         suggestion: suggestField(key, model),
+      });
+    },
+    noteFilter: (model, key, node) => {
+      // Only a field the schema declares NO index for. `indexedFields` already
+      // applies the leftmost-prefix rule, so a composite on `(a, b)` covers a
+      // filter on `a` and not one on `b`.
+      if (model.indexedFields.includes(key)) return;
+      const loc = locate(node.start as number);
+      scan.unindexedFilters.push({
+        model: model.name,
+        field: key,
+        normalizedFilePath,
+        line: loc.line,
+        column: loc.column,
       });
     },
     use: (modelName) => scan.usedModels.add(modelName),
@@ -703,7 +745,8 @@ export const buildSchemaDriftReport = async (
     drift: [],
     deadModels: [],
     deadModelDetection: "full",
-    summary: { filesScanned: 0, modelsUsed: 0, driftFindings: 0, deadModels: 0 },
+    unindexedFilters: [],
+    summary: { filesScanned: 0, modelsUsed: 0, driftFindings: 0, deadModels: 0, unindexedFilters: 0 },
   };
   if (schemaFiles.length === 0) return empty;
 
@@ -796,6 +839,25 @@ export const buildSchemaDriftReport = async (
           }))
       : [];
 
+  // One entry per (model, field, site); the same filter written twice in a file
+  // is two decisions, but the same line reached twice is one.
+  const seenFilters = new Set<string>();
+  const unindexedFilters = scans
+    .flatMap((scan) => scan.unindexedFilters)
+    .filter((f) => {
+      const id = `${f.model}.${f.field}@${f.normalizedFilePath}:${f.line}:${f.column}`;
+      if (seenFilters.has(id)) return false;
+      seenFilters.add(id);
+      return true;
+    })
+    .sort(
+      (a, b) =>
+        (a.normalizedFilePath < b.normalizedFilePath ? -1 : a.normalizedFilePath > b.normalizedFilePath ? 1 : 0) ||
+        a.line - b.line ||
+        a.column - b.column ||
+        (a.field < b.field ? -1 : 1),
+    );
+
   return {
     schemaPresent: true,
     schemaFiles: schemaFiles.map((f) => relative(rootDirectory, f).split(sep).join("/")),
@@ -804,11 +866,13 @@ export const buildSchemaDriftReport = async (
     drift,
     deadModels,
     deadModelDetection,
+    unindexedFilters,
     summary: {
       filesScanned: scans.length,
       modelsUsed: usedModels.size,
       driftFindings: drift.length,
       deadModels: deadModels.length,
+      unindexedFilters: unindexedFilters.length,
     },
   };
 };

@@ -33,6 +33,16 @@ export interface PrismaModel {
   fields: PrismaField[];
   /** Compound where-unique keys: `@@unique([a, b])` → `a_b` (or its custom `name:`). */
   compoundAliases: string[];
+  /**
+   * Fields a single-column filter can use an index for.
+   *
+   * Field-level `@id`/`@unique`, plus the **leading** field of every
+   * `@@index`/`@@unique`/`@@id` list. Only the leading one: a composite index on
+   * `(a, b)` serves a filter on `a`, and does not serve one on `b` alone — the
+   * leftmost-prefix rule every major engine follows. Listing `b` here would
+   * silently license the scan this is meant to find.
+   */
+  indexedFields: string[];
 }
 
 export interface PrismaEnum {
@@ -83,6 +93,62 @@ const fieldMapName = (line: string): string | null => {
  * carry argument lists (`email(sort: Desc, length: 10)`), which are stripped
  * before the default `a_b` alias is joined.
  */
+/**
+ * Walk to the matching close paren from `openAt`, string-aware, and return the
+ * argument text. Shared by the two attribute readers below.
+ */
+const attributeArgs = (body: string, openAt: number): { args: string; end: number } => {
+  let depth = 1;
+  let inString = false;
+  let i = openAt;
+  const start = i;
+  while (i < body.length && depth > 0) {
+    const c = body[i]!;
+    if (c === '"') inString = !inString;
+    else if (!inString && c === "(") depth++;
+    else if (!inString && c === ")") depth--;
+    i++;
+  }
+  return { args: body.slice(start, i - 1), end: i };
+};
+
+/** The bare field name, with any argument list (`email(sort: Desc)`) stripped. */
+const bareFieldRef = (raw: string): string => (raw.split("(")[0] ?? "").trim().replace(/^"|"$/g, "");
+
+/**
+ * Fields a single-column filter can use an index for: field-level `@id`/
+ * `@unique`, plus the LEADING field of each `@@index`/`@@unique`/`@@id` list.
+ */
+const indexedFieldNames = (body: string, fields: ReadonlyArray<{ name: string }>): string[] => {
+  const indexed = new Set<string>();
+
+  // Field-level `@id` / `@unique`, read from the field's own line.
+  for (const line of body.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("@@") || trimmed === "") continue;
+    const name = trimmed.split(/\s+/)[0];
+    if (!name || !fields.some((f) => f.name === name)) continue;
+    // Strip a default value before looking for attributes, so `@default(uuid())`
+    // cannot be mistaken for anything.
+    if (/@(id|unique)\b/.test(trimmed)) indexed.add(name);
+  }
+
+  // Block attributes: only the LEADING field of the list.
+  const attrRe = /@@(?:index|unique|id)\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = attrRe.exec(body)) !== null) {
+    const { args } = attributeArgs(body, m.index + m[0].length);
+    const bracket = /\[([^\]]*)\]/.exec(args);
+    if (!bracket) continue;
+    const first = (bracket[1] ?? "").split(",")[0];
+    if (first === undefined) continue;
+    const name = bareFieldRef(first);
+    if (name !== "") indexed.add(name);
+  }
+
+  return [...indexed].sort();
+};
+
 const compoundAliases = (body: string): string[] => {
   const aliases: string[] = [];
   const attrRe = /@@(?:unique|id)\s*\(/g;
@@ -189,6 +255,7 @@ export const parsePrismaSchema = (sources: string[]): PrismaSchema => {
         tableName: blockMapName(body) ?? name,
         fields,
         compoundAliases: compoundAliases(body),
+        indexedFields: indexedFieldNames(body, fields),
       });
     }
   }
