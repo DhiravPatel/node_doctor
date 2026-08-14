@@ -293,7 +293,20 @@ Both are literal-only — `minVersion: cfg.tlsMin` and `modulusLength: bits` are
 - Unhandled promise rejection.
 - Missing `async`/`await` where a promise is used synchronously.
 - Empty catch blocks (silent failure).
-- Wrong status code on error responses.
+- **Wrong status code on error responses** — `no-error-response-with-success-status`. A caught
+  exception reported with a 2xx, so `res.ok` is true, axios resolves instead of rejecting, APM
+  and uptime checks record a success, and retry/circuit-breaker middleware never fire. The
+  `status: false` in the body is read by none of them. Fires only where the status is *provably*
+  2xx (a literal `status(200)`/`code(2xx)`, or none at all — Express, Adonis and Fastify all
+  default to 200) **and** the payload evidences failure (it carries the caught error, an
+  `error`/`errors` key actually holding one, or `success`/`status`/`ok: false`). Both conditions
+  are required: a catch that recovers and returns real data on 200 is correct, and stays silent
+  because its payload makes no failure claim. Excluded, each for a reason found in the corpus
+  rather than imagined — GraphQL's `{ data, errors }` envelope (200 is what the spec requires),
+  webhook and OAuth-callback handlers (a 2xx acknowledgement is deliberate), and string/template
+  bodies (an HTML page for a browser, not an API error envelope). Measured on a 220,042-file
+  sweep: 138 findings, every one in application controllers, **zero in `node_modules`** — the
+  profile of a team convention rather than a library mistake.
 - Sensitive error leaks (stack traces / internals to clients).
 - Global error handler presence (framework error middleware).
 - Error-response consistency across handlers.
@@ -361,7 +374,28 @@ PostgreSQL, MySQL, MariaDB, MongoDB, Redis, DynamoDB, Cassandra, ClickHouse, SQL
 - Missing indexes on filtered/joined columns.
 - Slow queries (anti-pattern detection).
 - N+1 queries.
-- Transactions (multi-write without a transaction).
+- **Transactions (multi-write without a transaction)** — `no-untransacted-dependent-writes`.
+  Outside a transaction every statement commits on its own, so if the second of two dependent
+  writes fails, the first is already durable and nothing rolls it back — leaving a row the rest
+  of the system believes cannot exist. Demonstrated at the driver level rather than asserted:
+  the same two writes left **1 row behind without `BEGIN` and 0 rows with it**.
+  Fires only on a pair where W2 **references the value W1 returned**
+  (`workflowStep.create({ workflowId: workflow.id })`) — that reference is what proves the two
+  are one unit of work; writes sharing no value are silent. The receiver must **prove Prisma**
+  (a `prisma`-prefixed path segment, a `new PrismaClient()` binding, or an import from a Prisma
+  module), never a name hint: the repo's own `DB_RECEIVER_HINTS` matches `client`/`conn`/`repo`
+  and so returns true for all 20 SDK clients tested, including a real
+  `retellRepository.createLLM` → `createAgent` pair and jsforce's `conn.sobject().create` →
+  `.update`, both correct code. Silent on: a guarded W2 (a conditional refinement whose failure
+  leaves a usable record), a destructive W2 (a compensating rollback), the same model twice (a
+  status transition), a `tx`/`trx`/`queryRunner` handle or explicit `transaction`/`session`
+  option, a nested closure, and test/seed/fixture trees. Disabled outright on projects using
+  `cls-hooked`/`typeorm-transactional`/`nestjs-cls`, where a transaction is opened in
+  AsyncLocalStorage with no evidence at the call site and lexical analysis is unsound.
+  Measured: **3 findings across 2,106 Prisma producing-write sites in 595 files (0.14%)**, all
+  three hand-verified in cal.com — a Workflow with zero steps, and an instant booking with no
+  join token. *Currently Prisma-only; the Mongo/Mongoose equivalent is deliberately not shipped
+  because a `this.someCollection` field cannot yet be proven to be a database.*
 - Connection pooling (pool/client created per request).
 - Duplicate indexes.
 - Missing foreign keys.

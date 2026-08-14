@@ -58,6 +58,7 @@ import { noExternalCallInsideOpenTransaction } from "../diagnostics/db/no-extern
 import { noFindmanyThenFilterInJs } from "../diagnostics/db/no-findmany-then-filter-in-js.ts";
 import { noMissingAwaitOnQuery } from "../diagnostics/db/no-missing-await-on-query.ts";
 import { noQueryInLoop } from "../diagnostics/db/no-query-in-loop.ts";
+import { noUntransactedDependentWrites } from "../diagnostics/db/no-untransacted-dependent-writes.ts";
 // event-loop
 import { noLargeJsonParseInRequestPath } from "../diagnostics/event-loop/no-large-json-parse-in-request-path.ts";
 import { noProcessExitInRequestPath } from "../diagnostics/event-loop/no-process-exit-in-request-path.ts";
@@ -78,6 +79,7 @@ import { expressMissingReturnAfterResponse } from "../diagnostics/http/express-m
 import { fastifyMissingSchema } from "../diagnostics/http/fastify-missing-schema.ts";
 import { nestMissingValidationPipe } from "../diagnostics/http/nest-missing-validation-pipe.ts";
 import { noBodyOnBodilessStatus } from "../diagnostics/http/no-body-on-bodiless-status.ts";
+import { noErrorResponseWithSuccessStatus } from "../diagnostics/http/no-error-response-with-success-status.ts";
 import { noMissingBodySizeLimit } from "../diagnostics/http/no-missing-body-size-limit.ts";
 import { noSendAfterNext } from "../diagnostics/http/no-send-after-next.ts";
 import { noSharedCacheAuthenticatedResponse } from "../diagnostics/http/no-shared-cache-authenticated-response.ts";
@@ -221,6 +223,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noFindmanyThenFilterInJs,
   noMissingAwaitOnQuery,
   noQueryInLoop,
+  noUntransactedDependentWrites,
   // event-loop
   noLargeJsonParseInRequestPath,
   noProcessExitInRequestPath,
@@ -241,6 +244,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   fastifyMissingSchema,
   nestMissingValidationPipe,
   noBodyOnBodilessStatus,
+  noErrorResponseWithSuccessStatus,
   noMissingBodySizeLimit,
   noSendAfterNext,
   noSharedCacheAuthenticatedResponse,

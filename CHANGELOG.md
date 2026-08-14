@@ -11,6 +11,107 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Dependent writes with no transaction (§14)
+
+`no-untransacted-dependent-writes` — a second write that uses what the first
+returned, with nothing holding the two together.
+
+Outside a transaction every statement is its own committed transaction, so if the
+second write fails the first is already durable and nothing rolls it back. Shown
+at the driver level rather than asserted — the same two writes, run with and
+without `BEGIN`:
+
+```
+write2 threw: CHECK constraint failed
+orders rows after failure (NO tx):   1     ← the first write is COMMITTED
+orders rows after failure (WITH tx): 0
+```
+
+What survives is a row the rest of the system believes cannot exist: a workflow
+with no steps, a booking with no meeting token, a credit expense logged against a
+balance that was never debited. Nothing errors at the time and the request has
+already returned, so it surfaces later as a NOT NULL violation or a number that
+does not add up, arbitrarily far from the cause.
+
+**This rule was refuted once before it shipped, and the refutation is what it is
+built from.** Two earlier framings were thrown out for being defended by naming
+accident rather than by proof:
+
+- *Receiver name hints do not prove a database.* The repo's own
+  `DB_RECEIVER_HINTS` matches `client`, `conn`, `repo` and `repository`, and so
+  returns true for all 20 SDK clients tested — Stripe, Twilio, S3, Elasticsearch —
+  plus a real `retellRepository.createLLM(…)` → `createAgent(…)` pair and jsforce's
+  `conn.sobject(Lead).create(…)` → `.update(…)`, both correct code one rename from
+  firing. The rule now requires positive proof of Prisma: a `prisma`-prefixed path
+  segment, a `new PrismaClient()` binding, or an import from a Prisma module.
+- *`await` does not prove a write happened.* TypeORM's `repository.create()` builds
+  an entity in memory and writes nothing — verified, 0 rows — and awaiting a
+  non-promise is legal. The write set is Prisma's, enumerated explicitly, and is
+  deliberately not `QUERY_METHODS`, which contains `findMany`, `count` and
+  `aggregate`.
+
+The dependence test is what makes a pair provably one unit of work: **W2 must
+reference the value W1 returned.** Every true positive has that shape. Two writes
+sharing no value are not shown to be related, and are silent.
+
+Then, each from a case the refutation surfaced: a **guarded** second write is a
+conditional refinement whose failure leaves a usable record; a **destructive**
+second write is a compensating rollback; the **same model twice** is a status
+transition; a `tx`/`trx`/`queryRunner` segment or an explicit
+`transaction`/`session` option means a transaction is already in play; and
+test, seed and fixture trees were the largest noise class at ~246 hits.
+
+New capability token `ambient-transaction` (`cls-hooked`, `typeorm-transactional`,
+`nestjs-cls`) disables the rule outright. Those packages open a transaction in
+AsyncLocalStorage, so a write can be inside one with no evidence at the call site
+at all — lexical analysis is unsound there, and silence is the only correct
+response. None appeared in the corpus; the unsoundness is real regardless.
+
+Measured: **3 findings across 2,106 Prisma producing-write call sites in 595
+files — 0.14%**, every one hand-verified in cal.com. Prisma-only for now; the
+Mongo equivalent is deliberately withheld because a `this.someCollection` field
+cannot yet be proven to be a database, and an unprovable receiver is what the
+refutation was about.
+
+### Caught errors returned with a 2xx status (§9)
+
+`no-error-response-with-success-status` — the handler threw, and the response says
+everything is fine.
+
+Every layer that reads the status instead of the body then agrees. `fetch` sets
+`res.ok === true` and axios resolves rather than rejects, so the client's error
+branch is dead code. APM, load balancers and uptime checks record a success, so the
+endpoint reports a 100% success rate while it is failing and no alert ever fires —
+the outage is invisible in exactly the dashboard someone would look at. Retry and
+circuit-breaker middleware treat 200 as terminal.
+
+The bug is self-concealing, which is why it survives: the body carries
+`status: false` and a message, so it reads correctly in review and in manual
+testing. Only the machinery that reads status codes is misled, and that machinery
+is silent by nature.
+
+Two things must both be true, and either alone is not enough. **The status must be
+provably 2xx** — a literal `status(200)`/`code(2xx)`, or none at all, where Express,
+Adonis and Fastify all default to 200; a computed `status(err.statusCode)` is
+unknown, and unknown is silence. **The payload must evidence failure** — carrying
+the caught error, an `error`/`errors` key that actually holds one, or an explicit
+`success`/`status`/`ok: false`. The second condition is what keeps a legitimate
+fallback silent: a catch that recovers and returns real data on 200 is correct, and
+it is correct precisely because its payload makes no failure claim. An `error: null`
+kept only to stabilise the response shape is not a failure claim either.
+
+Three exclusions, each from something the sweep turned up rather than something
+imagined: GraphQL's `{ data, errors }` envelope, where HTTP 200 is what the spec
+requires; webhook and OAuth-callback handlers, where a 2xx is a deliberate
+acknowledgement that stops the provider retrying; and string or template bodies,
+which are pages for a browser to render rather than API error envelopes — the corpus
+had an OAuth popup returning an HTML error page to `window.opener`.
+
+Measured on a 220,042-file sweep: **138 findings across 32 files, and zero in
+`node_modules`** — the profile of a team convention rather than a library mistake.
+Sampled by hand, the pattern was consistent: the handler logs the error, fires an
+SNS alert about it, and then returns 200.
+
 ### Fix-regression detection — boomerang bugs (§161)
 
 - **`node-doctor ratchet check` now reports REGRESSIONS.** The ratchet's committed

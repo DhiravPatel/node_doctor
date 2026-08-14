@@ -76,6 +76,17 @@ const DEP_TOKENS: Record<string, string> = {
   "@langchain/core": "ai",
   llamaindex: "ai",
   "@modelcontextprotocol/sdk": "mcp",
+  // Ambient/implicit transactions. These packages open a transaction in
+  // AsyncLocalStorage or via a decorator, so a write can be inside one with no
+  // evidence at the call site at all. Any rule that reasons about transactions
+  // lexically is unsound on such a project and must disable itself — see
+  // `no-untransacted-dependent-writes`.
+  "cls-hooked": "ambient-transaction",
+  "typeorm-transactional": "ambient-transaction",
+  "typeorm-transactional-cls-hooked": "ambient-transaction",
+  "nestjs-cls": "ambient-transaction",
+  "@nestjs-cls/transactional": "ambient-transaction",
+  "@nestjs/cls": "ambient-transaction",
 };
 
 /** Extract the leading major version from a semver range (`^5.0.0` → 5). */

@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 169,
-  "defaultOn": 118,
+  "total": 171,
+  "defaultOn": 120,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 63,
     "Maintainability": 16,
-    "Reliability": 48,
-    "Bugs": 29
+    "Reliability": 49,
+    "Bugs": 30
   },
   "categoryWeights": {
     "Security": 2,
@@ -950,6 +950,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Log the error server-side and return a generic message (`res.status(500).json({ error: 'Internal error' })`). Never send `err.stack` or the raw error object — they leak paths, versions, and internal details."
+    },
+    {
+      "id": "no-error-response-with-success-status",
+      "title": "Caught error returned to the client with a 2xx status",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "error-handling",
+        "http",
+        "observability"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Return a status that matches what happened — 500 for an unexpected failure, 4xx where the caller can fix it. A 2xx makes `res.ok` true, resolves axios instead of rejecting, and records a success in APM and uptime checks, so the endpoint reports a 100% success rate while it is failing and no alert fires. The JSON body saying `success: false` is read by nothing that routes, retries, or alerts."
     },
     {
       "id": "no-eval-with-input",
@@ -2367,6 +2383,27 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Give every `skip`/`OFFSET` query a stable, unique sort key (e.g. `orderBy: { id: 'asc' }` or `ORDER BY id`), or switch to keyset/cursor pagination. Without a deterministic order, rows inserted or deleted between page fetches shift the window, so pages silently drop and duplicate records."
+    },
+    {
+      "id": "no-untransacted-dependent-writes",
+      "title": "Dependent writes with no transaction, so a failure leaves half of it committed",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "data-integrity",
+        "database",
+        "prisma",
+        "transaction"
+      ],
+      "requires": [
+        "prisma"
+      ],
+      "disabledWhen": [
+        "ambient-transaction"
+      ],
+      "optIn": false,
+      "recommendation": "Wrap both writes in `prisma.$transaction(async (tx) => { … })` and issue them on `tx`. Outside a transaction each statement commits on its own, so if the second write fails the first is already durable and nothing undoes it — leaving a record the rest of the system believes cannot exist (a parent with no child, a balance moved with no ledger row). Nothing errors at the time; it surfaces later, far from the cause."
     },
     {
       "id": "no-url-as-filesystem-path",
