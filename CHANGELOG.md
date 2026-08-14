@@ -98,6 +98,57 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Index migrations that lock the table (§15)
+
+- **`migration-index-without-concurrently`** (Reliability, warn) — a Postgres
+  `CREATE INDEX` on a table that already exists, without `CONCURRENTLY`. The
+  plain form holds a lock that blocks **every write** to the table until the
+  build finishes.
+  Measured on Postgres 14 against a 600,000-row table rather than quoted from
+  the manual: a concurrent `INSERT` waited **3,093 ms** against a plain
+  `CREATE INDEX` and **21 ms** against `CONCURRENTLY`. A factor of 147, and it
+  scales with the table rather than with the migration. The migration succeeds
+  either way, so nothing in CI or the deploy log marks it — the symptom is a
+  write stall at deploy time.
+
+Two guards matter more than the trigger. **A table created in the SAME migration
+is never reported**: it has no rows to scan and no traffic to block, and
+`CONCURRENTLY` would only forbid running it in a transaction. And **Postgres must
+be proven from the file** — `CONCURRENTLY` is Postgres-only syntax, so on MySQL
+or SQLite the advice is unfollowable; without positive in-file evidence of the
+dialect the rule says nothing.
+
+Validated against 593 real migration files from cal.com: 20 findings, with the
+guard proving itself inside a single file — `create_internal_notes_tables`
+creates `BookingInternalNote` and indexes both it and the pre-existing
+`Impersonations`, and only the latter was reported.
+
+### Missing indexes — `node-doctor schema-drift` (§14)
+
+- **Filters on a column with no declared index** are now a section of the
+  schema-drift report. Both halves were already in the repository — the schema
+  says what is indexed, the query says what it filters on — so this needed no
+  new infrastructure, only for the Prisma parser to stop discarding index
+  metadata.
+
+**The leftmost-prefix rule is the whole precision story.** `indexedFields`
+records field-level `@id`/`@unique` plus the **leading** field of each
+`@@index`/`@@unique`/`@@id`, and nothing else. A composite on `(tenantId,
+status)` serves a filter on `tenantId` and does not serve one on `status` alone.
+Recording every member of the list would have silently licensed exactly the scan
+this exists to find — and the real-world run proved it matters, reporting
+`PrReview.status`, which sits inside an index.
+
+**It reports facts, not defects.** Nothing in either file says how many rows a
+table has, and on a small table a sequential scan is correct and cheaper than an
+index, so the section is framed as "a fact, not a defect" in the same way
+`supply-chain` presents copyleft. A relation key is a join rather than a
+single-column filter and is never reported; `select`/`orderBy` are not filters.
+
+Validated against a real Prisma project rather than only fixtures, since none of
+the usual corpus uses Prisma: 8 models over 49 files produced 3 findings, each
+confirmed against the schema by hand.
+
 ### Conflicting dependency declarations (§19)
 
 - **`no-conflicting-dependency-declaration`** (Reliability, error) — a package

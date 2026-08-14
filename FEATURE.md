@@ -368,6 +368,14 @@ PostgreSQL, MySQL, MariaDB, MongoDB, Redis, DynamoDB, Cassandra, ClickHouse, SQL
 - ORM misuse (see §15).
 - Raw SQL misuse (unparameterized, unsafe raw helpers).
 
+**Missing-index detection shipped**, as a section of `node-doctor schema-drift`. Both halves are already in the repository — the schema says what is indexed, the query says what it filters on — so the cross-check needed no new infrastructure, only for the Prisma parser to stop discarding index metadata.
+
+**The leftmost-prefix rule is the whole precision story.** `indexedFields` records field-level `@id`/`@unique` plus the **leading** field of each `@@index`/`@@unique`/`@@id`, and nothing else. A composite index on `(tenantId, status)` serves a filter on `tenantId` and does **not** serve one on `status` alone — the rule every major engine follows. Recording every member of the list would have silently licensed exactly the scan this exists to find, and the real-world run proved it matters: `PrReview.status` sits inside an index and is still reported.
+
+**It reports facts, not defects.** Nothing in either file says how many rows the table has, and on a small table a sequential scan is correct and cheaper than an index — so the section is framed as *"a fact, not a defect — worth a look where the table grows"*, the same way `supply-chain` presents copyleft. A **relation key** is a join rather than a single-column filter and is never reported (the nested scalar inside it still is), and `select`/`orderBy` are not filters.
+
+Validated against a real Prisma project rather than only fixtures, since none of the usual corpus uses Prisma: 8 models over 49 files produced **3 findings, each confirmed against the schema by hand** — including a webhook path doing `findFirst({ where: { githubRepoId } })` on a column with no index.
+
 ## 15. ORM Analysis
 **Status:** receiver-aware query detection is **Core** across ORMs; deep schema/migration checks **Planned**.
 
@@ -380,6 +388,12 @@ Prisma, Sequelize, TypeORM, Mongoose, Knex, MikroORM, Objection.js, Drizzle ORM.
 - Schema drift (models vs migrations vs DB).
 - Unsafe queries (raw/interpolated).
 - Missing indexes declared on models.
+
+**`migration-index-without-concurrently` shipped.** A plain Postgres `CREATE INDEX` holds a lock that blocks **every write** to the table until the build finishes. Measured on Postgres 14 with a 600,000-row table rather than quoted from the manual: a concurrent `INSERT` waited **3,093 ms** against a plain `CREATE INDEX` and **21 ms** against `CONCURRENTLY` — a factor of 147, scaling with the table rather than the migration. The migration succeeds either way, so nothing in CI or the deploy log marks it; the symptom is a write stall at deploy time that gets attributed to almost anything else.
+
+Two guards matter more than the trigger. **A table created in the SAME migration is never reported** — it has no rows to scan and no traffic to block, and `CONCURRENTLY` would only forbid running it in a transaction. And **Postgres must be proven from the file**: `CONCURRENTLY` is Postgres-only syntax, so on MySQL or SQLite the advice would be impossible to follow; without positive in-file evidence of the dialect the rule says nothing, matching the migration module's stated bias toward silence.
+
+Validated against 593 real migration files from cal.com: **20 findings**, and the guard proved itself inside a single file — `create_internal_notes_tables` creates `BookingInternalNote` and indexes both it and the pre-existing `Impersonations`, and only the latter was reported.
 
 ## 16. Caching Analysis
 **Status: Planned**

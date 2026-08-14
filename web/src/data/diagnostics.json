@@ -1,13 +1,13 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 165,
-  "defaultOn": 114,
+  "total": 166,
+  "defaultOn": 115,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 63,
     "Maintainability": 16,
-    "Reliability": 44,
+    "Reliability": 45,
     "Bugs": 29
   },
   "categoryWeights": {
@@ -462,6 +462,23 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Split the destructive step into its own reviewed migration and stage it: stop writing the column in application code, deploy, verify nothing reads it, then drop it. Keep a restorable copy (a dated backup or a renamed table) until the drop is confirmed safe, and make sure the down migration can actually recreate what it removed."
+    },
+    {
+      "id": "migration-index-without-concurrently",
+      "title": "Index built on an existing table without CONCURRENTLY",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "text",
+      "tags": [
+        "availability",
+        "database",
+        "index",
+        "migration"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use `CREATE INDEX CONCURRENTLY` for an index on a table that already holds data. A plain `CREATE INDEX` blocks every write to the table until the build finishes — measured at 3,093 ms against 21 ms on a 600,000-row table. `CONCURRENTLY` cannot run inside a transaction block, so with Prisma it needs its own migration file, and it can leave an INVALID index behind if it fails, which is dropped and retried."
     },
     {
       "id": "migration-missing-index-on-foreign-key",

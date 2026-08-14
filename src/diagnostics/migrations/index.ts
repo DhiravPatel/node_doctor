@@ -8,11 +8,13 @@ import type { TextDiagnostic } from "../../core/text-scan.ts";
 import { migrationAddNotNullWithoutDefault } from "./migration-add-not-null-without-default.ts";
 import { migrationDestructiveWithoutGuard } from "./migration-destructive-without-guard.ts";
 import { migrationMissingIndexOnForeignKey } from "./migration-missing-index-on-foreign-key.ts";
+import { migrationIndexWithoutConcurrently } from "./migration-index-without-concurrently.ts";
 
 export const MIGRATION_DIAGNOSTICS: TextDiagnostic[] = [
   migrationAddNotNullWithoutDefault,
   migrationDestructiveWithoutGuard,
   migrationMissingIndexOnForeignKey,
+  migrationIndexWithoutConcurrently,
 ];
 
-export { migrationAddNotNullWithoutDefault, migrationDestructiveWithoutGuard, migrationMissingIndexOnForeignKey };
+export { migrationAddNotNullWithoutDefault, migrationDestructiveWithoutGuard, migrationMissingIndexOnForeignKey, migrationIndexWithoutConcurrently };
