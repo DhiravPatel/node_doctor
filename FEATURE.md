@@ -395,6 +395,18 @@ Two guards matter more than the trigger. **A table created in the SAME migration
 
 Validated against 593 real migration files from cal.com: **20 findings**, and the guard proved itself inside a single file — `create_internal_notes_tables` creates `BookingInternalNote` and indexes both it and the pre-existing `Impersonations`, and only the latter was reported.
 
+**Three more migration lock hazards shipped**, each measured against a live Postgres 14 rather than quoted. Five candidates were evaluated; two were rejected, and the measurements are why.
+
+- **`migration-foreign-key-without-not-valid`** — validating a new foreign key inline holds a write-blocking lock on **both** tables for the whole scan. The parent is the part nobody expects: measured on a 600,000-row child against a 200,000-row parent, an `INSERT` into the *referenced* table — which the statement never names as its target — waited **2,065 ms**. `NOT VALID` makes the `ADD CONSTRAINT` catalog-only, and the later `VALIDATE CONSTRAINT` does the same scan under a lock that does not block writes.
+- **`migration-volatile-column-default`** — and here the received wisdom is simply **wrong**. "Adding a column with a default rewrites the table" has been false since Postgres 11, and measurement shows the fast path is *wider* than "constant": it covers every non-VOLATILE default. Measured on 400,000 rows: `DEFAULT 5` did not rewrite and took **18 ms**; `DEFAULT gen_random_uuid()` rewrote and took **244 ms**. So the rule flags only genuinely volatile defaults, and `now()`/`CURRENT_TIMESTAMP` are deliberately absent — they are STABLE, take the fast path, and are the commonest default of all.
+- **`migration-column-type-rewrite`** — the heaviest lock in the set, `ACCESS EXCLUSIVE`, which blocks **reads** as well as writes. Measured on 2.4M rows: the lock was held **2,464 ms**, a concurrent indexed `SELECT` waited **2,400 ms** against a 2.08 ms baseline, and the one statement emitted **401 MB** of WAL.
+
+**The type rule's target list is the whole rule, and it is short because the file cannot see the current type.** The decisive experiment: two 400,000-row tables given the byte-identical statement `ALTER COLUMN c TYPE varchar(100)` — free at 19 ms from `varchar(50)`, a rewrite at 144 ms from `text`. Same bytes, opposite cost. So every target carrying a modifier is excluded, which means varchar widening — the commonest `ALTER COLUMN TYPE` in real migrations — is never reported. What remains are modifier-free targets where the only free source is the type itself, minus three near-misses with measured free paths in: `integer` (from `oid`), `inet` (from `cidr`), and `timestamptz` (from `timestamp`, but only under a UTC session — decided by a runtime GUC that is in no file).
+
+**Rejected, with numbers.** `ADD CONSTRAINT … CHECK` and `SET NOT NULL` both take ACCESS EXCLUSIVE and scan the table, and both have real `NOT VALID`-style escape hatches — but `SET NOT NULL` overlaps the shipped `migration-add-not-null-without-default`, and neither cleared the bar once the overlap and the guard requirements were accounted for.
+
+Validated against 593 real migration files from cal.com: **20 findings**, all from the foreign-key rule, spot-checked against the SQL — `BookingReference` referencing `Booking` in a migration that creates neither.
+
 ## 16. Caching Analysis
 **Status: Planned**
 

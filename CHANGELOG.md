@@ -98,6 +98,52 @@ come from a namespaced factory in a never-reassigned `const`.
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
 
+### Three more migration lock hazards, measured (§15)
+
+Five candidates were evaluated against a live Postgres 14; three shipped and two
+were rejected, and in every case the measurement is the reason.
+
+- **`migration-foreign-key-without-not-valid`** (Reliability, warn) —
+  validating a new foreign key inline holds a write-blocking lock on **both**
+  tables for the whole scan. The parent is the part nobody expects: measured on
+  a 600,000-row child against a 200,000-row parent, an `INSERT` into the
+  *referenced* table — which the statement never names as its target — waited
+  **2,065 ms**.
+
+- **`migration-volatile-column-default`** (Reliability, warn) — and here the
+  received wisdom is **wrong**. "Adding a column with a default rewrites the
+  table" has been false since Postgres 11, and the fast path turns out to be
+  wider than "constant": it covers every non-VOLATILE default. Measured on
+  400,000 rows, `DEFAULT 5` did not rewrite and took **18 ms**, while
+  `DEFAULT gen_random_uuid()` rewrote and took **244 ms**. The rule therefore
+  flags only genuinely volatile defaults, and `now()`/`CURRENT_TIMESTAMP` are
+  deliberately absent — they are STABLE, take the fast path, and are the
+  commonest default of all.
+
+- **`migration-column-type-rewrite`** (Reliability, warn) — the heaviest lock in
+  the set: `ACCESS EXCLUSIVE`, which blocks **reads** as well as writes.
+  Measured on 2.4M rows, the lock was held **2,464 ms**, a concurrent indexed
+  `SELECT` waited **2,400 ms** against a 2.08 ms baseline, and the statement
+  emitted **401 MB** of WAL.
+
+**The type rule's target list is short because the file cannot see the current
+type.** The decisive experiment: two 400,000-row tables given the byte-identical
+statement `ALTER COLUMN c TYPE varchar(100)` — free at 19 ms from `varchar(50)`,
+a rewrite at 144 ms from `text`. Same bytes, opposite cost. Every target carrying
+a modifier is therefore excluded, so varchar widening — the commonest such
+statement in real migrations — is never reported. What remains are modifier-free
+targets, minus three near-misses with measured free paths in: `integer` (from
+`oid`), `inet` (from `cidr`), and `timestamptz` (from `timestamp` under a UTC
+session, a runtime GUC that is in no file).
+
+The Postgres-evidence and created-in-this-migration guards were **extracted**
+into the migration context rather than copied a fourth time; the shipped
+`migration-index-without-concurrently` was moved onto them and its tests pass
+unchanged.
+
+Validated against 593 real migration files from cal.com: 20 findings, all from
+the foreign-key rule, spot-checked against the SQL.
+
 ### Index migrations that lock the table (§15)
 
 - **`migration-index-without-concurrently`** (Reliability, warn) — a Postgres

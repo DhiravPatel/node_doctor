@@ -1,13 +1,13 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 166,
-  "defaultOn": 115,
+  "total": 169,
+  "defaultOn": 118,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 63,
     "Maintainability": 16,
-    "Reliability": 45,
+    "Reliability": 48,
     "Bugs": 29
   },
   "categoryWeights": {
@@ -448,6 +448,22 @@
       "recommendation": "Split it into three deploys: add the column nullable (or with a cheap constant DEFAULT), backfill in bounded batches, then add the NOT NULL constraint — on Postgres 12+ as a NOT VALID CHECK followed by VALIDATE CONSTRAINT so no long ACCESS EXCLUSIVE lock is taken."
     },
     {
+      "id": "migration-column-type-rewrite",
+      "title": "Column type change that rewrites the table under an exclusive lock",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "text",
+      "tags": [
+        "availability",
+        "database",
+        "migration"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "There is no concurrent form of this statement. Add a new column of the target type, backfill it in batches, dual-write, then swap — the same multi-deploy split the NOT NULL rule recommends. An in-place change takes ACCESS EXCLUSIVE, which blocks reads as well as writes, for the whole rewrite: measured at 2,464 ms on a 2.4M-row table, with 401 MB of WAL from the one statement."
+    },
+    {
       "id": "migration-destructive-without-guard",
       "title": "Destructive migration outside a rollback path",
       "category": "Reliability",
@@ -462,6 +478,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Split the destructive step into its own reviewed migration and stage it: stop writing the column in application code, deploy, verify nothing reads it, then drop it. Keep a restorable copy (a dated backup or a renamed table) until the drop is confirmed safe, and make sure the down migration can actually recreate what it removed."
+    },
+    {
+      "id": "migration-foreign-key-without-not-valid",
+      "title": "Foreign key added to an existing table without NOT VALID",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "text",
+      "tags": [
+        "availability",
+        "database",
+        "migration"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Add the constraint `NOT VALID` first — a catalog-only change — then run `ALTER TABLE … VALIDATE CONSTRAINT …` in a later migration, where the same scan happens under a lock that does not block writes. Validating inline blocks writes to BOTH tables for the length of the scan: measured at 2,065 ms on the referenced parent, which the statement never names."
     },
     {
       "id": "migration-index-without-concurrently",
@@ -495,6 +527,22 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Create an index on the referencing column in the same migration (`CREATE INDEX CONCURRENTLY … ON child (parent_id)` on Postgres, so no long write lock is taken). If the index already exists in another migration or is declared on the ORM model, no change is needed."
+    },
+    {
+      "id": "migration-volatile-column-default",
+      "title": "Column added with a volatile default, rewriting the table",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "text",
+      "tags": [
+        "availability",
+        "database",
+        "migration"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Add the column with no default, backfill in batches, then set the default for new rows. A VOLATILE default is evaluated per row, so Postgres rewrites the whole table under a lock that blocks reads as well as writes — measured at 244 ms on 400,000 rows, against 18 ms for a non-volatile default, which takes the Postgres 11 fast path and does not rewrite at all."
     },
     {
       "id": "nest-missing-validation-pipe",
