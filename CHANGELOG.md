@@ -11,6 +11,107 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Dependent writes with no transaction (§14)
+
+`no-untransacted-dependent-writes` — a second write that uses what the first
+returned, with nothing holding the two together.
+
+Outside a transaction every statement is its own committed transaction, so if the
+second write fails the first is already durable and nothing rolls it back. Shown
+at the driver level rather than asserted — the same two writes, run with and
+without `BEGIN`:
+
+```
+write2 threw: CHECK constraint failed
+orders rows after failure (NO tx):   1     ← the first write is COMMITTED
+orders rows after failure (WITH tx): 0
+```
+
+What survives is a row the rest of the system believes cannot exist: a workflow
+with no steps, a booking with no meeting token, a credit expense logged against a
+balance that was never debited. Nothing errors at the time and the request has
+already returned, so it surfaces later as a NOT NULL violation or a number that
+does not add up, arbitrarily far from the cause.
+
+**This rule was refuted once before it shipped, and the refutation is what it is
+built from.** Two earlier framings were thrown out for being defended by naming
+accident rather than by proof:
+
+- *Receiver name hints do not prove a database.* The repo's own
+  `DB_RECEIVER_HINTS` matches `client`, `conn`, `repo` and `repository`, and so
+  returns true for all 20 SDK clients tested — Stripe, Twilio, S3, Elasticsearch —
+  plus a real `retellRepository.createLLM(…)` → `createAgent(…)` pair and jsforce's
+  `conn.sobject(Lead).create(…)` → `.update(…)`, both correct code one rename from
+  firing. The rule now requires positive proof of Prisma: a `prisma`-prefixed path
+  segment, a `new PrismaClient()` binding, or an import from a Prisma module.
+- *`await` does not prove a write happened.* TypeORM's `repository.create()` builds
+  an entity in memory and writes nothing — verified, 0 rows — and awaiting a
+  non-promise is legal. The write set is Prisma's, enumerated explicitly, and is
+  deliberately not `QUERY_METHODS`, which contains `findMany`, `count` and
+  `aggregate`.
+
+The dependence test is what makes a pair provably one unit of work: **W2 must
+reference the value W1 returned.** Every true positive has that shape. Two writes
+sharing no value are not shown to be related, and are silent.
+
+Then, each from a case the refutation surfaced: a **guarded** second write is a
+conditional refinement whose failure leaves a usable record; a **destructive**
+second write is a compensating rollback; the **same model twice** is a status
+transition; a `tx`/`trx`/`queryRunner` segment or an explicit
+`transaction`/`session` option means a transaction is already in play; and
+test, seed and fixture trees were the largest noise class at ~246 hits.
+
+New capability token `ambient-transaction` (`cls-hooked`, `typeorm-transactional`,
+`nestjs-cls`) disables the rule outright. Those packages open a transaction in
+AsyncLocalStorage, so a write can be inside one with no evidence at the call site
+at all — lexical analysis is unsound there, and silence is the only correct
+response. None appeared in the corpus; the unsoundness is real regardless.
+
+Measured: **3 findings across 2,106 Prisma producing-write call sites in 595
+files — 0.14%**, every one hand-verified in cal.com. Prisma-only for now; the
+Mongo equivalent is deliberately withheld because a `this.someCollection` field
+cannot yet be proven to be a database, and an unprovable receiver is what the
+refutation was about.
+
+### Caught errors returned with a 2xx status (§9)
+
+`no-error-response-with-success-status` — the handler threw, and the response says
+everything is fine.
+
+Every layer that reads the status instead of the body then agrees. `fetch` sets
+`res.ok === true` and axios resolves rather than rejects, so the client's error
+branch is dead code. APM, load balancers and uptime checks record a success, so the
+endpoint reports a 100% success rate while it is failing and no alert ever fires —
+the outage is invisible in exactly the dashboard someone would look at. Retry and
+circuit-breaker middleware treat 200 as terminal.
+
+The bug is self-concealing, which is why it survives: the body carries
+`status: false` and a message, so it reads correctly in review and in manual
+testing. Only the machinery that reads status codes is misled, and that machinery
+is silent by nature.
+
+Two things must both be true, and either alone is not enough. **The status must be
+provably 2xx** — a literal `status(200)`/`code(2xx)`, or none at all, where Express,
+Adonis and Fastify all default to 200; a computed `status(err.statusCode)` is
+unknown, and unknown is silence. **The payload must evidence failure** — carrying
+the caught error, an `error`/`errors` key that actually holds one, or an explicit
+`success`/`status`/`ok: false`. The second condition is what keeps a legitimate
+fallback silent: a catch that recovers and returns real data on 200 is correct, and
+it is correct precisely because its payload makes no failure claim. An `error: null`
+kept only to stabilise the response shape is not a failure claim either.
+
+Three exclusions, each from something the sweep turned up rather than something
+imagined: GraphQL's `{ data, errors }` envelope, where HTTP 200 is what the spec
+requires; webhook and OAuth-callback handlers, where a 2xx is a deliberate
+acknowledgement that stops the provider retrying; and string or template bodies,
+which are pages for a browser to render rather than API error envelopes — the corpus
+had an OAuth popup returning an HTML error page to `window.opener`.
+
+Measured on a 220,042-file sweep: **138 findings across 32 files, and zero in
+`node_modules`** — the profile of a team convention rather than a library mistake.
+Sampled by hand, the pattern was consistent: the handler logs the error, fires an
+SNS alert about it, and then returns 200.
+
 ### Fix-regression detection — boomerang bugs (§161)
 
 - **`node-doctor ratchet check` now reports REGRESSIONS.** The ratchet's committed
@@ -97,6 +198,103 @@ come from a namespaced factory in a never-reassigned `const`.
   on the binding in any order, is attached inline in the chain, when a
   `pipeline(...)` wrapper handles teardown, on a dynamic event name, or when the
   stream escapes into a helper that could attach the handler.
+
+### Three more migration lock hazards, measured (§15)
+
+Five candidates were evaluated against a live Postgres 14; three shipped and two
+were rejected, and in every case the measurement is the reason.
+
+- **`migration-foreign-key-without-not-valid`** (Reliability, warn) —
+  validating a new foreign key inline holds a write-blocking lock on **both**
+  tables for the whole scan. The parent is the part nobody expects: measured on
+  a 600,000-row child against a 200,000-row parent, an `INSERT` into the
+  *referenced* table — which the statement never names as its target — waited
+  **2,065 ms**.
+
+- **`migration-volatile-column-default`** (Reliability, warn) — and here the
+  received wisdom is **wrong**. "Adding a column with a default rewrites the
+  table" has been false since Postgres 11, and the fast path turns out to be
+  wider than "constant": it covers every non-VOLATILE default. Measured on
+  400,000 rows, `DEFAULT 5` did not rewrite and took **18 ms**, while
+  `DEFAULT gen_random_uuid()` rewrote and took **244 ms**. The rule therefore
+  flags only genuinely volatile defaults, and `now()`/`CURRENT_TIMESTAMP` are
+  deliberately absent — they are STABLE, take the fast path, and are the
+  commonest default of all.
+
+- **`migration-column-type-rewrite`** (Reliability, warn) — the heaviest lock in
+  the set: `ACCESS EXCLUSIVE`, which blocks **reads** as well as writes.
+  Measured on 2.4M rows, the lock was held **2,464 ms**, a concurrent indexed
+  `SELECT` waited **2,400 ms** against a 2.08 ms baseline, and the statement
+  emitted **401 MB** of WAL.
+
+**The type rule's target list is short because the file cannot see the current
+type.** The decisive experiment: two 400,000-row tables given the byte-identical
+statement `ALTER COLUMN c TYPE varchar(100)` — free at 19 ms from `varchar(50)`,
+a rewrite at 144 ms from `text`. Same bytes, opposite cost. Every target carrying
+a modifier is therefore excluded, so varchar widening — the commonest such
+statement in real migrations — is never reported. What remains are modifier-free
+targets, minus three near-misses with measured free paths in: `integer` (from
+`oid`), `inet` (from `cidr`), and `timestamptz` (from `timestamp` under a UTC
+session, a runtime GUC that is in no file).
+
+The Postgres-evidence and created-in-this-migration guards were **extracted**
+into the migration context rather than copied a fourth time; the shipped
+`migration-index-without-concurrently` was moved onto them and its tests pass
+unchanged.
+
+Validated against 593 real migration files from cal.com: 20 findings, all from
+the foreign-key rule, spot-checked against the SQL.
+
+### Index migrations that lock the table (§15)
+
+- **`migration-index-without-concurrently`** (Reliability, warn) — a Postgres
+  `CREATE INDEX` on a table that already exists, without `CONCURRENTLY`. The
+  plain form holds a lock that blocks **every write** to the table until the
+  build finishes.
+  Measured on Postgres 14 against a 600,000-row table rather than quoted from
+  the manual: a concurrent `INSERT` waited **3,093 ms** against a plain
+  `CREATE INDEX` and **21 ms** against `CONCURRENTLY`. A factor of 147, and it
+  scales with the table rather than with the migration. The migration succeeds
+  either way, so nothing in CI or the deploy log marks it — the symptom is a
+  write stall at deploy time.
+
+Two guards matter more than the trigger. **A table created in the SAME migration
+is never reported**: it has no rows to scan and no traffic to block, and
+`CONCURRENTLY` would only forbid running it in a transaction. And **Postgres must
+be proven from the file** — `CONCURRENTLY` is Postgres-only syntax, so on MySQL
+or SQLite the advice is unfollowable; without positive in-file evidence of the
+dialect the rule says nothing.
+
+Validated against 593 real migration files from cal.com: 20 findings, with the
+guard proving itself inside a single file — `create_internal_notes_tables`
+creates `BookingInternalNote` and indexes both it and the pre-existing
+`Impersonations`, and only the latter was reported.
+
+### Missing indexes — `node-doctor schema-drift` (§14)
+
+- **Filters on a column with no declared index** are now a section of the
+  schema-drift report. Both halves were already in the repository — the schema
+  says what is indexed, the query says what it filters on — so this needed no
+  new infrastructure, only for the Prisma parser to stop discarding index
+  metadata.
+
+**The leftmost-prefix rule is the whole precision story.** `indexedFields`
+records field-level `@id`/`@unique` plus the **leading** field of each
+`@@index`/`@@unique`/`@@id`, and nothing else. A composite on `(tenantId,
+status)` serves a filter on `tenantId` and does not serve one on `status` alone.
+Recording every member of the list would have silently licensed exactly the scan
+this exists to find — and the real-world run proved it matters, reporting
+`PrReview.status`, which sits inside an index.
+
+**It reports facts, not defects.** Nothing in either file says how many rows a
+table has, and on a small table a sequential scan is correct and cheaper than an
+index, so the section is framed as "a fact, not a defect" in the same way
+`supply-chain` presents copyleft. A relation key is a join rather than a
+single-column filter and is never reported; `select`/`orderBy` are not filters.
+
+Validated against a real Prisma project rather than only fixtures, since none of
+the usual corpus uses Prisma: 8 models over 49 files produced 3 findings, each
+confirmed against the schema by hand.
 
 ### Conflicting dependency declarations (§19)
 

@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 165,
-  "defaultOn": 114,
+  "total": 171,
+  "defaultOn": 120,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 63,
     "Maintainability": 16,
-    "Reliability": 44,
-    "Bugs": 29
+    "Reliability": 49,
+    "Bugs": 30
   },
   "categoryWeights": {
     "Security": 2,
@@ -448,6 +448,22 @@
       "recommendation": "Split it into three deploys: add the column nullable (or with a cheap constant DEFAULT), backfill in bounded batches, then add the NOT NULL constraint — on Postgres 12+ as a NOT VALID CHECK followed by VALIDATE CONSTRAINT so no long ACCESS EXCLUSIVE lock is taken."
     },
     {
+      "id": "migration-column-type-rewrite",
+      "title": "Column type change that rewrites the table under an exclusive lock",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "text",
+      "tags": [
+        "availability",
+        "database",
+        "migration"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "There is no concurrent form of this statement. Add a new column of the target type, backfill it in batches, dual-write, then swap — the same multi-deploy split the NOT NULL rule recommends. An in-place change takes ACCESS EXCLUSIVE, which blocks reads as well as writes, for the whole rewrite: measured at 2,464 ms on a 2.4M-row table, with 401 MB of WAL from the one statement."
+    },
+    {
       "id": "migration-destructive-without-guard",
       "title": "Destructive migration outside a rollback path",
       "category": "Reliability",
@@ -464,6 +480,39 @@
       "recommendation": "Split the destructive step into its own reviewed migration and stage it: stop writing the column in application code, deploy, verify nothing reads it, then drop it. Keep a restorable copy (a dated backup or a renamed table) until the drop is confirmed safe, and make sure the down migration can actually recreate what it removed."
     },
     {
+      "id": "migration-foreign-key-without-not-valid",
+      "title": "Foreign key added to an existing table without NOT VALID",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "text",
+      "tags": [
+        "availability",
+        "database",
+        "migration"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Add the constraint `NOT VALID` first — a catalog-only change — then run `ALTER TABLE … VALIDATE CONSTRAINT …` in a later migration, where the same scan happens under a lock that does not block writes. Validating inline blocks writes to BOTH tables for the length of the scan: measured at 2,065 ms on the referenced parent, which the statement never names."
+    },
+    {
+      "id": "migration-index-without-concurrently",
+      "title": "Index built on an existing table without CONCURRENTLY",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "text",
+      "tags": [
+        "availability",
+        "database",
+        "index",
+        "migration"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use `CREATE INDEX CONCURRENTLY` for an index on a table that already holds data. A plain `CREATE INDEX` blocks every write to the table until the build finishes — measured at 3,093 ms against 21 ms on a 600,000-row table. `CONCURRENTLY` cannot run inside a transaction block, so with Prisma it needs its own migration file, and it can leave an INVALID index behind if it fails, which is dropped and retried."
+    },
+    {
       "id": "migration-missing-index-on-foreign-key",
       "title": "Foreign key column has no index in this migration",
       "category": "Performance",
@@ -478,6 +527,22 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Create an index on the referencing column in the same migration (`CREATE INDEX CONCURRENTLY … ON child (parent_id)` on Postgres, so no long write lock is taken). If the index already exists in another migration or is declared on the ORM model, no change is needed."
+    },
+    {
+      "id": "migration-volatile-column-default",
+      "title": "Column added with a volatile default, rewriting the table",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "text",
+      "tags": [
+        "availability",
+        "database",
+        "migration"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Add the column with no default, backfill in batches, then set the default for new rows. A VOLATILE default is evaluated per row, so Postgres rewrites the whole table under a lock that blocks reads as well as writes — measured at 244 ms on 400,000 rows, against 18 ms for a non-volatile default, which takes the Postgres 11 fast path and does not rewrite at all."
     },
     {
       "id": "nest-missing-validation-pipe",
@@ -885,6 +950,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Log the error server-side and return a generic message (`res.status(500).json({ error: 'Internal error' })`). Never send `err.stack` or the raw error object — they leak paths, versions, and internal details."
+    },
+    {
+      "id": "no-error-response-with-success-status",
+      "title": "Caught error returned to the client with a 2xx status",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "error-handling",
+        "http",
+        "observability"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Return a status that matches what happened — 500 for an unexpected failure, 4xx where the caller can fix it. A 2xx makes `res.ok` true, resolves axios instead of rejecting, and records a success in APM and uptime checks, so the endpoint reports a 100% success rate while it is failing and no alert fires. The JSON body saying `success: false` is read by nothing that routes, retries, or alerts."
     },
     {
       "id": "no-eval-with-input",
@@ -2302,6 +2383,27 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Give every `skip`/`OFFSET` query a stable, unique sort key (e.g. `orderBy: { id: 'asc' }` or `ORDER BY id`), or switch to keyset/cursor pagination. Without a deterministic order, rows inserted or deleted between page fetches shift the window, so pages silently drop and duplicate records."
+    },
+    {
+      "id": "no-untransacted-dependent-writes",
+      "title": "Dependent writes with no transaction, so a failure leaves half of it committed",
+      "category": "Reliability",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "data-integrity",
+        "database",
+        "prisma",
+        "transaction"
+      ],
+      "requires": [
+        "prisma"
+      ],
+      "disabledWhen": [
+        "ambient-transaction"
+      ],
+      "optIn": false,
+      "recommendation": "Wrap both writes in `prisma.$transaction(async (tx) => { … })` and issue them on `tx`. Outside a transaction each statement commits on its own, so if the second write fails the first is already durable and nothing undoes it — leaving a record the rest of the system believes cannot exist (a parent with no child, a balance moved with no ledger row). Nothing errors at the time; it surfaces later, far from the cause."
     },
     {
       "id": "no-url-as-filesystem-path",
