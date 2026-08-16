@@ -944,26 +944,50 @@ export const renderSupplyChain = (
     lines.push(p.green("  ✔ No installed package runs a script at install time."));
     lines.push("");
   } else {
-    const direct = report.installScripts.filter((s) => s.direct);
-    const transitive = report.installScripts.filter((s) => !s.direct);
-    lines.push(
-      `  ${p.bold(`${report.summary.withInstallScripts} package(s) run code when you install`)}  ${p.dim(
-        `${direct.length} direct · ${transitive.length} transitive`,
-      )}`,
-    );
-    lines.push(
-      p.dim("      Each runs on every developer machine and CI runner, before any of your code does."),
-    );
-    lines.push("");
-    for (const s of [...direct, ...transitive].slice(0, 25)) {
-      const tag = s.direct ? p.yellow("direct") : p.dim("transitive");
-      lines.push(`      ${p.cyan(`${s.package}@${s.version}`)}  ${p.dim(s.hook)}  ${tag}`);
-      lines.push(`          ${p.dim(s.command)}`);
+    // Only hooks that ACTUALLY RUN are counted. `prepare`/`prepublish` on a
+    // registry-resolved package never fire — measured — and counting them
+    // overstated this section by roughly 28× across the projects it was checked
+    // against, burying the few packages that do run code.
+    const executing = report.installScripts.filter((s) => s.executes);
+    const dormant = report.installScripts.filter((s) => !s.executes);
+
+    if (executing.length === 0) {
+      lines.push(p.green("  ✔ No installed package runs a script at install time."));
+      lines.push(
+        p.dim(
+          `      ${dormant.length} package(s) declare a \`prepare\`/\`prepublish\` hook, which npm does not run for a registry install.`,
+        ),
+      );
+      lines.push("");
+    } else {
+      const direct = executing.filter((s) => s.direct);
+      const transitive = executing.filter((s) => !s.direct);
+      lines.push(
+        `  ${p.bold(`${report.summary.withExecutingInstallScripts} package(s) run code when you install`)}  ${p.dim(
+          `${direct.length} direct · ${transitive.length} transitive`,
+        )}`,
+      );
+      lines.push(
+        p.dim("      Each runs on every developer machine and CI runner, before any of your code does."),
+      );
+      lines.push("");
+      for (const s of [...direct, ...transitive].slice(0, 25)) {
+        const tag = s.direct ? p.yellow("direct") : p.dim("transitive");
+        lines.push(`      ${p.cyan(`${s.package}@${s.version}`)}  ${p.dim(s.hook)}  ${tag}`);
+        lines.push(`          ${p.dim(s.command)}`);
+      }
+      if (executing.length > 25) {
+        lines.push(p.dim(`      … ${executing.length - 25} more`));
+      }
+      if (dormant.length > 0) {
+        lines.push(
+          p.dim(
+            `      ${dormant.length} further package(s) declare a \`prepare\`/\`prepublish\` hook, which npm does not run for a registry install.`,
+          ),
+        );
+      }
+      lines.push("");
     }
-    if (report.installScripts.length > 25) {
-      lines.push(p.dim(`      … ${report.installScripts.length - 25} more`));
-    }
-    lines.push("");
   }
 
   if (report.sourceCheck !== "checked") {

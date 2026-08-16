@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 171,
-  "defaultOn": 120,
+  "total": 173,
+  "defaultOn": 122,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
-    "Security": 63,
+    "Security": 64,
     "Maintainability": 16,
     "Reliability": 49,
-    "Bugs": 30
+    "Bugs": 31
   },
   "categoryWeights": {
     "Security": 2,
@@ -109,6 +109,22 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Flatten the nesting: return early / use guard clauses, extract inner blocks into helper functions, or invert conditions. Deeply nested branches are hard to follow and test."
+    },
+    {
+      "id": "dockerfile-copies-dotenv-into-image",
+      "title": "Dotenv file copied into an image layer",
+      "category": "Security",
+      "severity": "error",
+      "scope": "text",
+      "tags": [
+        "container",
+        "docker",
+        "secrets"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Do not put the file in the image. Supply the values as runtime environment variables (compose `environment:`, a k8s Secret, your platform's config), or mount them at build time with `RUN --mount=type=secret,id=env …`, which never lands in a layer. A later `RUN rm .env` does not help — the earlier layer still contains the file, and `docker history` will show it. Rotate anything an already-built image carries."
     },
     {
       "id": "dockerfile-mutable-base-tag",
@@ -1254,6 +1270,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Treat model output as untrusted. Never eval/exec it or splice it into SQL, HTML, or a URL. Parse structured output and dispatch through an explicit allowlist, parameterize SQL, escape before rendering, and validate a URL's host against an allowlist."
+    },
+    {
+      "id": "no-local-date-as-iso-datestring",
+      "title": "Local-midnight Date rendered as a UTC calendar date, giving the previous day",
+      "category": "Bugs",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "date",
+        "timezone"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Build the instant in UTC — `new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10)` — or format the local date locally without going through UTC. `new Date(y, m, d)` is midnight LOCAL, and `toISOString()` renders UTC, so east of Greenwich the truncated date is the previous day. The `new Date(y, m + 1, 0)` \"last day of the month\" idiom is the costly one: the bound it produces silently excludes the last day."
     },
     {
       "id": "no-lost-async-context",

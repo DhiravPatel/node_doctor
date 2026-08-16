@@ -276,3 +276,122 @@ describe("supply-chain — CLI recognition", () => {
     assert.equal(parseArgs(["install-scripts"]).command, "supply-chain");
   });
 });
+
+/**
+ * Which declared hooks ACTUALLY RUN.
+ *
+ * Measured by packing a manifest declaring all five hooks and installing it both
+ * ways: a tarball install runs `preinstall`/`install`/`postinstall`; a directory
+ * (git-style) install also runs `prepare`; `--ignore-scripts` runs nothing.
+ *
+ * This is not a detail. Across 14 real projects, 705 of 730 declared hooks were
+ * `prepare`/`prepublish` on registry-resolved packages and never execute,
+ * against 25 that do — one project declared 178 and executes 3. Counting the
+ * dormant ones buries the handful that matter.
+ */
+describe("install scripts — declared vs actually executed", () => {
+  test("preinstall, install and postinstall execute", async () => {
+    await withProject(
+      {
+        manifest: { dependencies: { a: "^1.0.0", b: "^1.0.0", c: "^1.0.0" } },
+        installed: {
+          a: { scripts: { preinstall: "node a.js" } },
+          b: { scripts: { install: "node-gyp rebuild" } },
+          c: { scripts: { postinstall: "node install.js" } },
+        },
+      },
+      (report) => {
+        assert.equal(report.installScripts.length, 3);
+        assert.ok(report.installScripts.every((s) => s.executes));
+        assert.equal(report.summary.withExecutingInstallScripts, 3);
+      },
+    );
+  });
+
+  test("`prepare` on a registry-resolved package does NOT execute", async () => {
+    await withProject(
+      {
+        manifest: { dependencies: { lodash: "^4.0.0" } },
+        installed: { lodash: { scripts: { prepare: "npm run build" } } },
+      },
+      (report) => {
+        // Still reported — "declares a prepare hook" is worth seeing …
+        assert.equal(report.installScripts.length, 1);
+        // … but it is not code that runs.
+        assert.equal(report.installScripts[0]!.executes, false);
+        assert.equal(report.summary.withExecutingInstallScripts, 0);
+      },
+    );
+  });
+
+  test("`prepublish` never executes on install", async () => {
+    await withProject(
+      {
+        manifest: { dependencies: { qrcode: "^1.0.0" } },
+        installed: { qrcode: { scripts: { prepublish: "npm run build" } } },
+      },
+      (report) => {
+        assert.equal(report.installScripts[0]!.executes, false);
+        assert.equal(report.summary.withExecutingInstallScripts, 0);
+      },
+    );
+  });
+
+  test("`prepare` DOES execute when the package comes from git", async () => {
+    await withProject(
+      {
+        manifest: { dependencies: { tool: "github:acme/tool" } },
+        lock: {
+          name: "app",
+          lockfileVersion: 3,
+          packages: {
+            "node_modules/tool": { version: "1.0.0", resolved: "git+ssh://git@github.com/acme/tool.git#abc123" },
+          },
+        },
+        installed: { tool: { scripts: { prepare: "npm run build" } } },
+      },
+      (report) => {
+        assert.equal(report.installScripts[0]!.executes, true);
+        assert.equal(report.summary.withExecutingInstallScripts, 1);
+      },
+    );
+  });
+
+  test("with no lockfile the source is unknown, and unknown does not execute", async () => {
+    await withProject(
+      {
+        manifest: { dependencies: { tool: "^1.0.0" } },
+        installed: { tool: { scripts: { prepare: "npm run build" } } },
+      },
+      (report) => {
+        assert.equal(report.sourceCheck, "no-lockfile");
+        // The registry is the overwhelmingly common case, and overstating is the
+        // failure mode this distinction exists to fix.
+        assert.equal(report.installScripts[0]!.executes, false);
+      },
+    );
+  });
+
+  test("a mixed tree counts only what runs", async () => {
+    await withProject(
+      {
+        manifest: { dependencies: { esbuild: "^0.25.0" } },
+        installed: {
+          esbuild: { scripts: { postinstall: "node install.js" } },
+          luxon: { scripts: { prepare: "husky install" } },
+          eslintrc: { scripts: { prepare: "npm run build" } },
+        },
+      },
+      (report) => {
+        assert.equal(report.installScripts.length, 3, "all three are still reported");
+        assert.equal(report.summary.withInstallScripts, 3);
+        assert.equal(report.summary.withExecutingInstallScripts, 1, "only esbuild actually runs");
+        const executing = report.installScripts.filter((s) => s.executes);
+        assert.deepEqual(
+          executing.map((s) => s.package),
+          ["esbuild"],
+        );
+      },
+    );
+  });
+});

@@ -8,13 +8,15 @@
  */
 
 import { readFile, access } from "node:fs/promises";
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
+import fg from "fast-glob";
 import type { Diagnostic } from "./types.ts";
 
 export interface PackageManifest {
   name?: string;
   type?: string;
   engines?: { node?: string };
+  workspaces?: string[] | { packages?: string[] };
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
@@ -180,6 +182,119 @@ const readManifest = async (rootDirectory: string): Promise<PackageManifest | nu
 };
 
 /** Discover a project's name and capabilities from disk. */
+/** Workspace globs declared by a manifest, plus pnpm's separate file. */
+const workspaceGlobs = async (rootDirectory: string, pkg: PackageManifest | null): Promise<string[]> => {
+  const declared = pkg?.workspaces;
+  const globs = Array.isArray(declared) ? [...declared] : [...(declared?.packages ?? [])];
+  try {
+    const yaml = await readFile(join(rootDirectory, "pnpm-workspace.yaml"), "utf8");
+    let inPackages = false;
+    for (const raw of yaml.split("\n")) {
+      const line = raw.replace(/#.*$/, "");
+      if (/^packages\s*:/.test(line)) {
+        inPackages = true;
+        continue;
+      }
+      if (!inPackages) continue;
+      const item = /^\s*-\s*(.+?)\s*$/.exec(line);
+      if (item) globs.push(item[1]!.replace(/^["']|["']$/g, ""));
+      else if (/^\S/.test(line)) inPackages = false;
+    }
+  } catch {
+    /* no pnpm workspace file */
+  }
+  return globs;
+};
+
+/**
+ * Dependencies declared by WORKSPACE MEMBERS, unioned in for capability detection.
+ *
+ * Without this, capability gating is wrong in exactly the repos where it matters
+ * most. In a monorepo the database client is usually declared by one member and
+ * re-exported to the rest: cal.com declares `@prisma/client` only in
+ * `packages/prisma/package.json`, and every consumer imports `@calcom/prisma`.
+ * The root manifest's only prisma-ish entry is `@prisma/internals`, which is not
+ * a client. So a manifest-only reading of that repo yields **no `prisma`
+ * capability at any level** — root, `packages/features`, `packages/trpc` and
+ * `apps/web` all report NO — and every Prisma-gated diagnostic silently never
+ * runs on one of the largest open-source Prisma codebases there is. That is
+ * indistinguishable, in the report, from a clean result.
+ *
+ * Members' own manifests are read but not recursed into, and the count is
+ * bounded: capability detection is meant to be cheap, and a token that needs
+ * more evidence than this should be found another way.
+ */
+const MAX_WORKSPACE_MANIFESTS = 400;
+
+/**
+ * How far up to look for the workspace root.
+ *
+ * Scanning a member directly (`node-doctor scan packages/features`) is the
+ * common case in CI, and that directory declares no `workspaces` of its own — so
+ * without climbing, the member sees only its own manifest and the whole problem
+ * above returns. Bounded, because an unbounded climb would read manifests
+ * outside the project entirely.
+ */
+const WORKSPACE_ROOT_SEARCH_DEPTH = 6;
+
+/** The nearest ancestor (or self) that declares workspaces, with its manifest. */
+const enclosingWorkspaceRoot = async (
+  rootDirectory: string,
+): Promise<{ directory: string; globs: string[] } | null> => {
+  let directory = rootDirectory;
+  for (let depth = 0; depth <= WORKSPACE_ROOT_SEARCH_DEPTH; depth++) {
+    const manifest = await readManifest(directory);
+    const globs = await workspaceGlobs(directory, manifest);
+    if (globs.length > 0) return { directory, globs };
+    const parent = dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+  return null;
+};
+
+const workspaceDependencies = async (
+  rootDirectory: string,
+  _pkg: PackageManifest | null,
+): Promise<Record<string, string>> => {
+  const found = await enclosingWorkspaceRoot(rootDirectory);
+  if (!found) return {};
+  const { directory: rootDir, globs } = found;
+  rootDirectory = rootDir;
+  if (globs.length === 0) return {};
+
+  let manifests: string[];
+  try {
+    manifests = await fg(
+      globs.map((glob) => `${glob.replace(/\/+$/, "")}/package.json`),
+      {
+        cwd: rootDirectory,
+        absolute: true,
+        onlyFiles: true,
+        ignore: ["**/node_modules/**"],
+        suppressErrors: true,
+      },
+    );
+  } catch {
+    return {};
+  }
+
+  const merged: Record<string, string> = {};
+  for (const path of manifests.slice(0, MAX_WORKSPACE_MANIFESTS)) {
+    let member: PackageManifest | null = null;
+    try {
+      member = JSON.parse(await readFile(path, "utf8")) as PackageManifest;
+    } catch {
+      continue;
+    }
+    for (const [name, range] of Object.entries(allDependencies(member))) {
+      // First declaration wins; the root's own entries override all of these.
+      if (!(name in merged)) merged[name] = range;
+    }
+  }
+  return merged;
+};
+
 export const discoverProject = async (rootDirectory: string): Promise<ProjectInfo> => {
   const pkg = await readManifest(rootDirectory);
   const [hasTsconfig, bunLock, bunfig, denoJson, denoJsonc, wrangler] = await Promise.all([
@@ -190,7 +305,16 @@ export const discoverProject = async (rootDirectory: string): Promise<ProjectInf
     exists(join(rootDirectory, "deno.jsonc")),
     exists(join(rootDirectory, "wrangler.toml")),
   ]);
-  const capabilities = detectCapabilities(pkg, {
+  // A monorepo's client libraries are declared by members, not by the root — see
+  // `workspaceDependencies`. The root's own entries take precedence, so a version
+  // pinned at the root still decides tokens like `express:5`.
+  const memberDeps = await workspaceDependencies(rootDirectory, pkg);
+  const effective: PackageManifest | null =
+    Object.keys(memberDeps).length === 0
+      ? pkg
+      : { ...(pkg ?? {}), dependencies: { ...memberDeps, ...(pkg?.dependencies ?? {}) } };
+
+  const capabilities = detectCapabilities(effective, {
     hasTsconfig,
     bun: bunLock || bunfig,
     deno: denoJson || denoJsonc,

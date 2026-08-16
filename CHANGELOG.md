@@ -11,6 +11,115 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### A local-midnight Date rendered as a UTC calendar date
+
+`no-local-date-as-iso-datestring` — `new Date(y, m, d)` builds an instant from
+**local** wall-clock components; `toISOString()` renders **UTC**. East of
+Greenwich local midnight is still the previous day in UTC, so truncating to
+`YYYY-MM-DD` yields yesterday.
+
+Measured on the month-range idiom under five timezones rather than argued:
+
+```
+UTC                  2026-08-01 .. 2026-08-31   ← intended
+America/Los_Angeles  2026-08-01 .. 2026-08-31
+Asia/Kolkata         2026-07-31 .. 2026-08-30   ← wrong
+Europe/Berlin        2026-07-31 .. 2026-08-30   ← wrong
+Australia/Sydney     2026-07-31 .. 2026-08-30   ← wrong
+```
+
+The upper bound is the expensive half. `new Date(y, m + 1, 0)` is the standard
+"last day of this month" idiom, and the emitted bound silently **excludes the
+last day** — a month-to-date report that drops its final day, every month, on
+every host with a positive offset. Nothing throws, the string is well-formed, and
+it is correct on a UTC or US-hosted CI box, which is why it survives review.
+
+Both halves are required to fire: a 2–3 argument construction (which pins 00:00
+local), and truncation to exactly the date part — `slice(0, 10)`,
+`substring(0, 10)`, `split("T")[0]`, `.shift()`, array-destructuring, or
+`replace(/T.*​/, "")`. The truncation is the proof of intent: the author threw the
+time away, so the value is a calendar date.
+
+Silent on `Date.UTC(…)` (414 uses in the corpus, the correct idiom sitting next
+door to a defect in the same codebase); on four-or-more-argument constructions,
+which pin end-of-day deliberately and are correct under a positive offset; on
+`new Date()` and parsed strings, which are deliberate UTC; and on relative shifts
+via `setDate`/`setMonth`/`setFullYear`, which preserve whatever offset the base
+had — 25 of those were flagged by an earlier pass, read, and the whole branch
+removed. The discrimination is fine-grained enough to fire on one line of a real
+file and stay silent on the next: `new Date(y - 5, m, d).toISOString()...` fires
+while `today.toISOString()...` two lines below does not.
+
+Severity `warn`, not `error`: on a host running `TZ=UTC` or a negative offset the
+string is right, and which host this runs on is not in the file.
+
+### A dotenv file copied into an image layer
+
+`dockerfile-copies-dotenv-into-image` — `COPY .env` puts live credentials into an
+immutable, distributable layer. `docker history`, `docker save` and any registry
+mirror hand them to anyone who can pull the image; a later `RUN rm` deletes the
+file in a *new* layer while the old one still carries it; and the values cannot
+be rotated without a rebuild.
+
+**The reason this needed its own rule is that nothing else can see it.** A `.env`
+is gitignored — that is what it is for — so every check that reasons about
+committed content passes cleanly, this project's own `no-committed-env-secret`
+included, since it is `committedFilesOnly`. The sibling
+`dockerfile-secret-in-build-stage` does not cover it either: that fires on an
+`ENV`/`ARG` whose *value* is key material, and a `COPY` carries no value in the
+Dockerfile at all. The Dockerfile is the only artifact where the leak is visible,
+and it is visible as a filename.
+
+Found at 17 of 224 `COPY`/`ADD` instructions across 35 corpus Dockerfiles,
+naming files that contain `OPENAI_API_KEY=sk-pro…`, `GOOGLE_CLIENT_SECRET=GOCSPX…`,
+`JWT_SECRET` and a ClickHouse password.
+
+The source basename must match a positive allowlist — `.env`, `.env.production`,
+`.env.prod|staging|stage|live|release` — so `.env.example`, `.env.template`,
+`.env.test` and `.env.local` are never matched, and an unseen `.env.whatever`
+stays quiet too. **Any stage counts, not just the final one:** restricting to the
+final stage would look tidier and miss three real leaks, where a builder copies
+the dotenv, a `RUN cp` launders the path, and the runner copies the directory —
+so no final-stage `COPY` ever names a dotenv. Templated sources (`${ENV_FILE}`)
+and globs (`COPY .env* ./`, `COPY . .`) are undecidable from the Dockerfile and
+stay silent.
+
+### Fixed: the install-script check counted hooks that never run (§69)
+
+`supply-chain` reported every declared `preinstall`/`install`/`postinstall`/
+`prepare`/`prepublish` hook as "code that runs when you install". Three of those
+five do not.
+
+Measured, by packing a manifest declaring all five hooks and installing it both
+ways rather than reading the docs:
+
+```
+tarball install (what a registry install is) → preinstall, install, postinstall
+directory install (git-style)                → preinstall, install, postinstall, prepare
+--ignore-scripts                             → nothing at all
+```
+
+npm does not run `prepare` or `prepublish` for a published tarball — those fire
+on publish, and on installs from git or a local directory. So a registry
+dependency declaring `prepare: "npm run build"` executes nothing on your machine.
+
+The scale of the overstatement is why this matters rather than being a footnote.
+Across 14 real projects, **705 of 730 declared hooks were dormant against 25 that
+actually execute** — one project reported 178 and executes 3. The section that
+was supposed to show you which third-party code runs before your own was, in
+practice, 28× noise, and the packages that genuinely run code — `bcrypt`
+building natively, `esbuild` fetching a binary, `@scarf/scarf` phoning home —
+were buried in a list nobody would read to the end.
+
+`InstallScript` now carries `executes`, decided per package from the hook and,
+for `prepare`, from whether the lockfile resolves that package outside the
+registry. Dormant hooks are still reported — "this package declares a
+postinstall-shaped hook" is worth seeing — but they are counted and rendered
+separately, as a single trailing line rather than a wall. With no lockfile the
+source is unknown, and unknown resolves to "does not execute": the registry is
+the common case and overstating is the failure being fixed. New summary field
+`withExecutingInstallScripts`.
+
 ### Dependent writes with no transaction (§14)
 
 `no-untransacted-dependent-writes` — a second write that uses what the first

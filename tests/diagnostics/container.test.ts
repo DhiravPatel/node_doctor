@@ -4,6 +4,7 @@ import type { TextDiagnostic } from "../../src/core/text-scan.ts";
 import { dockerfileRunsAsRoot } from "../../src/diagnostics/container/dockerfile-runs-as-root.ts";
 import { dockerfileMutableBaseTag } from "../../src/diagnostics/container/dockerfile-mutable-base-tag.ts";
 import { dockerfileSecretInBuildStage } from "../../src/diagnostics/container/dockerfile-secret-in-build-stage.ts";
+import { dockerfileCopiesDotenvIntoImage } from "../../src/diagnostics/container/dockerfile-copies-dotenv-into-image.ts";
 
 interface Report {
   line: number;
@@ -27,6 +28,7 @@ const run = (diagnostic: TextDiagnostic, content: string, path = "Dockerfile"): 
 const root = (content: string, path?: string): Report[] => run(dockerfileRunsAsRoot, content, path);
 const tag = (content: string, path?: string): Report[] => run(dockerfileMutableBaseTag, content, path);
 const secret = (content: string, path?: string): Report[] => run(dockerfileSecretInBuildStage, content, path);
+const dotenv = (content: string, path?: string): Report[] => run(dockerfileCopiesDotenvIntoImage, content, path);
 
 describe("dockerfile-runs-as-root", () => {
   test("fires when the final stage has no USER and the base runs as root", () => {
@@ -314,5 +316,82 @@ describe("container diagnostics: shape and determinism", () => {
       assert.deepEqual(run(d, "# just a comment\n\n"), []);
       assert.deepEqual(run(d, "FROM\n"), []);
     }
+  });
+});
+
+/**
+ * `dockerfile-copies-dotenv-into-image`.
+ *
+ * A `.env` is gitignored by design, so every check that reasons about committed
+ * content — including this project's own `no-committed-env-secret`, which is
+ * `committedFilesOnly` — passes cleanly while the credentials ship inside an
+ * image layer. The Dockerfile is the only artifact where the leak is visible,
+ * and it is visible as a filename. Found at 17 of 224 COPY/ADD instructions
+ * across 35 corpus Dockerfiles.
+ */
+describe("dockerfile-copies-dotenv-into-image", () => {
+  test("fires on a plain `COPY .env`", () => {
+    const found = dotenv("FROM node:20\nCOPY .env ./\n");
+    assert.equal(found.length, 1);
+    assert.equal(found[0]!.line, 2);
+    assert.match(found[0]!.message, /docker history/);
+  });
+
+  test("fires on a dotenv carried out of a builder stage", () => {
+    const found = dotenv(
+      "FROM node:20 AS builder\nRUN npm ci\nFROM node:20\nCOPY --chown=node:node --from=builder /app/.env.production ./build/.env\n",
+    );
+    assert.equal(found.length, 1);
+  });
+
+  test("fires in a BUILDER stage too — the leak can launder through a shell cp", () => {
+    // Real corpus shape: the builder copies the dotenv, `RUN cp` moves it into a
+    // directory, and the runner copies that directory. No final-stage COPY ever
+    // names a dotenv, so a final-stage-only rule would miss it entirely.
+    const found = dotenv(
+      "FROM node:20 AS builder\nCOPY apps/api/.env apps/api/.env\nRUN cp apps/api/.env /deploy/.env\nFROM node:20\nCOPY --from=builder /deploy ./\n",
+    );
+    assert.equal(found.length, 1);
+    assert.equal(found[0]!.line, 2);
+  });
+
+  test("fires on ADD and on the JSON operand form", () => {
+    assert.equal(dotenv("FROM node:20\nADD .env /app/.env\n").length, 1);
+    assert.equal(dotenv('FROM node:20\nCOPY [".env", "./"]\n').length, 1);
+  });
+
+  test("every production-ish dotenv name is covered", () => {
+    for (const name of [".env", ".env.production", ".env.prod", ".env.staging", ".env.live", ".env.release"]) {
+      assert.equal(dotenv(`FROM node:20\nCOPY ${name} ./\n`).length, 1, name);
+    }
+  });
+
+  describe("silence", () => {
+    test("template and fixture names — six of the 35 corpus Dockerfiles ship one", () => {
+      for (const name of [".env.example", ".env.sample", ".env.template", ".env.dist", ".env.test", ".env.local", ".env.development"]) {
+        assert.equal(dotenv(`FROM node:20\nCOPY ${name} ./\n`).length, 0, name);
+      }
+    });
+
+    test("an unseen `.env.whatever` stays quiet — the allowlist is positive", () => {
+      assert.equal(dotenv("FROM node:20\nCOPY .env.tomorrow ./\n").length, 0);
+    });
+
+    test("a templated source is resolved at build time", () => {
+      assert.equal(dotenv("FROM node:20\nCOPY ${ENV_FILE} .env\n").length, 0);
+    });
+
+    test("globs depend on the build context and .dockerignore", () => {
+      assert.equal(dotenv("FROM node:20\nCOPY .env* ./\n").length, 0);
+      assert.equal(dotenv("FROM node:20\nCOPY . .\n").length, 0);
+    });
+
+    test("seeding a placeholder is not shipping values", () => {
+      assert.equal(dotenv("FROM node:20\nCOPY .env .env.example\n").length, 0);
+    });
+
+    test("a BuildKit secret mount is the correct pattern", () => {
+      assert.equal(dotenv("FROM node:20\nRUN --mount=type=secret,id=env cat /run/secrets/env\n").length, 0);
+    });
   });
 });

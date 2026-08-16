@@ -38,6 +38,7 @@ import { noChunkStringConcat } from "../diagnostics/bugs/no-chunk-string-concat.
 import { noConstantCondition } from "../diagnostics/bugs/no-constant-condition.ts";
 import { noDirnameInEsm } from "../diagnostics/bugs/no-dirname-in-esm.ts";
 import { noFloatingPromiseInTry } from "../diagnostics/bugs/no-floating-promise-in-try.ts";
+import { noLocalDateAsIsoDatestring } from "../diagnostics/bugs/no-local-date-as-iso-datestring.ts";
 import { noNamespaceObjectWrite } from "../diagnostics/bugs/no-namespace-object-write.ts";
 import { noNanComparison } from "../diagnostics/bugs/no-nan-comparison.ts";
 import { noOutOfRangeExitCode } from "../diagnostics/bugs/no-out-of-range-exit-code.ts";
@@ -203,6 +204,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noConstantCondition,
   noDirnameInEsm,
   noFloatingPromiseInTry,
+  noLocalDateAsIsoDatestring,
   noNamespaceObjectWrite,
   noNanComparison,
   noOutOfRangeExitCode,
