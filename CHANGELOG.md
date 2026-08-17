@@ -11,6 +11,42 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Fixed: capability gating was blind in monorepos, silencing whole rule families
+
+Capabilities decide which diagnostics run, and they were derived from a single
+`package.json`. In a monorepo that is the wrong manifest. The database client is
+usually declared by ONE member and re-exported to the rest: cal.com declares
+`@prisma/client` only in `packages/prisma/package.json`, and every consumer
+imports `@calcom/prisma`. The root manifest's sole prisma-ish entry is
+`@prisma/internals`, which is not a client.
+
+So a manifest-only reading of cal.com produced **no `prisma` capability at any
+level** — root, `packages/features`, `packages/trpc` and `apps/web` all reported
+NO — and every Prisma-gated diagnostic silently never ran on one of the largest
+open-source Prisma codebases in existence. `no-untransacted-dependent-writes`,
+shipped days earlier and hand-verified against three real defects *in that very
+repo*, fired zero times there through the CLI. In the report that is
+indistinguishable from a clean result, which is the dangerous part: the scan says
+nothing is wrong, and it is not that nothing is wrong, it is that nothing ran.
+
+This was invisible to the corpus sweeps because they call `lintSource` with
+capabilities supplied directly, which bypasses the gate entirely. The sweep
+proved the rule's logic and proved nothing about whether it would ever execute.
+
+`discoverProject` now unions the dependencies declared by workspace members
+(npm/yarn `workspaces` and `pnpm-workspace.yaml`) before detecting capabilities,
+and climbs to the enclosing workspace root when a MEMBER is scanned directly —
+the common CI invocation, where the member declares no `workspaces` of its own.
+The root's own entries still take precedence, so a version pinned at the root
+continues to decide tokens like `express:5`. `node_modules` is never mistaken for
+a member, member reads are bounded at 400 manifests, and a plain single package
+globs nothing and is unaffected (measured: 26 ms for cal.com's 114 packages,
+&lt;1 ms for a single package).
+
+This repairs every dependency-gated diagnostic in monorepos, not only the Prisma
+ones — `mongoose`, `typeorm`, `sequelize`, `jsonwebtoken`, `nest`, `next` and the
+whole `ai` family gate the same way.
+
 ### A local-midnight Date rendered as a UTC calendar date
 
 `no-local-date-as-iso-datestring` — `new Date(y, m, d)` builds an instant from
@@ -50,8 +86,22 @@ removed. The discrimination is fine-grained enough to fire on one line of a real
 file and stay silent on the next: `new Date(y - 5, m, d).toISOString()...` fires
 while `today.toISOString()...` two lines below does not.
 
-Severity `warn`, not `error`: on a host running `TZ=UTC` or a negative offset the
-string is right, and which host this runs on is not in the file.
+**The rule was refuted before it settled, and the refutation shaped it.** An
+adversarial review produced a counter-example rather than an argument: two of its
+findings sat in a project whose own `.env` line 1 is `TZ=UTC`, where the emitted
+string is correct — so the rule was reporting working code, which this project
+treats as a release blocker. Capability detection now reads `TZ=` from a root
+`.env`/`Dockerfile`/compose file, and `disabledWhen: ["tz:utc"]` turns the rule
+off entirely on a project that declares a UTC deployment. Conflicting
+declarations prove nothing and count as undeclared — both corpus projects that
+pin `ENV TZ=Asia/Kolkata` in a Dockerfile also ship a `.env` saying `TZ=UTC`, and
+which wins at runtime depends on whether the dotenv loader runs before the first
+`Date` is constructed.
+
+On a project that declares nothing it still fires, deliberately. Unlike a value
+that is simply correct, this code is *contingently* correct: it produces the right
+string on today's host and the wrong one the moment the service moves east. The
+defect is latent, not absent. Severity `warn`, not `error`, says exactly that.
 
 ### A dotenv file copied into an image layer
 

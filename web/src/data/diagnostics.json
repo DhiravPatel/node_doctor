@@ -1283,7 +1283,9 @@
         "timezone"
       ],
       "requires": [],
-      "disabledWhen": [],
+      "disabledWhen": [
+        "tz:utc"
+      ],
       "optIn": false,
       "recommendation": "Build the instant in UTC — `new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10)` — or format the local date locally without going through UTC. `new Date(y, m, d)` is midnight LOCAL, and `toISOString()` renders UTC, so east of Greenwich the truncated date is the previous day. The `new Date(y, m + 1, 0)` \"last day of the month\" idiom is the costly one: the bound it produces silently excludes the last day."
     },

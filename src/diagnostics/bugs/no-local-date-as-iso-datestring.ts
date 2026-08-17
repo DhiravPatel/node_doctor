@@ -64,8 +64,22 @@ import { isTestFile } from "../../core/test-file.ts";
  *     bound, which is correct.
  *   - A shadowed `Date`, and test files.
  *
- * Severity is `warn`, not `error`: on a host running `TZ=UTC` or a negative
- * offset the string is right, and which host this runs on is not in the file.
+ * **AND the project must not DECLARE a UTC deployment** (`disabledWhen: ["tz:utc"]`).
+ * An adversarial review refuted an earlier version of this rule with a
+ * counter-example rather than an argument: two of its findings sat in a project
+ * whose own `.env` line 1 is `TZ=UTC`, where the emitted string is correct and
+ * flagging it reports working code. Capability detection now reads `TZ=` from a
+ * root `.env`/`Dockerfile`/compose file, and a declared UTC deployment turns the
+ * rule off entirely. Conflicting declarations prove nothing and are treated as
+ * undeclared — both corpus projects that pin `ENV TZ=Asia/Kolkata` in a
+ * Dockerfile also ship a `.env` saying `TZ=UTC`, and which wins at runtime
+ * depends on whether the dotenv loader runs before the first `Date`.
+ *
+ * On a project that declares nothing, this still fires, and that is deliberate:
+ * unlike a value that is simply correct, this code is CONTINGENTLY correct. It
+ * produces the right string on today's host and the wrong one the moment the
+ * service moves east — the defect is latent rather than absent. Severity is
+ * `warn`, not `error`, to say exactly that.
  */
 
 /** Mutators that re-base the instant, preserving whatever offset it had. */
@@ -171,6 +185,9 @@ export const noLocalDateAsIsoDatestring = defineDiagnostic({
   category: "Bugs",
   confidence: "high",
   tags: ["correctness", "timezone", "date"],
+  // Silent on any project that DECLARES a UTC deployment, where this code is
+  // exactly right. See the `tz:utc` note in the precision model.
+  disabledWhen: ["tz:utc"],
   recommendation:
     "Build the instant in UTC — `new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10)` — or format the local date locally without going through UTC. `new Date(y, m, d)` is midnight LOCAL, and `toISOString()` renders UTC, so east of Greenwich the truncated date is the previous day. The `new Date(y, m + 1, 0)` \"last day of the month\" idiom is the costly one: the bound it produces silently excludes the last day.",
   create: (ctx) => {

@@ -295,6 +295,51 @@ const workspaceDependencies = async (
   return merged;
 };
 
+/**
+ * The deployment timezone a project DECLARES, when it declares one.
+ *
+ * Some defects only exist away from UTC. A `Date` built from local wall-clock
+ * components and rendered with `toISOString()` is wrong east of Greenwich and
+ * exactly right on a UTC host — so a rule about it must not fire on a project
+ * that pins `TZ=UTC`, or it reports correct code. Both halves are real in the
+ * corpus: `finance_backend/.env` line 1 is `TZ=UTC`, while
+ * `crm_backend/Dockerfile:22` and `pg_petpooja/Dockerfile:51` both set
+ * `ENV TZ=Asia/Kolkata`.
+ *
+ * Only an explicit declaration counts. No declaration means unknown, and unknown
+ * grants no token — so a rule requiring `tz:non-utc` stays silent rather than
+ * guessing which hemisphere the host is in.
+ */
+const TZ_SOURCES = [".env", ".env.production", ".env.local", "Dockerfile", "docker-compose.yml", "docker-compose.yaml"];
+/** `TZ=Asia/Kolkata`, `ENV TZ=UTC`, `ENV TZ Asia/Kolkata`, `- TZ=UTC`. */
+const TZ_DECLARATION_RE = /(?:^|\n)\s*(?:-\s*)?(?:ENV\s+)?TZ[=\s]+["']?([A-Za-z][\w+\-/]*)["']?/;
+/** Zone names that ARE UTC, so the offset is zero and the defect cannot occur. */
+const UTC_ZONE_RE = /^(UTC|GMT|Etc\/UTC|Etc\/GMT|Etc\/Greenwich|Universal|Zulu|Z)$/i;
+
+const declaredTimezone = async (rootDirectory: string): Promise<"utc" | "non-utc" | null> => {
+  let seen: "utc" | "non-utc" | null = null;
+  for (const file of TZ_SOURCES) {
+    let content: string;
+    try {
+      content = await readFile(join(rootDirectory, file), "utf8");
+    } catch {
+      continue;
+    }
+    const match = TZ_DECLARATION_RE.exec(content);
+    const zone = match?.[1];
+    if (zone === undefined) continue;
+    const kind = UTC_ZONE_RE.test(zone) ? ("utc" as const) : ("non-utc" as const);
+    // Sources that DISAGREE prove nothing. Both of the corpus projects that pin
+    // `ENV TZ=Asia/Kolkata` in their Dockerfile also ship a `.env` saying
+    // `TZ=UTC`, and which one wins at runtime depends on whether the dotenv
+    // loader runs before the first `Date` is constructed — not something this
+    // file can settle. Conflict resolves to unknown, and unknown grants nothing.
+    if (seen !== null && seen !== kind) return null;
+    seen = kind;
+  }
+  return seen;
+};
+
 export const discoverProject = async (rootDirectory: string): Promise<ProjectInfo> => {
   const pkg = await readManifest(rootDirectory);
   const [hasTsconfig, bunLock, bunfig, denoJson, denoJsonc, wrangler] = await Promise.all([
@@ -320,6 +365,10 @@ export const discoverProject = async (rootDirectory: string): Promise<ProjectInf
     deno: denoJson || denoJsonc,
     edge: wrangler,
   });
+
+  // Only an explicit declaration grants a timezone token; silence on unknown.
+  const timezone = await declaredTimezone(rootDirectory);
+  if (timezone !== null) capabilities.add(timezone === "utc" ? "tz:utc" : "tz:non-utc");
   const name = (pkg?.name && pkg.name.trim()) || basename(rootDirectory) || "project";
   return { name, rootDirectory, capabilities };
 };
