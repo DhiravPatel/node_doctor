@@ -87,8 +87,19 @@ export const computeTaint = (program: AstNode): Set<string> => {
 
   const referencesCaller = (expr: AstNode | null | undefined): boolean => {
     if (!expr) return false;
-    const isTaintedIdent = (n: AstNode): boolean =>
-      n.type === "Identifier" && (isCallerRoot(n.name) || tainted.has(n.name));
+    const isTaintedIdent = (n: AstNode): boolean => {
+      if (n.type !== "Identifier" || !(isCallerRoot(n.name) || tainted.has(n.name))) return false;
+      // An Identifier is only a VARIABLE READ in some positions. `row.user_id`
+      // and `{ token: … }` are a property name and a key — not references — and
+      // treating them as such let taint spread by NAME COLLISION alone, which in
+      // a file-global set means one binding contaminates everything sharing a
+      // common word. `looksCallerControlled` applies the same rule; both must,
+      // or taint re-enters here on the next round and the fix there is undone.
+      const parent = n.parent as AstNode | undefined;
+      if (parent?.type === "MemberExpression" && parent.property === n && parent.computed !== true) return false;
+      if (parent?.type === "Property" && parent.key === n && parent.computed !== true) return false;
+      return true;
+    };
     if (isTaintedIdent(expr)) return true;
     return findDescendant(expr, isTaintedIdent, isFunctionLike) !== null;
   };

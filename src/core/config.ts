@@ -49,17 +49,39 @@ export interface LoadedConfig {
   format: ConfigFormat;
 }
 
-/** Always-applied ignore globs. */
+/**
+ * Always-applied ignore globs.
+ *
+ * Every entry is machine-generated output. Analysing it is worse than useless:
+ * nobody can act on a finding in a file they do not write, and minified bundles
+ * actively manufacture false positives, because any analysis that tracks
+ * identifiers by name collides constantly with single-letter names rebound
+ * hundreds of times in one file.
+ *
+ * Measured: a Next.js static export (`out/_next/**`) produced **183 of one
+ * project's 184 findings**, 167 of them a single rule firing on mangled bundle
+ * code. `.next/**` was already covered but `out/_next/**` — the `next export`
+ * destination — was not, so the same artifact was ignored under one name and
+ * scanned under another.
+ */
 export const BUILTIN_IGNORES: readonly string[] = [
   "**/node_modules/**",
   "**/dist/**",
   "**/build/**",
   "**/.next/**",
+  // `next export` writes the same bundles here, and this was the gap.
+  "**/out/_next/**",
   "**/.nuxt/**",
   "**/coverage/**",
   "**/.node-doctor-cache/**",
+  // Vite's pre-bundled dependency cache — copies of node_modules, by definition.
+  "**/.vite/**",
+  // `prisma generate` output: a client rewritten on every schema change.
+  "**/prisma/generated/**",
   "**/*.d.ts",
   "**/*.min.js",
+  "**/*.bundle.js",
+  "**/*.vendor.js",
 ];
 
 const JS_CONFIG_FILES = ["node-doctor.config.js", "node-doctor.config.mjs", "node-doctor.config.cjs"];

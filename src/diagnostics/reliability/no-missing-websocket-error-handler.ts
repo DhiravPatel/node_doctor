@@ -87,7 +87,19 @@ export const noMissingWebsocketErrorHandler = defineDiagnostic({
   confidence: "high",
   tags: ["reliability", "websocket", "crash"],
   defaultEnabled: false,
-  requires: ["ws"],
+  // No capability gate, deliberately. This rule carried `requires: ["ws"]` and
+  // NOTHING granted that token — `DEP_TOKENS` has no `ws` entry — so it could
+  // never fire on any project, on any machine, even when a user explicitly
+  // enabled it: `capabilitiesSatisfied` is checked before the explicit-config
+  // escape hatch. The whole test suite stayed green because the tests hand
+  // `ws` straight to `lintSource`, bypassing gating entirely.
+  //
+  // It is not restored as a real token either, because the token was never
+  // load-bearing: the file-level import gate below is strictly stronger, and it
+  // is what the sibling opt-in import-gated rule (`no-invalid-cron-expression`)
+  // relies on with no `requires` at all. A manifest token would also miss `ws`
+  // reached through a wrapper package. The rule is opt-in, so it runs only when
+  // asked for — and then it should actually run.
   recommendation:
     "Register an `error` listener on every websocket: `ws.on(\"error\", (err) => logger.error({ err }, \"socket error\"))`. A socket is an EventEmitter, so an `error` event with no listener is re-thrown as an uncaught exception — one client dropping its connection would otherwise take down the process and every other socket with it.",
   create: (ctx) => {

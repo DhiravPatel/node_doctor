@@ -235,7 +235,23 @@ export const looksCallerControlled = (
   // seeds them, applying the local-declaration exclusion as it goes. Re-deriving
   // "is this a request root?" from the NAME here is what defeated that exclusion
   // and made every `const context = …` look caller-controlled.
-  const isTaintedIdent = (n: AstNode): boolean => n.type === "Identifier" && tainted.has(n.name);
+  const isTaintedIdent = (n: AstNode): boolean => {
+    if (n.type !== "Identifier" || !tainted.has(n.name)) return false;
+    // An Identifier is only a VARIABLE READ in some positions. In others it is
+    // just a name, and reading it as a reference is how a single tainted binding
+    // contaminates an entire file:
+    //
+    //   row.user_id           ← `user_id` is a property name, not the variable
+    //   { token: "literal" }  ← `token` is a key, not the variable
+    //
+    // Both were treated as caller-controlled. In minified bundles, where short
+    // names are rebound hundreds of times per file, this manufactured findings
+    // wholesale — one project produced 167 of them from a single rule.
+    const parent = n.parent as AstNode | undefined;
+    if (parent?.type === "MemberExpression" && parent.property === n && parent.computed !== true) return false;
+    if (parent?.type === "Property" && parent.key === n && parent.computed !== true) return false;
+    return true;
+  };
   if (isTaintedIdent(node)) return true;
   return findDescendant(node, isTaintedIdent, isFunctionLike) !== null;
 };

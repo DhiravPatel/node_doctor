@@ -91,6 +91,40 @@ const DEP_TOKENS: Record<string, string> = {
   "@nestjs/cls": "ambient-transaction",
 };
 
+/**
+ * Every capability token this module can ever grant.
+ *
+ * A gate naming a token that is not in here can never be satisfied, and a rule
+ * behind such a gate is not "quiet" — it is DEAD, on every project and every
+ * machine, indistinguishable in the report from a clean result.
+ *
+ * That is not hypothetical. `no-missing-websocket-error-handler` shipped with
+ * `requires: ["ws"]` while `DEP_TOKENS` had no `ws` entry, so it could never run,
+ * and the test suite stayed green throughout because the tests pass capabilities
+ * straight to `lintSource` and bypass gating. This set exists so a test can
+ * assert the invariant directly — see `tests/engine/capabilities.test.ts`.
+ *
+ * Keep it in step with the `caps.add(...)` calls below; the test is what makes
+ * that obligation real rather than a comment.
+ */
+export const GRANTABLE_CAPABILITIES: ReadonlySet<string> = new Set<string>([
+  ...Object.values(DEP_TOKENS),
+  "node",
+  "esm",
+  "cjs",
+  "typescript",
+  "express:5",
+  "bun",
+  "deno",
+  "edge",
+  "tz:utc",
+  "tz:non-utc",
+]);
+
+/** `node:<major>` is granted from `engines.node`, so it is matched by shape. */
+export const isGrantableCapability = (token: string): boolean =>
+  GRANTABLE_CAPABILITIES.has(token) || /^node:\d+$/.test(token);
+
 /** Extract the leading major version from a semver range (`^5.0.0` → 5). */
 export const majorVersion = (range: string | undefined): number | null => {
   if (typeof range !== "string") return null;

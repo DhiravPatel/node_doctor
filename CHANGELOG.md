@@ -11,6 +11,91 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Fixed: a shipped rule that could never fire, and the invariant that lets it recur
+
+`no-missing-websocket-error-handler` was gated `requires: ["ws"]`, and **nothing
+grants a `ws` token** — `DEP_TOKENS` has no entry for it. So the rule could not
+fire on any project, on any machine, not even when a user explicitly enabled it:
+`capabilitiesSatisfied` is checked before the explicit-config escape hatch. In a
+report, a rule that never ran is indistinguishable from a clean result.
+
+It stayed invisible for its entire shipped life because diagnostic tests hand
+capabilities straight to `lintSource`, which bypasses gating — the same blind
+spot that hid the monorepo Prisma bug. An audit of all 173 diagnostics found this
+was the *only* ungrantable gate in the catalog.
+
+The gate is deleted rather than the token added. The rule's own comment says the
+capability "does not make THIS file websocket code" — it was never load-bearing,
+because the file-level import gate underneath it is strictly stronger. The
+sibling opt-in import-gated rule, `no-invalid-cron-expression`, carries no
+`requires` at all; the websocket rule was the anomaly. A manifest token would
+also have missed `ws` reached through a wrapper package.
+
+**The instance is the smaller half.** `GRANTABLE_CAPABILITIES` is now exported
+from `src/core/project.ts`, and a test asserts that every `requires` and
+`disabledWhen` token across every shipped diagnostic is actually grantable. The
+test was confirmed to have teeth by reintroducing the bug and watching it fail
+with the exact offender named. This class cannot ship again.
+
+### Fixed: two false-positive sources that produced 183 of one project's 184 findings
+
+**Generated output was being analysed.** `BUILTIN_IGNORES` covered `.next/**` but
+not `out/_next/**` — the `next export` destination — so the same artifact was
+skipped under one name and scanned under another. Measured on a Next.js static
+export: **183 of 184 findings came from generated bundles**, 167 of them from a
+single rule. Also added: `.vite/**` (Vite's pre-bundled dependency cache),
+`prisma/generated/**`, `*.bundle.js` and `*.vendor.js`. Every entry is machine
+output — nobody can act on a finding in a file they do not write.
+
+**And the reason minified code produced findings at all.** `looksCallerControlled`
+and `computeTaint` both searched an expression for any Identifier whose NAME sat
+in the file's tainted set — including positions where an Identifier is not a
+variable read:
+
+```js
+row.user_id            // a property NAME, not the variable `user_id`
+{ token: "literal" }   // a KEY, not the variable `token`
+```
+
+Since the tainted set is file-global, one tainted binding contaminated every
+matching name in the file. In minified bundles, where single letters are rebound
+hundreds of times, it manufactured findings wholesale. Both functions now reject
+Identifiers in non-computed member-property and object-key position; a computed
+`obj[key]` is still a read, and the genuine
+`target[req.body.key] = …` defect still fires. Fixing only `looksCallerControlled`
+is not enough — taint re-enters through `computeTaint` on the next round and undoes
+it, which a test written for the first fix caught.
+
+Net effect on the measured project: **184 findings → 1**, and that one is a real
+finding in hand-written source. Security recall is intact: the same corpus backend
+still reports 150 security findings.
+
+### Recall: `no-timing-unsafe-secret-compare` missed the abbreviated `sig`
+
+Webhook verification is where this rule matters most, and it is routinely written
+with one operand spelled out and one shortened:
+
+```js
+if (signature !== expectedSig) return { valid: false };
+```
+
+Because BOTH operands must look secret-shaped before the rule fires, the
+abbreviation on either side silenced the whole comparison — so the rule was
+quietest on exactly the code it exists for. Measured on the corpus, a single
+word-boundary-anchored `sig` token recovers **5 real sites**: four
+`signature !== expectedSig` webhook checks across one backend, plus cal.com's
+Help Scout handler (`hsSignature !== calculatedSig`).
+
+The boundaries are what make it safe. A bare substring `sig` would match
+`config`, `design`, `assign`, `signal`, `signIn`, `sigma`, `origSize` and
+`significant`; none of them match, verified against the list.
+
+One correction to the change as originally proposed: the token is tested against
+the **original** identifier, not the `-`/`_`-stripped one the existing
+`SECRET_RE` uses. Stripping turns `expected_sig` into `expectedsig` and destroys
+the very word boundary the pattern depends on — the proposal tested the regex
+standalone and would have silently lost every snake_case spelling.
+
 ### Fixed: capability gating was blind in monorepos, silencing whole rule families
 
 Capabilities decide which diagnostics run, and they were derived from a single

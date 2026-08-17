@@ -9,8 +9,13 @@ import {
   capabilitiesSatisfied,
   majorVersion,
   discoverProject,
+  isGrantableCapability,
 } from "../../src/core/project.ts";
-import { DIAGNOSTICS_BY_ID } from "../../src/core/registry.ts";
+import { DIAGNOSTICS, DIAGNOSTICS_BY_ID } from "../../src/core/registry.ts";
+import { ALL_TEXT_DIAGNOSTICS } from "../../src/diagnostics/text-diagnostics.ts";
+
+/** Every shipped diagnostic, AST and text-scan alike. */
+const ALL_DIAGNOSTICS = [...DIAGNOSTICS, ...ALL_TEXT_DIAGNOSTICS];
 
 describe("detectCapabilities", () => {
   test("express 4 does not add express:5", () => {
@@ -276,5 +281,55 @@ describe("declared deployment timezone", () => {
     assert.ok(shouldEnableDiagnostic(rule, new Set(["node", "tz:non-utc"])));
     // Undeclared still fires: the code is contingently correct, not correct.
     assert.ok(shouldEnableDiagnostic(rule, new Set(["node"])));
+  });
+});
+
+/**
+ * Every gate must be satisfiable.
+ *
+ * `no-missing-websocket-error-handler` shipped with `requires: ["ws"]` while
+ * nothing granted a `ws` token, so the rule could never fire — on any project,
+ * on any machine, even when a user explicitly enabled it, because
+ * `capabilitiesSatisfied` is checked before the explicit-config escape hatch.
+ * In a report, a rule that never ran is indistinguishable from a clean result.
+ *
+ * The whole suite stayed green for its entire shipped life, because diagnostic
+ * tests hand capabilities straight to `lintSource` and never exercise gating.
+ * This test closes that hole for every rule at once, present and future — it is
+ * the class-level fix, where deleting the bad token was only the instance.
+ */
+describe("gate integrity", () => {
+  test("every `requires` token can actually be granted", () => {
+    const offenders: string[] = [];
+    for (const diagnostic of ALL_DIAGNOSTICS) {
+      for (const token of diagnostic.requires ?? []) {
+        if (!isGrantableCapability(token)) offenders.push(`${diagnostic.id} requires "${token}"`);
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "a rule gated on a token nothing grants is dead, not quiet — add the token to DEP_TOKENS or drop the gate",
+    );
+  });
+
+  test("every `disabledWhen` token can actually be granted", () => {
+    // A disabledWhen naming an ungrantable token is harmless but always a
+    // mistake: it says "turn this off under condition X" where X cannot occur.
+    const offenders: string[] = [];
+    for (const diagnostic of ALL_DIAGNOSTICS) {
+      for (const token of diagnostic.disabledWhen ?? []) {
+        if (!isGrantableCapability(token)) offenders.push(`${diagnostic.id} disabledWhen "${token}"`);
+      }
+    }
+    assert.deepEqual(offenders, []);
+  });
+
+  test("the websocket rule specifically is reachable again", () => {
+    const rule = DIAGNOSTICS_BY_ID.get("no-missing-websocket-error-handler")!;
+    assert.ok(rule, "rule must be registered");
+    assert.equal(rule.requires ?? null, null, "the ungrantable `ws` gate must stay deleted");
+    // Opt-in, so it is off by default but selectable once explicitly enabled.
+    assert.ok(capabilitiesSatisfied(rule, new Set(["node", "esm"])));
   });
 });

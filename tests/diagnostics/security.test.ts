@@ -80,6 +80,47 @@ describe("no-timing-unsafe-secret-compare", () => {
   test("fires: header api key !== apiKey", () => {
     expectFires("no-timing-unsafe-secret-compare", `if (req.headers["x-api-key"] !== apiKey) return res.status(401).end();`);
   });
+
+  /**
+   * The abbreviated `sig`. Webhook verification is where this rule matters most,
+   * and it is routinely written with one operand spelled out and one shortened —
+   * `signature !== expectedSig`. Since BOTH operands must look secret-shaped, the
+   * abbreviation on either side used to silence the whole comparison. Measured on
+   * the corpus, this token recovers 5 real sites: four `signature !== expectedSig`
+   * webhook checks in one backend, plus cal.com's Help Scout handler.
+   */
+  test("fires: signature !== expectedSig — the shape found in real webhook handlers", () => {
+    expectFires("no-timing-unsafe-secret-compare", `if (signature !== expectedSig) return { valid: false };`);
+  });
+  test("fires: hsSignature !== calculatedSig", () => {
+    expectFires("no-timing-unsafe-secret-compare", `if (hsSignature !== calculatedSig) return deny();`);
+  });
+  test("fires: snake_case keeps its word boundary", () => {
+    // `SECRET_RE` reads a separator-free name, but the `sig` token is tested on
+    // the ORIGINAL name — stripping would make `expected_sig` into `expectedsig`
+    // and destroy the boundary the pattern depends on.
+    expectFires("no-timing-unsafe-secret-compare", `if (expected_sig !== req_sig) return deny();`);
+  });
+  test("fires: a bare `sig` on both sides", () => {
+    expectFires("no-timing-unsafe-secret-compare", `if (sig !== otherSig) return deny();`);
+  });
+
+  test("silent: words that merely contain the letters s-i-g", () => {
+    // A bare substring `sig` would match every one of these, which is why the
+    // token is word-boundary anchored.
+    for (const source of [
+      `if (config !== design) return;`,
+      `if (assign !== signal) return;`,
+      `if (signIn !== signup) return;`,
+      `if (sigma !== origSize) return;`,
+      `if (significant !== designation) return;`,
+    ]) {
+      expectSilent("no-timing-unsafe-secret-compare", source);
+    }
+  });
+  test("silent: only one operand is secret-shaped", () => {
+    expectSilent("no-timing-unsafe-secret-compare", `if (sig !== other) return;`);
+  });
 });
 
 describe("no-jwt-decode-as-verify", () => {

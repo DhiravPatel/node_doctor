@@ -105,3 +105,96 @@ describe("a locally-declared request-root NAME is not caller data", () => {
     ]);
   });
 });
+
+/**
+ * A third false positive in the same helper, found by an audit of shipped rules.
+ *
+ * `looksCallerControlled` searched an expression for ANY Identifier whose NAME
+ * sits in the file's tainted set — including identifiers in positions where an
+ * Identifier is not a variable read at all:
+ *
+ *   row.user_id            the property NAME, not the variable `user_id`
+ *   { token: "literal" }   the KEY, not the variable `token`
+ *
+ * Because `computeTaint` is file-global, one tainted binding then contaminated
+ * every such name in the file. In minified bundles — where single letters are
+ * rebound hundreds of times — it manufactured findings wholesale: one Next.js
+ * static export produced 183 of a project's 184 findings, 167 of them from
+ * `no-prototype-pollution` alone.
+ */
+describe("looksCallerControlled — an Identifier is only a read in some positions", () => {
+  test("a property NAME matching a tainted binding is not caller data", async () => {
+    const { noPrototypePollution } = await import("../../src/diagnostics/security/no-prototype-pollution.ts");
+    const found = findings(
+      `app.post("/x", (req, res) => {
+         const key = req.body.key;
+         rows.forEach((row) => { out[row.key] = row.value; });
+       });`,
+      [noPrototypePollution],
+    );
+    assert.equal(found.length, 0, "`row.key` is a property name, not the tainted `key` binding");
+  });
+
+  test("an object KEY matching a tainted binding is not caller data", async () => {
+    const { noPrototypePollution } = await import("../../src/diagnostics/security/no-prototype-pollution.ts");
+    const found = findings(
+      `app.post("/x", (req, res) => {
+         const key = req.body.key;
+         const shape = { key: "literal" };
+         out[shape.key] = 1;
+       });`,
+      [noPrototypePollution],
+    );
+    assert.equal(found.length, 0);
+  });
+
+  test("the genuine defect still fires — this must not become a recall loss", async () => {
+    const { noPrototypePollution } = await import("../../src/diagnostics/security/no-prototype-pollution.ts");
+    const found = findings(
+      `app.post("/x", (req, res) => {
+         const key = req.body.key;
+         target[key] = req.body.value;
+       });`,
+      [noPrototypePollution],
+    );
+    assert.ok(found.length > 0, "a computed write keyed on request data is the real bug");
+  });
+
+  test("a COMPUTED member access is still a read", async () => {
+    // `obj[key]` genuinely reads the variable, unlike `obj.key`.
+    const { noPrototypePollution } = await import("../../src/diagnostics/security/no-prototype-pollution.ts");
+    const found = findings(
+      `app.post("/x", (req, res) => {
+         const key = req.body.key;
+         target[lookup[key]] = 1;
+       });`,
+      [noPrototypePollution],
+    );
+    assert.ok(found.length > 0);
+  });
+});
+
+/**
+ * Generated output is never analysed. Every entry is machine-written: nobody can
+ * act on a finding in a file they do not author, and minified bundles actively
+ * manufacture findings. `.next/**` was already ignored but `out/_next/**` — the
+ * `next export` destination — was not, so the same artifact was skipped under one
+ * name and scanned under another.
+ */
+describe("BUILTIN_IGNORES covers generated output", () => {
+  test("the generated directories are all ignored", async () => {
+    const { BUILTIN_IGNORES } = await import("../../src/core/config.ts");
+    for (const glob of [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/.next/**",
+      "**/out/_next/**",
+      "**/.vite/**",
+      "**/prisma/generated/**",
+      "**/*.min.js",
+      "**/*.bundle.js",
+    ]) {
+      assert.ok(BUILTIN_IGNORES.includes(glob), `${glob} must be ignored`);
+    }
+  });
+});

@@ -13,6 +13,27 @@ import type { AstNode } from "../../core/types.ts";
 const EQUALITY_OPS = new Set(["===", "!==", "==", "!="]);
 const SECRET_RE = /(secret|token|signature|hmac|apikey|api[_-]?key|seckey|password|passwd|pwd|otp|nonce|digest)/i;
 
+/**
+ * `sig` as a word of its own — the abbreviation `signature` misses.
+ *
+ * Webhook verification is where this rule matters most, and it is routinely
+ * written `if (signature !== expectedSig)`: one operand spelled out, one
+ * abbreviated. Because BOTH operands must look secret-shaped, the abbreviation
+ * on either side silences the whole comparison. Measured on the corpus, this
+ * token alone recovers 5 real sites the rule was missing — four
+ * `signature !== expectedSig` webhook checks in one backend, and cal.com's
+ * `hsSignature !== calculatedSig` Help Scout handler.
+ *
+ * The word boundaries are what make it safe. A bare substring `sig` would match
+ * `config`, `design`, `assign`, `signal`, `signIn`, `sigma`, `origSize` and
+ * `significant`; none of those match here, verified against the list.
+ *
+ * NOTE: this is tested against the ORIGINAL name, not the `-`/`_`-stripped one
+ * `SECRET_RE` uses. Stripping would turn `expected_sig` into `expectedsig` and
+ * destroy the very boundary this pattern depends on.
+ */
+const ABBREVIATED_SIG_RE = /(?:^|[^a-zA-Z])sig(?:[^a-zA-Z]|$)|[a-z]Sig(?:[^a-z]|$)/;
+
 /** Extract a comparable "name" from an operand (identifier or member tail). */
 const operandName = (node: AstNode): string | null => {
   if (node.type === "Identifier") return node.name;
@@ -28,7 +49,9 @@ const operandName = (node: AstNode): string | null => {
 const isSecretShaped = (node: AstNode): boolean => {
   const name = operandName(node);
   if (!name) return false;
-  return SECRET_RE.test(name.replace(/[-_]/g, ""));
+  // `SECRET_RE` reads a separator-free name so `api_key` and `apiKey` agree;
+  // `ABBREVIATED_SIG_RE` needs the separators, which are its word boundaries.
+  return SECRET_RE.test(name.replace(/[-_]/g, "")) || ABBREVIATED_SIG_RE.test(name);
 };
 
 export const noTimingUnsafeSecretCompare = defineDiagnostic({
