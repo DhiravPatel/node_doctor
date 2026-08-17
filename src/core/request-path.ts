@@ -199,8 +199,37 @@ const collectExportedHandlers = (program: AstNode, handlers: Set<AstNode>): void
   }
 };
 
+/** Adonis's request-context type, across the versions that name it differently. */
+const ADONIS_CONTEXT_TYPES = new Set(["HttpContext", "HttpContextContract"]);
+
+/** Does this file import Adonis's HTTP context type? */
+const importsAdonisContext = (program: AstNode): boolean => {
+  for (const statement of (program.body as AstNode[] | undefined) ?? []) {
+    if (statement.type !== "ImportDeclaration") continue;
+    const source = (statement.source as AstNode | undefined)?.value;
+    if (typeof source !== "string" || !/adonis/i.test(source)) continue;
+    for (const specifier of (statement.specifiers as AstNode[] | undefined) ?? []) {
+      const imported = (specifier.imported ?? specifier.local) as AstNode | undefined;
+      if (imported?.type === "Identifier" && ADONIS_CONTEXT_TYPES.has(String(imported.name))) return true;
+    }
+  }
+  return false;
+};
+
+/** Is this parameter annotated as Adonis's HTTP context? */
+const isAdonisContextParameter = (param: AstNode): boolean => {
+  // `{ request, response }: HttpContext` and `ctx: HttpContext` are both real.
+  const holder = param.typeAnnotation as AstNode | undefined;
+  const reference = (holder?.typeAnnotation as AstNode | undefined) ?? holder;
+  if (reference?.type !== "TSTypeReference") return false;
+  const name = reference.typeName as AstNode | undefined;
+  if (name?.type !== "Identifier") return false;
+  return ADONIS_CONTEXT_TYPES.has(String(name.name));
+};
+
 export const collectRequestHandlers = (program: AstNode, scope: ScopeResolver): Set<AstNode> => {
   const handlers = new Set<AstNode>();
+  const adonisContextImported = importsAdonisContext(program);
 
   collectExportedHandlers(program, handlers);
 
@@ -253,6 +282,29 @@ export const collectRequestHandlers = (program: AstNode, scope: ScopeResolver): 
             handlersFromArg(field.value as AstNode, scope, handlers);
           }
         }
+      }
+
+      // AdonisJS controller methods, recognized by their CONTEXT TYPE.
+      //
+      // Adonis registers routes in a different file, as a tuple naming a class
+      // and a method by string: `router.post("/x", [AuthController, "encrypt"])`.
+      // Nothing in the controller file marks the method, and nothing in the route
+      // file contains a function — so neither `handlersFromArg` nor the
+      // Express-signature fallback can see it, and every request-path rule was a
+      // silent no-op on the whole stack. Eight rules were affected.
+      //
+      // The type annotation is what makes this decidable in one file, and it is
+      // deliberately the annotation rather than the destructured parameter NAMES:
+      // `{ request, response }` is a shape plenty of ordinary helpers have, while
+      // `HttpContext` is Adonis's own and appears on essentially nothing else. The
+      // import is required as well, so the name alone can never carry it.
+      if (
+        adonisContextImported &&
+        (node.type === "MethodDefinition" || node.type === "PropertyDefinition") &&
+        isFunctionLike(node.value)
+      ) {
+        const first = ((node.value as AstNode).params as AstNode[] | undefined)?.[0];
+        if (first && isAdonisContextParameter(first)) handlers.add(node.value as AstNode);
       }
 
       // Decorator handlers (Nest/Adonis), and GraphQL decorators.

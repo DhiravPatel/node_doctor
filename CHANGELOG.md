@@ -11,6 +11,59 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### AdonisJS controllers are request handlers — eight rules were dead on the stack
+
+`collectRequestHandlers` recognized **zero** AdonisJS controller methods, so all
+eight request-path-gated rules were silent no-ops on the corpus's dominant backend
+stack: `no-sync-io-in-request-path`, `no-sync-bcrypt-in-request-path`,
+`no-process-exit-in-request-path`, `no-large-json-parse-in-request-path`,
+`no-db-connection-per-request`, `no-listener-added-per-request`,
+`no-cross-request-state-mutation`, `no-shared-cache-authenticated-response`.
+
+Adonis registers routes in a *different* file, as a tuple naming a class and a
+method by string — `router.post("/x", [AuthController, "encrypt"])`. Nothing in
+the controller marks the method, and nothing in the route file contains a
+function, so neither handler-argument analysis nor the Express-signature fallback
+could reach it. Recognition now keys on the **type annotation** of the first
+parameter (`HttpContext`, or Adonis 5's `HttpContextContract`), plus an actual
+Adonis import — not on the destructured parameter names, because
+`{ request, response }` is a shape plenty of ordinary helpers have. On one real
+controller that took recognition from 0 to 107 methods.
+
+**Recognition alone was not shippable, and this is the more important half.** It
+surfaced 119 findings in one backend, of which **116 were false positives** in
+three classes — every one found by reading the findings rather than trusting the
+count:
+
+*`JSON.parse` of a value the request merely influenced (94).* The rule is about
+SIZE, so "caller-controlled" in the taint sense is the wrong test:
+
+```js
+const row = await locationsCollection.findOne({ location_id: id })
+const details = JSON.parse(row.location_details)   // ← was reported
+```
+
+Taint reaches `row` legitimately — a request field chose which row — but the bytes
+come from the database, and no caller can make a stored column megabytes by
+sending a large request. The argument must now BE the request payload, the same
+correction `no-mass-assignment` needed when it went from 743 false positives to 0.
+Taint through a database round-trip still matters for injection rules (stored XSS
+is real), which is why this is fixed in the rule rather than by weakening
+`computeTaint` for everyone.
+
+*Listeners on emitters created per request (17 + 5).* The rule excluded
+per-request emitters by NAME, so it could not see one that has no telling name:
+`fs.createReadStream(p).pipe(csv()).on("data", …)` roots at `fs`, a module, and
+`const archive = archiver("zip"); archive.on("error", …)` roots at a local whose
+name says nothing about its lifetime. Both build a fresh emitter that dies with
+the request. An emitter is now treated as per-request when it is a construction,
+or a binding declared inside that handler from a construction; a long-lived
+`bus.on(…)` still fires.
+
+Net on the measured backend: **119 → 8 findings, all eight hand-verified** as real
+`fs.existsSync`/`mkdirSync`/`unlinkSync` calls blocking the event loop on a
+request path — defects that were completely invisible before.
+
 ### Fixed: a shipped rule that could never fire, and the invariant that lets it recur
 
 `no-missing-websocket-error-handler` was gated `requires: ["ws"]`, and **nothing
