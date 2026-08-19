@@ -128,6 +128,73 @@ describe("createTypeSource", () => {
     if (!result.ok) return;
     assert.equal(result.source.promiseKindAt("/p/a.ts", 7), "not-promise");
   });
+
+  /**
+   * SEVERAL NODES SHARE A START OFFSET, and only one of them has the type the
+   * caller wants.
+   *
+   * `r.save("a");` begins an ExpressionStatement, a CallExpression, a
+   * PropertyAccessExpression and an Identifier at the very same column. The index
+   * was first-wins over a pre-order walk, so the ExpressionStatement claimed the
+   * offset — and a statement has no call signature, so `promiseKindAt` answered
+   * "unknown" and `no-floating-promise`, the only type-aware diagnostic, reported
+   * nothing on any project, ever.
+   *
+   * The stub above could never have caught it: it emits exactly one node per
+   * offset. This one reproduces the collision, and pins that last-wins is not the
+   * answer either — that would hand the offset to the Identifier, whose type is
+   * the receiver rather than the call's return.
+   */
+  test("the CALL wins when several nodes start at the same offset", async () => {
+    const OFFSET = 30;
+    const typeOf = new Map<string, string>([
+      ["call", "Promise<void>"],
+      ["identifier", "Repo"],
+      ["statement", "void"],
+    ]);
+
+    const identifier = { kind: "identifier", getStart: () => OFFSET, forEachChild: () => {} };
+    const call = {
+      kind: "call",
+      getStart: () => OFFSET,
+      forEachChild: (cb: (n: unknown) => void) => cb(identifier),
+    };
+    // Pre-order: the statement is visited FIRST, exactly as TypeScript walks it.
+    const statement = {
+      kind: "statement",
+      getStart: () => OFFSET,
+      forEachChild: (cb: (n: unknown) => void) => cb(call),
+    };
+
+    const compiler = {
+      version: "5.6.0",
+      sys: { readFile: () => "{}" },
+      readConfigFile: () => ({ config: {} }),
+      parseJsonConfigFileContent: () => ({ fileNames: ["/p/a.ts"], options: {} }),
+      isCallExpression: (n: unknown) => (n as { kind?: string }).kind === "call",
+      createProgram: () => ({
+        getTypeChecker: () => ({
+          getTypeAtLocation: (n: unknown) => ({
+            __kind: (n as { kind?: string }).kind,
+            getCallSignatures: () => [{ getReturnType: () => ({ __of: (n as { kind?: string }).kind }) }],
+          }),
+          typeToString: (t: { __of?: string }) => typeOf.get(t.__of ?? "") ?? "unknown",
+        }),
+        getSourceFile: (f: string) =>
+          f === "/p/a.ts" ? { forEachChild: (cb: (n: unknown) => void) => cb(statement) } : undefined,
+      }),
+    };
+
+    const result = await createTypeSource("/p", async () => compiler);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(
+      result.source.promiseKindAt("/p/a.ts", OFFSET),
+      "promise",
+      "the CallExpression must own the offset — the enclosing statement shadowing it is what kept the only type-aware rule silent",
+    );
+    result.source.dispose();
+  });
 });
 
 // ---------------------------------------------------------------------------

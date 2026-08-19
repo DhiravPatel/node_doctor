@@ -27,6 +27,10 @@
  * checker cannot resolve something.
  */
 
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+
 /** What the checker can say about the value an expression produces. */
 export type PromiseKind = "promise" | "not-promise" | "unknown";
 
@@ -70,6 +74,8 @@ export interface TsLike {
   readConfigFile?: (path: string, read: (p: string) => string | undefined) => { config?: unknown };
   sys?: { readFile: (p: string) => string | undefined };
   TypeFlags?: Record<string, number>;
+  /** Used to break offset ties in the node index — see `makeSource`'s walk. */
+  isCallExpression?: (node: unknown) => boolean;
 }
 
 export interface TsProgram {
@@ -127,9 +133,33 @@ export const typeNameIsPromise = (typeName: string): PromiseKind => {
  * node.doctor's own tree, because the answer must come from the project's own
  * compiler and tsconfig.
  */
+/**
+ * Resolve `typescript` from the SCANNED PROJECT, not from node.doctor's tree.
+ *
+ * A bare `import("typescript")` resolves relative to THIS module, so a globally
+ * or locally installed node.doctor always loaded its own compiler. That is not a
+ * theoretical mismatch: node.doctor dev-depends on TypeScript 7, whose native
+ * build ships no `createProgram`, so `--typed` reported "the resolved TypeScript
+ * does not expose the JavaScript compiler API" on every project — including
+ * projects sitting on a perfectly good TypeScript 5.9 of their own. The single
+ * type-aware diagnostic could therefore never run anywhere.
+ *
+ * `createRequire` rooted at the project reproduces Node's own lookup from that
+ * directory. The bare import stays as a fallback so a globally installed
+ * node.doctor still works against a project with no local compiler.
+ */
+const resolveFromProject = async (rootDirectory: string, specifier: string): Promise<unknown> => {
+  try {
+    const require = createRequire(join(rootDirectory, "__node-doctor-resolve__.js"));
+    return await import(pathToFileURL(require.resolve(specifier)).href);
+  } catch {
+    return await import(specifier);
+  }
+};
+
 export const createTypeSource = async (
   rootDirectory: string,
-  load: (specifier: string) => Promise<unknown> = (s) => import(s),
+  load: (specifier: string) => Promise<unknown> = (s) => resolveFromProject(rootDirectory, s),
 ): Promise<TypeSourceResult> => {
   let ts: TsLike;
   try {
@@ -203,7 +233,22 @@ const makeSource = (ts: TsLike, program: TsProgram): TypeSource => {
       const n = node as { getStart?: (sf?: unknown) => number; forEachChild?: (cb: (c: unknown) => void) => void };
       try {
         const start = n.getStart?.(sourceFile);
-        if (typeof start === "number" && !index.has(start)) index.set(start, node);
+        if (typeof start === "number") {
+          // SEVERAL NODES SHARE A START OFFSET, and the caller always wants the
+          // call. `r.save("a");` begins an ExpressionStatement, a CallExpression,
+          // a PropertyAccessExpression and an Identifier at the very same column.
+          //
+          // First-wins handed the offset to the ExpressionStatement — a statement
+          // has no type, so `promiseKindAt` answered "unknown" and the only
+          // type-aware diagnostic reported nothing, ever. Last-wins is not the fix
+          // either: it would hand the offset to the Identifier `r`, whose type is
+          // the receiver rather than the call's return.
+          //
+          // So the call expression claims the offset outright, and everything else
+          // keeps first-wins.
+          const isCall = ts.isCallExpression?.(node) === true;
+          if (isCall || !index.has(start)) index.set(start, node);
+        }
       } catch {
         /* a synthetic node without a position — skip it */
       }

@@ -119,6 +119,58 @@ describe("no-open-redirect", () => {
       `app.get("/go", (req, res) => { res.redirect(req.query.url); });`,
     );
   });
+
+  /**
+   * A destination the caller cannot move is not a redirect vulnerability,
+   * whatever the taint set says about the values interpolated after it.
+   *
+   * This fired at `error` severity on the OAuth start handler of a real API. The
+   * interpolated `state` was `crypto.randomBytes(32).toString("hex")` — about as
+   * far from caller data as a value gets — and looked tainted only because taint
+   * is file-global: the other exported handler in the same file destructures a
+   * `state` from `request.query`, and the two locals share a name. Shape is
+   * decidable where that provenance is not. Five false positives across two
+   * projects, no true positive lost.
+   */
+  test("silent: an absolute origin fixed before the interpolation (real OAuth start)", () => {
+    expectSilent(
+      "no-open-redirect",
+      "app.get(\"/g\", (req, res) => { const state = req.query.state; const p = new URLSearchParams({ state }); res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${p.toString()}`); });",
+    );
+  });
+  test("silent: a site-root-relative path keeps the browser on-origin", () => {
+    expectSilent(
+      "no-open-redirect",
+      "app.get(\"/r\", (req, res) => { const id = req.params.id; res.redirect(`/admin/clients/${id}/edit`); });",
+    );
+  });
+  test("silent: interpolation into the fragment", () => {
+    expectSilent(
+      "no-open-redirect",
+      "app.get(\"/r\", (req, res) => { const t = req.query.t; res.redirect(`https://app.example.com/home#${t}`); });",
+    );
+  });
+
+  test("fires: a DYNAMIC host is the whole point — the origin is not fixed", () => {
+    expectFires(
+      "no-open-redirect",
+      "app.get(\"/r\", (req, res) => { const h = req.query.h; res.redirect(`https://${h}/x`); });",
+    );
+  });
+  test("fires: a lone leading slash can still become protocol-relative", () => {
+    // `` `/${x}` `` with x = "/evil.com" yields "//evil.com" — off-origin. The
+    // shape check requires a non-slash character after the first slash.
+    expectFires(
+      "no-open-redirect",
+      "app.get(\"/r\", (req, res) => { const x = req.query.x; res.redirect(`/${x}`); });",
+    );
+  });
+  test("fires: a fully dynamic destination", () => {
+    expectFires(
+      "no-open-redirect",
+      "app.get(\"/r\", (req, res) => { const u = req.query.u; res.redirect(`${u}`); });",
+    );
+  });
 });
 
 describe("no-ssrf-unvalidated-url", () => {

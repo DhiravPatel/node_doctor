@@ -11,6 +11,64 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Fixed: `--typed` could never work, so the only type-aware rule never ran
+
+`no-floating-promise` is the sole `requiresTypes` diagnostic, and it reported
+nothing on any project, ever. Two independent bugs stood between it and a
+finding, and fixing either alone leaves it silent.
+
+**It loaded the wrong compiler.** `createTypeSource`'s default loader was
+`(s) => import(s)`, and a bare specifier resolves relative to the importing
+module — node.doctor's own tree, never the scanned project's. The doc comment
+three lines above already promised the opposite ("the default resolves TypeScript
+from the *scanned project*"). node.doctor dev-depends on TypeScript 7, whose
+native build ships no `createProgram`, so `--typed` answered *"the resolved
+TypeScript (7.0.2) does not expose the JavaScript compiler API"* on every project
+— including ones sitting on a perfectly good TypeScript 5.9 of their own.
+Resolution is now rooted at the scanned directory via `createRequire`, with the
+bare import kept as a fallback so a globally installed node.doctor still works.
+
+**And the node index handed out the wrong node.** `r.save("a");` begins an
+`ExpressionStatement`, a `CallExpression`, a `PropertyAccessExpression` and an
+`Identifier` at the very same column. The index was first-wins over a pre-order
+walk, so the statement claimed the offset — and a statement has no call
+signature, so `promiseKindAt` answered `unknown`. Last-wins is not the fix
+either: that hands the offset to the `Identifier`, whose type is the receiver
+rather than the call's return. The call expression now claims the offset outright
+and everything else keeps first-wins.
+
+Verified end to end on a real TypeScript 5.9 project: exactly one finding on the
+floating call, with awaited, `void`-ed, `.catch()`-ed, returned and non-promise
+calls all correctly silent. The existing stub could never have caught the index
+bug — it emits one node per offset — so the regression test now reproduces the
+real collision, and was confirmed to fail when the fix is reverted.
+
+### Fixed: `no-open-redirect` flagged fixed-destination URLs at error severity
+
+The rule asked only whether the URL expression was caller-controlled, and never
+looked at its SHAPE. A template literal whose first quasi already spells out an
+absolute origin and a path —
+`` `https://accounts.google.com/o/oauth2/v2/auth?${params}` `` — has a
+destination no interpolation can reach; everything dynamic lands in the query or
+fragment, and the browser goes to Google either way.
+
+It fired at `error` severity on the OAuth start handler of a real API, where the
+interpolated `state` was `crypto.randomBytes(32).toString("hex")` — about as far
+from caller data as a value gets. It looked tainted only because taint is
+file-global: the *other* exported handler in the same file destructures a `state`
+from `request.query`, and the two locals share a name. Shape is decidable where
+that provenance is not.
+
+Two shapes now end the claim: an absolute origin followed by at least one path
+character, and a site-root-relative path whose second character is not a slash.
+The second condition is load-bearing — `` `/${x}` `` still fires, because `x`
+could be `/evil.com` and make it protocol-relative.
+
+Measured: **5 false positives removed across two projects, no true positive
+lost.** `` `https://${host}/x` `` still fires (the origin is dynamic), and so do
+the fully dynamic `` response.redirect(`${redirect_url}`) `` sites in another
+backend.
+
 ### AdonisJS controllers are request handlers — eight rules were dead on the stack
 
 `collectRequestHandlers` recognized **zero** AdonisJS controller methods, so all
