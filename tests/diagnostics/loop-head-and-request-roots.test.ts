@@ -198,3 +198,65 @@ describe("BUILTIN_IGNORES covers generated output", () => {
     }
   });
 });
+
+/**
+ * Vendored third-party libraries are not the developer's code.
+ *
+ * `node_modules` and `*.min.js` were already ignored, but a copy of jQuery or
+ * Highcharts committed under `webroot/`, `public/js/` or `assets/` is invisible
+ * to both — and a finding inside one is unactionable: the fix is to upgrade the
+ * dependency, not to edit the file.
+ *
+ * Measured on a CakePHP app: **1,871 of its 1,871 findings** came from vendored
+ * copies (six separate `jquery.js` files, `highcharts.src.js`,
+ * `datatables_do_not_delete.js`, `fusioncharts.js`) and ZERO from first-party
+ * code. After the gate: 155, all first-party.
+ *
+ * The test is on CONTENT, not path, and that is load-bearing: ignoring
+ * `webroot/**` would have been simpler and wrong, because CakePHP's document
+ * root also holds the application's own scripts.
+ */
+describe("looksVendoredLibrary", () => {
+  test("a license banner marks a redistributed library", async () => {
+    const { looksVendoredLibrary } = await import("../../src/core/config.ts");
+    assert.ok(looksVendoredLibrary("/*! jQuery v3.6.0 | (c) OpenJS Foundation */\nfunction x(){}"));
+    assert.ok(looksVendoredLibrary("/**\n * @license Highcharts JS v9.0.0\n */\nvar H = {};"));
+    assert.ok(looksVendoredLibrary("// Copyright (c) 2011 SpryMedia Ltd\nvar DataTable = {};"));
+    assert.ok(looksVendoredLibrary("/*! @preserve fusioncharts */\nvar FC;"));
+  });
+
+  test("a UMD preamble marks a distributed bundle, in the spellings that occur", async () => {
+    const { looksVendoredLibrary } = await import("../../src/core/config.ts");
+    // The jQuery variant — this one slipped a narrower pattern.
+    assert.ok(
+      looksVendoredLibrary(
+        `(function( global, factory ) {\n\tif ( typeof module === "object" && typeof module.exports === "object" ) {\n\t\tmodule.exports = factory(global);\n\t}\n})(this, function(w){});`,
+      ),
+    );
+    assert.ok(
+      looksVendoredLibrary(
+        `(function (root, factory) {\n  if (typeof exports === "object" && typeof define === "function" && define.amd) {\n    define([], factory);\n  }\n})(this, function () {});`,
+      ),
+    );
+  });
+
+  test("first-party application code is NOT excluded", async () => {
+    const { looksVendoredLibrary } = await import("../../src/core/config.ts");
+    // Shapes taken from the same repo's own scripts, which must keep being analysed.
+    for (const source of [
+      `/* [ ---- Gebo Admin Panel - extended form elements ---- ] */\n\n$(document).ready(function() {\n  init();\n});`,
+      `// Support popup data — FAQ + Quick Actions\n// Loaded lazily via $.getScript(...)\nwindow.faq_printer_data = {};`,
+      `import express from "express";\nconst app = express();\napp.get("/x", (req, res) => res.json({}));`,
+      `module.exports = { handler: async (req, res) => res.end() };`,
+    ]) {
+      assert.equal(looksVendoredLibrary(source), false, source.slice(0, 40));
+    }
+  });
+
+  test("only the head of the file is inspected", async () => {
+    const { looksVendoredLibrary } = await import("../../src/core/config.ts");
+    // A copyright line deep inside a large first-party file must not exclude it.
+    const source = `${"const x = 1;\n".repeat(1000)}// Copyright (c) 2020 Someone\n`;
+    assert.equal(looksVendoredLibrary(source), false);
+  });
+});

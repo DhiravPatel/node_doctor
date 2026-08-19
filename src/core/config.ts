@@ -352,3 +352,52 @@ export const settingsForFile = (
   }
   return merged;
 };
+
+/**
+ * Is this file a VENDORED third-party library checked into the repository?
+ *
+ * `node_modules` and `*.min.js` are already ignored, but a copy of jQuery or
+ * Highcharts committed under `webroot/`, `public/js/`, `assets/` or `lib/` is
+ * invisible to both — and it is not the developer's code. Nobody can act on a
+ * finding inside a vendored library: the fix is to upgrade the dependency, not
+ * to edit the file, and editing it would be undone by the next update.
+ *
+ * Measured on a CakePHP app in the corpus: **1,871 of its 1,871 findings** came
+ * from `webroot/` and `Vendor/` — six separate copies of `jquery.js`, plus
+ * `highcharts.src.js`, `datatables_do_not_delete.js`, `fusioncharts.js` and
+ * `jquery-ui.custom.js` — and ZERO came from first-party code. The report was
+ * pure noise.
+ *
+ * The test is on CONTENT, not on the path, and that choice is load-bearing.
+ * Ignoring `**​/webroot/**` would have been simpler and wrong: that directory is
+ * CakePHP's document root and also holds the application's own scripts
+ * (`admin_gebo/admin.js`, `support_panel_web/support_actions_faq.js`), which
+ * must keep being analysed. Verified against those files — none matches.
+ *
+ * Two signals, both of which a distributed library carries and hand-written
+ * application code essentially never does:
+ *
+ *   - A LICENSE BANNER in the first few KB — `/*!`, `@license`, `@preserve`, or
+ *     a copyright line with a year. Libraries carry these because their licence
+ *     requires the notice to survive redistribution.
+ *   - A UMD PREAMBLE, the wrapper a build tool emits so one file works under
+ *     CommonJS, AMD and a browser global. Application code has no reason to
+ *     detect `define.amd` about itself.
+ */
+const VENDORED_SIGNALS: readonly RegExp[] = [
+  /^﻿?\s*\/\*!/,
+  /@license|@preserve/i,
+  /\(c\)\s*(?:19|20)\d\d|Copyright\s+(?:\(c\)\s*)?(?:19|20)\d\d/i,
+  // UMD, in the spellings bundlers and hand-rolled libraries actually emit.
+  /typeof\s+exports\s*===?\s*["']object["'][\s\S]{0,200}?typeof\s+define\s*===?\s*["']function["']/,
+  /typeof\s+module\s*===?\s*["']object["']\s*&&\s*typeof\s+module\.exports\s*===?\s*["']object["']/,
+  /typeof\s+define\s*===?\s*["']function["']\s*&&\s*define\.amd/,
+];
+
+/** How much of the file to inspect — a banner or UMD wrapper is always at the top. */
+const VENDORED_PROBE_BYTES = 4096;
+
+export const looksVendoredLibrary = (sourceText: string): boolean => {
+  const head = sourceText.slice(0, VENDORED_PROBE_BYTES);
+  return VENDORED_SIGNALS.some((signal) => signal.test(head));
+};

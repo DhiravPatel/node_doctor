@@ -11,6 +11,76 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Security wave: four false-positive classes closed, one recall gap opened
+
+A six-lens security pass over the corpus, with every survivor adversarially
+refuted. The refuters earned their keep — they **rejected** a proposal to teach
+`no-open-redirect` about sanitizer functions by showing its regex would have
+silenced `res.redirect(unescape(req.query.next))`, the textbook vulnerable form.
+Authorization/IDOR was also rejected, on its proposer's own measurement: 18%
+precision ungated, and every gate that reached shippable precision collapsed it
+to two findings in one handler — overfitting with no held-out data.
+
+**Vendored libraries are no longer analysed.** `node_modules` and `*.min.js` were
+already ignored, but a copy of jQuery committed under `webroot/` or `public/js/`
+is invisible to both, and a finding inside one is unactionable — the fix is to
+upgrade the dependency, not edit the file. One CakePHP app reported **1,871
+findings, every single one from vendored copies** (six separate `jquery.js`,
+plus `highcharts.src.js`, `datatables_do_not_delete.js`, `fusioncharts.js`) and
+none from its own code; it now reports 155, all first-party. The test is on
+CONTENT — a license banner or a UMD preamble in the first 4KB — not on the path,
+and that is load-bearing: ignoring `webroot/**` would have been simpler and wrong,
+because CakePHP's document root also holds the app's own scripts. Verified
+against those: none matches, and the gate excludes 0 files in a normal Node repo.
+
+**`require-secure-cookie-flags` fired on cookie READS.** It matched any
+`<x>.cookie(name, …)` with an auth-shaped name, catching AdonisJS
+`request.cookie("refresh_token")` and client-side `$.cookie(...)`. A read cannot
+be missing `httpOnly`. Gated on the receiver being a response object rather than
+on argument count — which matters, because `request.cookie(key, default)` is a
+legal two-argument read.
+
+**`no-mass-assignment` reported a single destructured field as the whole body.**
+`ScopeResolver` attaches the declarator's initializer to every name a pattern
+binds, so `const { id } = req.body` records `initNode = req.body` for `id`, and
+`User.update(id, {…})` was flagged as passing the body — the recommended fix,
+reported as the bug. The binding's own position discriminates it, and `...rest`
+still fires: `const { id, ...rest } = req.body` leaves `rest` carrying every
+attacker-settable key but one, which IS the defect. Fixed in the rule, not in
+`ScopeResolver`, whose 23 other consumers depend on current behaviour.
+
+**`no-nosql-object-injection` branch (b) was 21-for-21 false.** It gated on the
+file-global, name-keyed taint set, so every locally-built filter object in a file
+that touched the request anywhere was reported. What matters for injection is
+provenance of the KEYS — `$ne` reaches the driver only if the caller decided which
+keys exist — so the gate is now syntactic, and a PREFIX test: `req.body.filter`
+and `req.query.where.inner` count, not just `req.body` exactly. Corpus findings
+for this rule went 21 → 0, with the genuinely vulnerable spreads still firing.
+
+**`no-timing-unsafe-secret-compare` was quietest on the code it exists for.**
+Requiring BOTH operands to look secret-shaped missed every real webhook HMAC
+check, because those compare a header against a computed value:
+
+```js
+if (headerData["x-hub-signature-256"] !== `sha256=${computedSignature}`)   // n8n
+if (apiKey !== env.get("INTERNAL_API_KEY"))                                // Adonis middleware
+if (headersList.get("x-webhook-signature") !== computed_signature)         // cal.com
+```
+
+One operand may now be a closed set of counterpart shapes instead — a template
+literal wrapping a secret, a header/env/query getter named for one, a
+word-bounded `pass` token, or an `expected`/`provided` name. **17 real sites
+recovered**, and n8n's nodes-base went from 0 findings to 12. The `pass` token is
+three alternations rather than one case-insensitive pattern on purpose:
+`/[a-z]Pass/i` would match `bypass`.
+
+In the other direction it now stays silent on password-confirmation pairs — 15
+corpus findings where both operands come from the same submitter in one request,
+so there is no stored value to recover and no oracle to leak. Both a password word
+in BOTH names and structural siblinghood are required, which keeps
+`user.passwordHash !== req.body.password` and `confirmationToken !== token`
+firing.
+
 ### Fixed: `--typed` could never work, so the only type-aware rule never ran
 
 `no-floating-promise` is the sole `requiresTypes` diagnostic, and it reported

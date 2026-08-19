@@ -167,7 +167,26 @@ export const noMassAssignment = defineDiagnostic({
       }
       if (node.type !== "Identifier") return false;
       const binding = ctx.scope.getBinding(node.name as string, node);
-      return isWholeBody(binding?.initNode as AstNode | undefined, depth + 1);
+      if (!binding) return false;
+
+      // A DESTRUCTURED FIELD IS NOT THE OBJECT.
+      //
+      // `ScopeResolver` attaches the declarator's whole initializer to every name
+      // a pattern binds, so `const { id } = req.body` records `initNode` =
+      // `req.body` for `id`. Following that alias reported `User.update(id, {…})`
+      // as passing the whole body, when `id` is one scalar field — the very fix
+      // this rule recommends.
+      //
+      // The binding's own position discriminates it exactly, and the `...rest`
+      // case must survive: `const { id, ...rest } = req.body` leaves `rest`
+      // carrying every attacker-settable key but one, which IS the bug. So a
+      // `Property` key is a field and ends the claim; a `RestElement` keeps it.
+      // Fixed here rather than in `ScopeResolver`, whose 23 other consumers
+      // depend on the current behaviour.
+      const declarationParent = (binding.declNode as AstNode | undefined)?.parent as AstNode | undefined;
+      if (declarationParent?.type === "Property") return false;
+
+      return isWholeBody(binding.initNode as AstNode | undefined, depth + 1);
     };
 
     const report = (node: AstNode, how: string): void => {

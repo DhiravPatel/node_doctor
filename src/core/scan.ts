@@ -26,7 +26,7 @@ import { computeTaint } from "./taint.ts";
 import { collectRequestHandlers } from "./request-path.ts";
 import { createLocator, type Locator } from "./location.ts";
 import { discoverProject, shouldEnableDiagnostic, capabilitiesSatisfied } from "./project.ts";
-import { loadConfig, BUILTIN_IGNORES, effectiveSetting, settingsForFile, type NodeDoctorConfig } from "./config.ts";
+import { loadConfig, BUILTIN_IGNORES, effectiveSetting, settingsForFile, type NodeDoctorConfig, looksVendoredLibrary } from "./config.ts";
 import { classifyFileContext, isRelaxedInContext } from "./file-context.ts";
 import { runTextScan, selectTextDiagnostics } from "./text-scan.ts";
 import { ALL_TEXT_DIAGNOSTICS } from "../diagnostics/text-diagnostics.ts";
@@ -690,6 +690,16 @@ export const scanProject = async (options: ScanProjectOptions): Promise<ScanRepo
         totalLines: 0,
         parseFailureMessage: err instanceof Error ? err.message : "unreadable file",
       };
+    }
+
+    // A vendored third-party library checked into the repo is not the developer's
+    // code, and a finding inside one is unactionable: the fix is to upgrade the
+    // dependency, not to edit the file. `node_modules` and `*.min.js` are already
+    // ignored; a committed copy of jQuery under `webroot/` or `public/js/` is
+    // invisible to both. Measured: one CakePHP app reported 1,871 findings, ALL
+    // of them from vendored copies, and none from its own code.
+    if (looksVendoredLibrary(sourceText)) {
+      return { filePath, normalizedFilePath, pending: [], suppressedKeys: [], totalLines: 0 };
     }
 
     const hash = cacheEnabled ? hashContent(sourceText) : "";
