@@ -153,6 +153,7 @@ import { noSqlTemplateInterpolation } from "../diagnostics/security/no-sql-templ
 import { noSsrfUnvalidatedUrl } from "../diagnostics/security/no-ssrf-unvalidated-url.ts";
 import { noStateChangeOnGet } from "../diagnostics/security/no-state-change-on-get.ts";
 import { noStatefulGlobalRegexTest } from "../diagnostics/security/no-stateful-global-regex-test.ts";
+import { noStaticCipherIv } from "../diagnostics/security/no-static-cipher-iv.ts";
 import { noTaintedSinkViaHelper } from "../diagnostics/security/no-tainted-sink-via-helper.ts";
 import { noTimingUnsafeSecretCompare } from "../diagnostics/security/no-timing-unsafe-secret-compare.ts";
 import { noUnanchoredSecurityRegex } from "../diagnostics/security/no-unanchored-security-regex.ts";
@@ -319,6 +320,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noSsrfUnvalidatedUrl,
   noStateChangeOnGet,
   noStatefulGlobalRegexTest,
+  noStaticCipherIv,
   noTaintedSinkViaHelper,
   noTimingUnsafeSecretCompare,
   noUnanchoredSecurityRegex,

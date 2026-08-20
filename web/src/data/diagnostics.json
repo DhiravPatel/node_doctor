@@ -1,11 +1,11 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 173,
-  "defaultOn": 122,
+  "total": 174,
+  "defaultOn": 123,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
-    "Security": 64,
+    "Security": 65,
     "Maintainability": 16,
     "Reliability": 49,
     "Bugs": 31
@@ -1915,6 +1915,21 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Drop the `g`/`y` flag for a membership check (`/^\\d+$/` instead of `/^\\d+$/g`) — a stateless regex gives the same answer every call. If you truly need the flag, reset `re.lastIndex = 0` before each `.test()`, or match against a fresh literal."
+    },
+    {
+      "id": "no-static-cipher-iv",
+      "title": "Cipher initialization vector is the same every time",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "crypto",
+        "encryption"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Generate the IV per message — `const iv = crypto.randomBytes(16)` — and store it alongside the ciphertext; it is not secret, only unique. A fixed IV makes the cipher deterministic, so equal plaintexts produce equal ciphertexts and shared prefixes stay shared. In GCM or any counter mode a repeated nonce repeats the keystream, which reveals the XOR of two plaintexts and lets the authentication key be recovered. If you genuinely need deterministic encryption for searching, use a construction designed for it (AES-SIV) rather than a fixed IV."
     },
     {
       "id": "no-string-length-as-content-length",

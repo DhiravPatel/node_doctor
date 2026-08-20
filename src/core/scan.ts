@@ -264,7 +264,7 @@ const analyzeFile = (opts: AnalyzeOptions): AnalyzeResult => {
   const program = parsed.program;
   attachParents(program);
   const scope = resolveScopes(program);
-  const tainted = computeTaint(program);
+  const tainted = computeTaint(program, scope);
   const handlers = collectRequestHandlers(program, scope);
 
   // Cache hit: we still parse (the project graph needs the AST + facts), but the

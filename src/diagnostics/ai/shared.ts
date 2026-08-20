@@ -9,7 +9,7 @@
  * file that never imports an AI SDK is never inspected at all.
  */
 
-import type { AstNode } from "../../core/types.ts";
+import type { AstNode, TaintLookup } from "../../core/types.ts";
 import { collectDescendants } from "../../core/walk.ts";
 import {
   getCalleeName,
@@ -132,7 +132,7 @@ const concatHasLiteralText = (node: AstNode): boolean => {
  */
 export const mixesTaintIntoText = (
   node: AstNode | null | undefined,
-  tainted: Set<string>,
+  tainted: TaintLookup,
 ): boolean => {
   if (!isBuiltString(node) || !node) return false;
   if (!looksCallerControlled(node, tainted)) return false;

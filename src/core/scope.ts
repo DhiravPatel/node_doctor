@@ -87,6 +87,8 @@ export class ScopeResolver {
   readonly moduleScope: Scope;
   /** Map from a scope-owning node (Program/function) to its Scope. */
   private readonly scopes = new Map<AstNode, Scope>();
+  /** node → its owning scope, memoized (see `enclosingScope`). */
+  private readonly enclosingCache = new WeakMap<AstNode, Scope>();
 
   constructor(program: AstNode) {
     this.moduleScope = { kind: "module", node: program, parent: null, bindings: new Map() };
@@ -219,16 +221,33 @@ export class ScopeResolver {
     return scope.kind === "module" ? "module" : "function";
   }
 
-  /** The nearest scope that owns `node` (walking up through parents). */
+  /**
+   * The nearest scope that owns `node` (walking up through parents).
+   *
+   * Memoized: scope-keyed taint asks this for every identifier on every
+   * fixpoint round, and the parent walk is O(depth) each time. The cache is
+   * keyed by node identity and the parent chain never changes after
+   * `attachParents`, so it can only save work, never change an answer.
+   */
   private enclosingScope(node: AstNode | null | undefined): Scope {
+    if (!node) return this.moduleScope;
+    const cached = this.enclosingCache.get(node);
+    if (cached) return cached;
     let cur: AstNode | null | undefined = node;
+    const seen: AstNode[] = [];
     while (cur) {
       if (isScopeNode(cur)) {
         const scope = this.scopes.get(cur);
-        if (scope) return scope;
+        if (scope) {
+          for (const n of seen) this.enclosingCache.set(n, scope);
+          this.enclosingCache.set(cur, scope);
+          return scope;
+        }
       }
+      seen.push(cur);
       cur = cur.parent;
     }
+    for (const n of seen) this.enclosingCache.set(n, this.moduleScope);
     return this.moduleScope;
   }
 

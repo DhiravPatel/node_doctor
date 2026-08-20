@@ -473,3 +473,62 @@ describe("no-prototype-pollution — only writes that can reach the prototype", 
     });
   });
 });
+
+/**
+ * `no-static-cipher-iv`.
+ *
+ * An IV exists to make the same plaintext encrypt differently every time. Fix it
+ * and the cipher becomes a deterministic function of the plaintext — measured on
+ * the same key twice: CBC with a fixed IV produced byte-identical ciphertext, and
+ * two messages sharing a prefix shared 32 hex characters of ciphertext. For GCM
+ * it is a break rather than a leak: a repeated nonce repeats the keystream, so
+ * `ct1 XOR ct2 === pt1 XOR pt2` exactly (measured: both `030303…`).
+ *
+ * Found in the corpus at a `static encrypt()` holding a hardcoded key AND a
+ * hardcoded 16-character IV, copied across a monorepo's variants. node.doctor
+ * reported NOTHING on that file before this rule — `no-weak-cipher` judges the
+ * algorithm, and `aes-256-cbc` is a fine algorithm.
+ */
+describe("no-static-cipher-iv", () => {
+  test("fires: the corpus shape — a literal IV", () => {
+    expectFires("no-static-cipher-iv", `const cipher = crypto.createCipheriv('aes-256-cbc', key, '1234567812345678');`);
+  });
+  test("fires: Buffer.alloc, the most fixed IV there is", () => {
+    expectFires("no-static-cipher-iv", `const c = crypto.createCipheriv('aes-256-gcm', key, Buffer.alloc(12));`);
+  });
+  test("fires: through a const binding", () => {
+    expectFires(
+      "no-static-cipher-iv",
+      `const IV = '1234567812345678';\nconst c = crypto.createCipheriv('aes-256-cbc', key, IV);`,
+    );
+    expectFires("no-static-cipher-iv", `const IV = Buffer.alloc(16);\nconst c = createCipheriv('aes-256-cbc', key, IV);`);
+  });
+
+  describe("silence", () => {
+    test("the correct form — a fresh IV per message", () => {
+      expectSilent("no-static-cipher-iv", `const c = crypto.createCipheriv('aes-256-cbc', key, crypto.randomBytes(16));`);
+      expectSilent(
+        "no-static-cipher-iv",
+        `const iv = crypto.randomBytes(16);\nconst c = crypto.createCipheriv('aes-256-cbc', key, iv);`,
+      );
+    });
+    test("an IV the file cannot decide is silence", () => {
+      expectSilent("no-static-cipher-iv", `function enc(key, iv) { return crypto.createCipheriv('aes-256-cbc', key, iv); }`);
+      expectSilent("no-static-cipher-iv", `const c = crypto.createCipheriv('aes-256-cbc', key, deriveIv(msg));`);
+      expectSilent("no-static-cipher-iv", `const c = crypto.createCipheriv('aes-256-cbc', key, cfg.iv);`);
+    });
+    test("a `let` may hold a fresh IV by the time it runs", () => {
+      expectSilent(
+        "no-static-cipher-iv",
+        `let iv = '1234567812345678';\niv = crypto.randomBytes(16);\nconst c = crypto.createCipheriv('aes-256-cbc', key, iv);`,
+      );
+    });
+    test("a null IV is ECB — `no-weak-cipher`'s subject, not this one's", () => {
+      expectSilent("no-static-cipher-iv", `const c = crypto.createCipheriv('aes-128-ecb', key, null);`);
+    });
+    test("DEcryption must reuse the IV the ciphertext was made with", () => {
+      // A literal here is a consequence of the defect, not the defect.
+      expectSilent("no-static-cipher-iv", `const d = crypto.createDecipheriv('aes-256-cbc', key, '1234567812345678');`);
+    });
+  });
+});

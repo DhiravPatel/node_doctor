@@ -11,6 +11,112 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Taint is now keyed by BINDING, not by name
+
+The intra-file taint set was a file-global `Set<string>` of NAMES, and
+`looksCallerControlled` asked only "does this expression mention such a name?".
+One tainted binding therefore contaminated every same-named binding in the file.
+Measured on a 28k-line controller: **908 of its 2,232 distinct identifiers (41%)
+were tainted**, including bare `user`, `key`, `row`, `item` and `id`. A small,
+well-factored file measured 0% — the pathology scales with file size.
+
+Fifteen rules consume this, thirteen of them security rules, and the defect had
+already been worked around three separate times rather than fixed:
+`no-nosql-object-injection` (21 of 21 findings false), `no-open-redirect` (5
+error-severity false positives, from a `state` local colliding with a `state`
+destructured from `request.query` in a *different* handler), and
+`no-prototype-pollution`. A fourth work-around would have been the wrong answer.
+
+Taint is now keyed by the `Binding` a name resolves to at the use site, so
+`req.query.state` in handler A taints only A's `state`. Names that resolve to no
+binding at all keep a name-keyed fallback, because there is nothing better to key
+them by. `looksCallerControlled` collapses to `tainted.hasRef(node)` — one
+definition of "is this a caller-controlled read?" instead of logic duplicated
+across two files.
+
+The old `locallyDeclared` exclusion is replaced by a per-binding request-root
+test, which closes both halves of a hole: it was file-global, so one
+`const ctx = …` anywhere silenced every genuine `ctx` handler parameter in the
+file; and it inspected only `VariableDeclarator`, so a `function f(request)`
+signature still seeded the entire file.
+
+**Measured across five corpus backends: 1,315 findings → 1,300.** Twenty-one lost,
+six gained, hand-read:
+
+- The three lost path traversals are provably false — one reads `filename`,
+  declared a string *literal* on the line above and tainted only by collision with
+  a `filename` in another function; another joins nothing but literals.
+- The three gained are real, and are the argument for the change on its own:
+  `path.join(public_folder, "orders/" + file.name)` on an **uploaded filename**,
+  and the same shape on `removed_img` feeding a **delete** — arbitrary file
+  deletion, invisible to the old substrate.
+
+Performance improved rather than regressed — 7.8s against 8.3s on the largest
+corpus project — because `ScopeResolver.enclosingScope` is now memoized in a
+WeakMap. It is asked for every identifier on every fixpoint round, and the parent
+chain never changes after `attachParents`, so the cache can only save work.
+
+One companion propagation rule ships with it: `for (const x of req.body.items)`
+taints the element binding. It is required, not optional — without it, scope
+keying silently drops real findings the old substrate caught only by name
+collision.
+
+Three propagation variants were measured and REJECTED, and are pinned as tests so
+they are not re-added: `for…in` (adds 75 false `no-prototype-pollution` findings
+in one file, because it binds `"0"`, `"1"`, `"2"`); iteration-callback propagation
+(recovers 0 lost detections, adds 3 false positives on `new RegExp(escapeRegex(v))`
+— the pattern that rule's own docblock lists as the safe one); and call-site
+parameter propagation (recovers 2 of 3 lost detections but adds 1 false positive,
+and one is a release blocker).
+
+The honest cost is one real detection: a prototype-pollution sink in
+`order.save.js` reached through a call-site parameter. It was only ever found by
+name collision rather than by analysis, and recovering it properly needs the
+argument→parameter rule, which cannot ship until `no-unsafe-regexp-from-input`
+stops firing on the escaping it recommends.
+
+### New: `no-static-cipher-iv` — an initialization vector that never changes
+
+An IV exists to make the same plaintext encrypt differently every time. Fix it and
+the cipher becomes a deterministic function of the plaintext. Measured on the same
+key, the same plaintext, twice:
+
+```
+CBC, fixed IV:  2bb3f4f2bd6704d2e52480cca69d3ecf…
+                2bb3f4f2bd6704d2e52480cca69d3ecf…   identical
+CBC, random IV: different every time
+```
+
+That leaks equality — an observer learns which records hold the same value, enough
+to de-anonymise a column of statuses or salaries — and because CBC chains block by
+block, two messages sharing a prefix share a ciphertext prefix: measured, 32
+identical hex characters for `"transfer 100 to alice"` and `"transfer 100 to bob"`.
+
+For GCM and any counter mode it is a break rather than a leak. A repeated nonce
+repeats the keystream, so `ct1 XOR ct2` equals `pt1 XOR pt2` exactly — measured,
+both sides came out `030303030303030303030303` — and the authentication key can be
+recovered from two messages under one nonce.
+
+Found at three corpus sites, all the same helper copied across a monorepo's
+variants: a `static encrypt()` holding a hardcoded key AND a hardcoded
+16-character IV, so every value the application ever encrypts uses the same pair.
+**node.doctor reported nothing on that file before this rule** — `no-weak-cipher`
+judges the algorithm, and `aes-256-cbc` is a fine algorithm.
+
+The IV must be provably constant: a literal, `Buffer.from(<literal>)`,
+`Buffer.alloc(n)`, or a `const` bound to one of those. A parameter, a call result
+or a property read is undecidable and stays silent, as does a `let` that may be
+reassigned. `crypto.randomBytes` is never reported. Only ENCRYPTION is judged —
+`createDecipheriv` must be given the very IV the ciphertext was produced with, so
+a literal there is a consequence of the defect rather than the defect. A `null` IV
+is ECB, which is `no-weak-cipher`'s subject.
+
+**A correction to an earlier measurement.** I previously reported this family as
+having zero corpus population — "5 `createCipheriv` call sites, 0 with a constant
+IV" — and concluded it could not clear the population bar. That probe was wrong:
+the real first-party count is roughly 20 call sites, three of which have a literal
+IV. The rule ships because the population is real.
+
 ### `no-prototype-pollution` was built on a false premise
 
 A single-level computed write cannot pollute anything. Run it:

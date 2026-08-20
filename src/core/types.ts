@@ -107,6 +107,24 @@ export interface ReportOverrides {
 }
 
 /**
+ * The intra-file taint answer, keyed by BINDING rather than by name.
+ *
+ * `hasRef` is the real question — "is this identifier REFERENCE a read of
+ * caller-controlled data?" — and it resolves the name to its binding before
+ * answering, so a `state` local in one handler cannot borrow taint from a
+ * `state` destructured from `request.query` in another. `has` is the older,
+ * name-only query, kept only for the one consumer that follows it with its own
+ * binding-level confirmation.
+ */
+export interface TaintLookup {
+  /** Loose name-only membership. Prefer `hasRef`. */
+  has(name: string): boolean;
+  /** Is this Identifier node a read of a caller-controlled binding? */
+  hasRef(node: AstNode | null | undefined): boolean;
+  readonly size: number;
+}
+
+/**
  * Everything a diagnostic's visitors receive. Project-scope diagnostics additionally get
  * `graph` and `effectsOf`.
  */
@@ -127,8 +145,8 @@ export interface DiagnosticContext {
    * DOES has to be handed them separately.
    */
   comments: readonly CommentNode[];
-  /** Caller-controlled binding names (intra-file taint). */
-  taintedBindings: Set<string>;
+  /** Caller-controlled bindings (intra-file taint). */
+  taintedBindings: TaintLookup;
   /** All active capability tokens. */
   capabilities: Set<string>;
   /** Query a capability token. */

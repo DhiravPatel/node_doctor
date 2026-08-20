@@ -10,19 +10,39 @@
  * says "caller-controlled — this is injection"). It must never *gate* a finding:
  * an unsound analysis silencing a real sink would ship a false negative people
  * trust. See §3.4 / guardrail 3.
+ *
+ * ## Keyed by BINDING, not by name
+ *
+ * The set used to be a file-global `Set<string>` of NAMES, and
+ * `looksCallerControlled` asked only "does this expression mention such a
+ * name?". One tainted binding therefore contaminated every same-named binding
+ * in the file — a `const state = …` local collided with a `state` destructured
+ * from `request.query` in a DIFFERENT handler, and `no-open-redirect` reported
+ * five error-severity false positives from it. One measured file had 908 of its
+ * 2,232 distinct identifiers (41%) in the tainted set, including bare `user`,
+ * `key`, `row`, `item` and `id`.
+ *
+ * Taint is now keyed by the `Binding` a name resolves to at the use site
+ * (`ScopeResolver.getBinding`), so `req.query.state` in handler A taints only
+ * A's `state`. Names that resolve to no binding at all (ambient/undeclared)
+ * keep a name-keyed fallback, because there is nothing better to key them by.
  */
 
-import type { AstNode } from "./types.ts";
+import type { AstNode, TaintLookup } from "./types.ts";
 import { walk, findDescendant } from "./walk.ts";
 import { REQUEST_ROOTS, isFunctionLike } from "./ast.ts";
+import type { Binding, ScopeResolver } from "./scope.ts";
 
 const MAX_ROUNDS = 6;
 
-const patternNames = (pattern: AstNode | null | undefined, out: string[]): void => {
+const patternNames = (
+  pattern: AstNode | null | undefined,
+  out: [AstNode, string][],
+): void => {
   if (!pattern) return;
   switch (pattern.type) {
     case "Identifier":
-      out.push(pattern.name);
+      out.push([pattern, pattern.name]);
       break;
     case "AssignmentPattern":
       patternNames(pattern.left, out);
@@ -44,85 +64,156 @@ const patternNames = (pattern: AstNode | null | undefined, out: string[]): void 
   }
 };
 
-/** Compute the set of caller-controlled binding names in a file. */
-export const computeTaint = (program: AstNode): Set<string> => {
-  const tainted = new Set<string>();
+/**
+ * An Identifier is only a VARIABLE READ in some positions. `row.user_id` and
+ * `{ token: … }` are a property name and a key — not references — and treating
+ * them as such let taint spread by NAME COLLISION alone.
+ */
+const isReferencePosition = (n: AstNode): boolean => {
+  const parent = n.parent as AstNode | undefined;
+  if (parent?.type === "MemberExpression" && parent.property === n && parent.computed !== true) return false;
+  if (parent?.type === "Property" && parent.key === n && parent.computed !== true) return false;
+  return true;
+};
+
+/**
+ * The caller-controlled bindings of one file.
+ *
+ * `has(name)` is kept for the one consumer that legitimately asks a name-only
+ * question and then confirms against the binding itself
+ * (`no-cross-request-state-mutation`); everything else should ask `hasRef`,
+ * which resolves the identifier to its binding first.
+ */
+export class TaintSet implements TaintLookup {
+  /** Bindings known to hold caller data. Identity-keyed: one per (scope, name). */
+  private readonly bindings = new Set<Binding>();
+  /** Names that resolve to no binding at all — ambient/undeclared globals. */
+  private readonly unresolved = new Set<string>();
+  /** Every tainted NAME, for the loose `has` query. */
+  private readonly names = new Set<string>();
+
+  private readonly scope: ScopeResolver;
+
+  constructor(scope: ScopeResolver) {
+    this.scope = scope;
+  }
+
+  get size(): number {
+    return this.bindings.size + this.unresolved.size;
+  }
+
+  /** Loose, name-only. Prefer `hasRef`. */
+  has(name: string): boolean {
+    return this.names.has(name);
+  }
 
   /**
-   * A request-root *name* that the file declares as its own variable is not the
-   * request object — `const context = 3` in a diff utility means "lines of
-   * context". Seeding taint from it floods the whole function and produces
-   * false positives, so such names are never treated as a source. If the local
-   * really is caller-derived (`const ctx = req.context`), the propagation rule
-   * below still taints it, so nothing is lost.
+   * A request-root NAME is the request object only when it arrives as a
+   * function PARAMETER (`(req, res) => …`, `async function h(ctx)`) or is
+   * ambient. A `const context = lines.join("\n")` in a diff utility is not —
+   * seeding from it floods the function with false taint. The old pass had this
+   * exclusion too, but keyed by name and applied to the whole FILE, so one
+   * `const ctx = …` anywhere silenced every genuine `ctx` handler param in the
+   * file, and (the other half of the hole) it only inspected
+   * `VariableDeclarator`, so a `function f(request: any)` signature still
+   * seeded the entire file. Per-binding, both halves close.
    */
-  const locallyDeclared = new Set<string>();
-  walk(program, {
-    enter: (node) => {
-      if (node.type !== "VariableDeclarator") return;
-      const names: string[] = [];
-      patternNames(node.id, names);
-      for (const name of names) if (REQUEST_ROOTS.has(name)) locallyDeclared.add(name);
-    },
-  });
+  private isRequestRoot(binding: Binding | null, name: string): boolean {
+    if (!REQUEST_ROOTS.has(name)) return false;
+    if (!binding) return true; // ambient `req`/`ctx` — nothing declares it here
+    return binding.kind === "param";
+  }
 
-  const isCallerRoot = (name: string): boolean => REQUEST_ROOTS.has(name) && !locallyDeclared.has(name);
+  /** Is this Identifier NODE a read of a caller-controlled binding? */
+  hasRef(n: AstNode | null | undefined): boolean {
+    if (!n || n.type !== "Identifier") return false;
+    if (!isReferencePosition(n)) return false;
+    const binding = this.scope.resolveIdentifier(n);
+    if (!binding) return this.unresolved.has(n.name) || this.isRequestRoot(null, n.name);
+    return this.bindings.has(binding) || this.isRequestRoot(binding, binding.name);
+  }
+
+  /** @internal — mark the binding `name` resolves to from `at` as tainted. */
+  taint(at: AstNode, name: string): boolean {
+    const binding = this.scope.getBinding(name, at);
+    const before = this.size;
+    if (binding) this.bindings.add(binding);
+    else this.unresolved.add(name);
+    this.names.add(name);
+    return this.size !== before;
+  }
+}
+
+/** Compute the caller-controlled bindings of a file. */
+export const computeTaint = (program: AstNode, scope: ScopeResolver): TaintSet => {
+  const tainted = new TaintSet(scope);
 
   /**
-   * Seed the set with the request roots this file GENUINELY has, so the answer
-   * lives in one place.
-   *
-   * `looksCallerControlled` used to re-derive "is this a request root?" from the
-   * name alone, which quietly defeated the exclusion above for all sixteen files
-   * that call it — a local `const context = lines.slice(0, 3).join("\n")` in a
-   * diff utility was reported as caller-controlled by thirteen security rules.
-   * Seeding here means the exclusion is applied once, by the code that knows
-   * about it, and every consumer inherits it.
+   * Seed the NAME view with this file's genuine request roots. The binding view
+   * needs no seeding — `hasRef` recognizes a request-root parameter directly,
+   * so there is exactly one definition of "is this the request object?".
    */
   walk(program, {
     enter: (node) => {
-      if (node.type === "Identifier" && isCallerRoot(node.name)) tainted.add(node.name);
+      if (node.type === "Identifier" && tainted.hasRef(node)) tainted.taint(node, node.name);
     },
   });
 
   const referencesCaller = (expr: AstNode | null | undefined): boolean => {
     if (!expr) return false;
-    const isTaintedIdent = (n: AstNode): boolean => {
-      if (n.type !== "Identifier" || !(isCallerRoot(n.name) || tainted.has(n.name))) return false;
-      // An Identifier is only a VARIABLE READ in some positions. `row.user_id`
-      // and `{ token: … }` are a property name and a key — not references — and
-      // treating them as such let taint spread by NAME COLLISION alone, which in
-      // a file-global set means one binding contaminates everything sharing a
-      // common word. `looksCallerControlled` applies the same rule; both must,
-      // or taint re-enters here on the next round and the fix there is undone.
-      const parent = n.parent as AstNode | undefined;
-      if (parent?.type === "MemberExpression" && parent.property === n && parent.computed !== true) return false;
-      if (parent?.type === "Property" && parent.key === n && parent.computed !== true) return false;
-      return true;
-    };
-    if (isTaintedIdent(expr)) return true;
-    return findDescendant(expr, isTaintedIdent, isFunctionLike) !== null;
+    if (tainted.hasRef(expr)) return true;
+    return findDescendant(expr, (n) => tainted.hasRef(n), isFunctionLike) !== null;
   };
 
+  // Propagate across statements and through assignments to a fixpoint:
+  // `const a = req.body.x; const b = a; sink(b)` must reach `b`.
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const before = tainted.size;
+    let grew = false;
+    const taintPattern = (pattern: AstNode | null | undefined): void => {
+      const names: [AstNode, string][] = [];
+      patternNames(pattern, names);
+      for (const [declNode, name] of names) grew = tainted.taint(declNode, name) || grew;
+    };
     walk(program, {
       enter: (node) => {
-        if (node.type === "VariableDeclarator" && node.init && referencesCaller(node.init)) {
-          const names: string[] = [];
-          patternNames(node.id, names);
-          for (const name of names) tainted.add(name);
+        if (
+          node.type === "VariableDeclarator" &&
+          node.init &&
+          // A function VALUE is never caller data, whatever its body reads.
+          // Without this, `const esc = (v) => v.replace(…)` becomes tainted the
+          // moment `v` does, and then every `esc(x)` in the file reads as
+          // caller-controlled — including `new RegExp(esc(input))`, which is
+          // the escaping the rules explicitly document as the SAFE pattern.
+          !isFunctionLike(node.init) &&
+          referencesCaller(node.init)
+        ) {
+          taintPattern(node.id);
         } else if (
           node.type === "AssignmentExpression" &&
           node.operator === "=" &&
           node.left?.type === "Identifier" &&
           referencesCaller(node.right)
         ) {
-          tainted.add(node.left.name);
+          grew = tainted.taint(node.left, node.left.name) || grew;
+        } else if (node.type === "ForOfStatement" && referencesCaller(node.right)) {
+          // `for (const id of req.body.ids)` binds a caller-controlled element.
+          // The loop variable has no initializer, so the VariableDeclarator arm
+          // above never reached it; the file-global name set used to cover the
+          // gap by accident, whenever some other function happened to declare
+          // the same name from a request. Keyed by binding, that accident is
+          // gone, so the propagation has to be real.
+          //
+          // `for…in` is deliberately NOT here. Its binding is a KEY, and over
+          // the corpus the objects reached this way are overwhelmingly DB rows
+          // that are "tainted" only because the QUERY mentioned caller input —
+          // `for (let x in rows.data)` binds "0", "1", "2". Propagating there
+          // added 75 false `no-prototype-pollution` findings in one file.
+          const left = node.left as AstNode;
+          taintPattern(left.type === "VariableDeclaration" ? (left.declarations as AstNode[])?.[0]?.id : left);
         }
       },
     });
-    if (tainted.size === before) break;
+    if (!grew) break;
   }
 
   return tainted;

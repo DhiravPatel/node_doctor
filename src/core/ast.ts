@@ -7,7 +7,7 @@
  * never make a helper throw).
  */
 
-import type { AstNode } from "./types.ts";
+import type { AstNode, TaintLookup } from "./types.ts";
 import { findDescendant } from "./walk.ts";
 
 const FUNCTION_TYPES = new Set([
@@ -228,30 +228,21 @@ export const getPropertyValue = (
  */
 export const looksCallerControlled = (
   node: AstNode | null | undefined,
-  tainted: Set<string>,
+  tainted: TaintLookup,
 ): boolean => {
   if (!node) return false;
-  // `tainted` already carries this file's genuine request roots — `computeTaint`
-  // seeds them, applying the local-declaration exclusion as it goes. Re-deriving
-  // "is this a request root?" from the NAME here is what defeated that exclusion
-  // and made every `const context = …` look caller-controlled.
-  const isTaintedIdent = (n: AstNode): boolean => {
-    if (n.type !== "Identifier" || !tainted.has(n.name)) return false;
-    // An Identifier is only a VARIABLE READ in some positions. In others it is
-    // just a name, and reading it as a reference is how a single tainted binding
-    // contaminates an entire file:
-    //
-    //   row.user_id           ← `user_id` is a property name, not the variable
-    //   { token: "literal" }  ← `token` is a key, not the variable
-    //
-    // Both were treated as caller-controlled. In minified bundles, where short
-    // names are rebound hundreds of times per file, this manufactured findings
-    // wholesale — one project produced 167 of them from a single rule.
-    const parent = n.parent as AstNode | undefined;
-    if (parent?.type === "MemberExpression" && parent.property === n && parent.computed !== true) return false;
-    if (parent?.type === "Property" && parent.key === n && parent.computed !== true) return false;
-    return true;
-  };
+  // `tainted.hasRef` resolves each identifier to the BINDING it names at that
+  // use site, so it answers three questions this function used to get wrong:
+  //
+  //   • is it a variable read at all?  `row.user_id` and `{ token: … }` are a
+  //     property name and a key, not references — reading them as references is
+  //     how one tainted binding contaminated a whole file (a minified bundle
+  //     produced 167 findings from a single rule this way);
+  //   • is it a request root?  a `const context = lines.join("\n")` in a diff
+  //     utility is not, and `computeTaint` applies that exclusion per binding;
+  //   • is it THIS binding?  a `state` local in one handler no longer inherits
+  //     taint from a `state` destructured from `request.query` in another.
+  const isTaintedIdent = (n: AstNode): boolean => tainted.hasRef(n);
   if (isTaintedIdent(node)) return true;
   return findDescendant(node, isTaintedIdent, isFunctionLike) !== null;
 };
