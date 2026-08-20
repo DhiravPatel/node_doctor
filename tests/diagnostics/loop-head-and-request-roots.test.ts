@@ -150,10 +150,13 @@ describe("looksCallerControlled — an Identifier is only a read in some positio
 
   test("the genuine defect still fires — this must not become a recall loss", async () => {
     const { noPrototypePollution } = await import("../../src/diagnostics/security/no-prototype-pollution.ts");
+    // An ESCALATING write — the key is written THROUGH, which is what reaches
+    // `Object.prototype`. A single-level `target[key] = v` is inert; see the
+    // rule's header for the measurement.
     const found = findings(
       `app.post("/x", (req, res) => {
          const key = req.body.key;
-         target[key] = req.body.value;
+         target[key].sub = req.body.value;
        });`,
       [noPrototypePollution],
     );
@@ -166,7 +169,7 @@ describe("looksCallerControlled — an Identifier is only a read in some positio
     const found = findings(
       `app.post("/x", (req, res) => {
          const key = req.body.key;
-         target[lookup[key]] = 1;
+         target[lookup[key]].sub = 1;
        });`,
       [noPrototypePollution],
     );

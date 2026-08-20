@@ -11,6 +11,78 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### `no-prototype-pollution` was built on a false premise
+
+A single-level computed write cannot pollute anything. Run it:
+
+```js
+const o = {}; o["__proto__"] = { polluted: 1 };
+({}).polluted   // undefined — `o` was merely RE-PARENTED
+
+const b = {}; b["__proto__"]["p2"] = 42;
+({}).p2         // 42 — THIS is the vulnerability
+```
+
+`obj[key] = value` sets an own property. If the key is `__proto__` the assignment
+goes through the setter and changes **that object's** prototype; it adds nothing
+to `Object.prototype`, and no other object in the process is affected.
+
+Flagging that shape was essentially the rule's entire output. A hand-audit of all
+76 findings in one backend found **1 true positive and 75 false**, while the rule
+was more than half of every Security finding in that project. The dominant false
+classes were a group-by accumulator keyed on a database row field (45), an array
+element written at a `findIndex` result (7), and a key normalised to one of a few
+string literals (6) — none of which can pollute anything even if the key were
+`__proto__`.
+
+The rule now fires only where the write reaches the prototype:
+
+- **The recursive merge gadget** — a function taking two objects, walking the
+  source's keys, and recursing into `(target[k], source[k])`. This is the shape
+  behind the lodash.merge / deep-extend / merge-deep CVEs, because the recursion
+  supplies the second level a single write lacks. Confirmed by running the
+  corpus's own `_deepMergeInto` against `{"__proto__":{"pp_polluted":"yes"}}`.
+- **An escalating write** — a caller-controlled computed key with at least one
+  further member link after it. Stated as "a link AFTER the computed one" rather
+  than "two or more links", because the looser form readmits `a.b[k] = v`, which
+  is still single-level and still inert.
+- **The walked pointer** — `base[k] = v` where `base` is reassigned from
+  `base = base[...]`, the `lodash.set`/`dot-prop`/`set-value` shape. This clause
+  exists because an adversarial review proved that narrowing to escalating writes
+  alone would silence that entire CVE class.
+- **A deliberate literal sink** — only a *computed* `obj["__proto__"] = v`.
+  `prototype` is dropped from the dangerous set, since `Foo.prototype = {...}` is
+  how pre-class JavaScript defines methods.
+
+Two discriminators were measured rather than guessed. A merge gadget recurses into
+computed reads of **both** parameters; `json2.js`'s JSON reviver is recursive,
+walks keys and writes computed keys — every surface trait of a merge — but passes
+a value and a *key*. Requiring both parameters removed 72 library-internal
+findings. And a numeric key can never be the string `__proto__`, which removed the
+loop-counter and `findIndex` classes; `+` is deliberately excluded from the
+numeric operators, since string concatenation is exactly how a `__proto__` key
+gets assembled.
+
+**403 findings across five projects → 33**, with the one real gadget kept.
+
+The residual are escalating writes whose keys come from server-side rows. Closing
+those needs scope-keyed taint — the file-global, name-keyed set is what marks them
+— and that is a substrate change affecting a dozen rules, so it is deliberately
+not bundled here.
+
+Two shipped tests asserted the old, false premise and were corrected rather than
+worked around; a third (the ratchet CLI test) was decoupled from this rule
+entirely, since it only needed *some* new finding and keying it on one rule's
+precision made it fail when that rule was corrected.
+
+**Also: obfuscated bundles are no longer scanned.** The vendored-library gate now
+also recognises a file that is both one-lined and bundle-scale — the corpus has an
+obfuscated 688,354-byte single-line file with no licence banner and no UMD wrapper,
+whose "variables" are `_0x34e2f2`. Both conditions are required: a *small* file with
+one long line is not a bundle but something pathological, and this tool's posture is
+that "I did not look" must never be reported as "there is nothing", so such a file is
+still surfaced as a coverage gap rather than silently dropped.
+
 ### Security wave: four false-positive classes closed, one recall gap opened
 
 A six-lens security pass over the corpus, with every survivor adversarially

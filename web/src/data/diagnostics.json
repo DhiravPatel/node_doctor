@@ -1657,7 +1657,7 @@
       "requires": [],
       "disabledWhen": [],
       "optIn": false,
-      "recommendation": "Reject the dangerous keys before writing (`if (key === '__proto__' || key === 'constructor' || key === 'prototype') return;`), use a `Map`, or store data on a `Object.create(null)` bag. Never write to an object with an unvalidated caller-supplied key."
+      "recommendation": "Reject the dangerous keys before the write (`if (key === '__proto__' || key === 'constructor') continue;`), use a `Map`, or build on `Object.create(null)`. A single `obj[key] = value` is harmless on its own — what reaches `Object.prototype` is writing THROUGH such a key, which is why deep-merge and path-setter helpers are the classic sinks."
     },
     {
       "id": "no-public-cloud-storage",

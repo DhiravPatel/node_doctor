@@ -14,7 +14,7 @@ describe("no-prototype-pollution", () => {
   test("fires on a caller-controlled computed key write", () => {
     expectFires(
       "no-prototype-pollution",
-      `app.post("/x", (req, res) => { const target = {}; target[req.body.key] = req.body.value; });`,
+      `app.post("/x", (req, res) => { const target = {}; target[req.body.key].sub = req.body.value; });`,
     );
   });
   test("fires on a literal __proto__ write", () => {

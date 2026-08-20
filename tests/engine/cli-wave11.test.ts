@@ -217,7 +217,10 @@ describe("CLI: ratchet (§87)", () => {
       assert.equal(unchanged.code, 0, "accepted debt does not fail the build");
       assert.match(unchanged.stdout, /Ratchet: PASS/);
 
-      await writeFile(join(dir, "src", "worse.js"), 'app.post("/y",(req,res)=>{const t={};t[req.body.k]=1;});\n');
+      // Deliberately a second `eval` site rather than a prototype-pollution
+      // shape: this test is about the RATCHET, and keying it on one rule's
+      // precision model made it fail when that model was corrected.
+      await writeFile(join(dir, "src", "worse.js"), 'app.post("/y",(req,res)=>{eval(req.body.k);});\n');
       const regressed = await runCli(["ratchet", "check"], dir);
       assert.equal(regressed.code, 1, "a NEW finding fails");
       assert.match(regressed.stdout, /Ratchet: FAIL/);

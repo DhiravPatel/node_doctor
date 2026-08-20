@@ -354,3 +354,122 @@ describe("no-nosql-object-injection — who chose the keys", () => {
     );
   });
 });
+
+/**
+ * `no-prototype-pollution` was built on a premise that is false, and a hand-audit
+ * of all 76 findings in one backend found **1 true positive and 75 false** — while
+ * the rule was more than half of every Security finding in that project.
+ *
+ * The premise, disproved by running it:
+ *
+ *   const o = {}; o["__proto__"] = { polluted: 1 };
+ *   ({}).polluted   // undefined — `o` was merely RE-PARENTED
+ *
+ *   const b = {}; b["__proto__"]["p2"] = 42;
+ *   ({}).p2         // 42 — THIS is the vulnerability
+ *
+ * A single-level `obj[key] = value` sets an own property. If the key is
+ * `__proto__` it changes that object's prototype and nothing else — no other
+ * object in the process is affected. So the rule now fires only where the write
+ * can actually reach `Object.prototype`. Corpus: 403 findings across five
+ * projects → 33, with the one real gadget kept.
+ */
+describe("no-prototype-pollution — only writes that can reach the prototype", () => {
+  test("fires: an ESCALATING write, where the key is written through", () => {
+    expectFires(
+      "no-prototype-pollution",
+      `app.post("/x", (req, res) => { const k = req.body.k; target[k].sub = req.body.v; });`,
+    );
+    expectFires(
+      "no-prototype-pollution",
+      `app.post("/x", (req, res) => { const k = req.body.k; target[k][req.body.k2] = 1; });`,
+    );
+  });
+
+  test("fires: the recursive deep-merge gadget, in every spelling", () => {
+    // The shape behind lodash.merge / deep-extend / merge-deep CVEs. Verified by
+    // running the corpus's own `_deepMergeInto` against `{"__proto__":{"x":1}}`.
+    const decl = `function merge(target, source){ for (const k of Object.keys(source)) { if (typeof source[k] === "object") { if(!target[k]) target[k]={}; merge(target[k], source[k]); } else { target[k] = source[k]; } } }`;
+    const method = `class S { _deepMergeInto(target, source){ for (const k in source) { const sv = source[k]; const tv = target[k]; if (sv && typeof sv === "object" && tv) { this._deepMergeInto(tv, sv); } else { target[k]=sv; } } } }`;
+    const arrow = `const merge = (target, source) => { for (const k of Object.keys(source)) { if (typeof source[k]==="object") { if(!target[k]) target[k]={}; merge(target[k], source[k]); } else { target[k]=source[k]; } } };`;
+    for (const source of [decl, method, arrow]) expectFires("no-prototype-pollution", source);
+  });
+
+  test("fires: the walked-pointer path setter (lodash.set / dot-prop CVE shape)", () => {
+    // Narrowing to escalating writes alone would silence this entire class — an
+    // adversarial review caught that, which is why the clause exists.
+    expectFires(
+      "no-prototype-pollution",
+      `app.post("/s", (req, res) => {
+         const segs = req.body.path.split(".");
+         let node = obj;
+         for (const s of segs.slice(0, -1)) { node = node[s]; }
+         node[segs[segs.length - 1]] = req.body.v;
+       });`,
+    );
+  });
+
+  test("fires: a computed literal write to a prototype key", () => {
+    expectFires("no-prototype-pollution", `o["__proto__"] = payload;`);
+  });
+
+  describe("silence — shapes that cannot pollute under any input", () => {
+    test("a single-level caller-keyed write only re-parents that object", () => {
+      expectSilent(
+        "no-prototype-pollution",
+        `app.post("/x", (req, res) => { const k = req.body.k; target[k] = req.body.v; });`,
+      );
+      // `a.b[k] = v` is still single-level — "two or more links total" would
+      // wrongly readmit it, which is why the test is "a link AFTER the computed one".
+      expectSilent(
+        "no-prototype-pollution",
+        `app.post("/x", (req, res) => { const k = req.body.k; rights.column_preferences[k] = { visible: true }; });`,
+      );
+    });
+
+    test("a group-by accumulator keyed on a database row field", () => {
+      // The single largest false class: 45 of the 76 findings in one backend.
+      expectSilent(
+        "no-prototype-pollution",
+        `app.get("/x", (req, res) => {
+           const id = req.query.id;
+           const rows = await db.find({ id });
+           rows.reduce((acc, user) => { acc[user.user_id] = { name: user.name }; return acc; }, {});
+         });`,
+      );
+    });
+
+    test("a numeric key — a number can never be the string `__proto__`", () => {
+      expectSilent(
+        "no-prototype-pollution",
+        `app.post("/x", (req, res) => { const v = req.body.v; const i = slabs.findIndex((s) => s.b === v); if (i !== -1) { slabs[i].qty = v; } });`,
+      );
+      expectSilent(
+        "no-prototype-pollution",
+        `app.get("/x", (req, res) => { let counter = 0; out.items[counter]["it_id"] = req.query.x; });`,
+      );
+    });
+
+    test("a JSON reviver is recursive and walks keys but is not a merge", () => {
+      // `json2.js`'s `walk` has every surface trait of a merge gadget. The
+      // discriminator is that a merge recurses into computed reads of BOTH
+      // parameters; a reviver passes a value and a KEY. Removed 72 findings.
+      expectSilent(
+        "no-prototype-pollution",
+        `function walk(holder, key) { var v, value = holder[key]; if (value && typeof value === "object") { for (var k in value) { v = walk(value, k); if (v !== undefined) { value[k] = v; } } } return reviver.call(holder, key, value); }`,
+      );
+    });
+
+    test("ordinary prototype assignment is not pollution", () => {
+      expectSilent("no-prototype-pollution", `o.__proto__ = Base.prototype;`);
+      expectSilent("no-prototype-pollution", `Foo.prototype = { greet() {} };`);
+    });
+
+    test("a non-recursive two-parameter copy helper", () => {
+      expectSilent(
+        "no-prototype-pollution",
+        `function copy(target, source){ for (const k of Object.keys(source)) { target[k] = source[k]; } }`,
+      );
+    });
+  });
+});

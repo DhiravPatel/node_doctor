@@ -397,7 +397,36 @@ const VENDORED_SIGNALS: readonly RegExp[] = [
 /** How much of the file to inspect — a banner or UMD wrapper is always at the top. */
 const VENDORED_PROBE_BYTES = 4096;
 
+/**
+ * A line no human wrote.
+ *
+ * Minified and obfuscated bundles are machine output even when they carry no
+ * licence banner and no UMD wrapper — an obfuscator strips both. The corpus has
+ * one at 688,354 bytes on a SINGLE line, which the banner and UMD signals both
+ * miss, and which produced findings whose "variables" are `_0x34e2f2`.
+ *
+ * A 2,000-character line is three orders of magnitude past anything a person
+ * types and well past what any formatter emits. But length alone is not enough:
+ * BOTH conditions are required, because a small file with one long line is not a
+ * bundle — it is more likely something pathological that the reader needs TOLD
+ * about. This tool's whole posture is that "I did not look" must never be
+ * reported as "there is nothing", so a file that cannot be analysed is surfaced
+ * as a coverage gap rather than silently dropped, and only genuine machine output
+ * is dropped. A real minified bundle is both one-lined AND large.
+ */
+const MINIFIED_LINE_LENGTH = 2000;
+const MINIFIED_MIN_BYTES = 50_000;
+
+const hasMachineLengthLine = (sourceText: string): boolean => {
+  if (sourceText.length < MINIFIED_MIN_BYTES) return false;
+  const head = sourceText.slice(0, VENDORED_PROBE_BYTES * 2);
+  // No newline at all within the probe window means the first line is at least
+  // this long already.
+  if (!head.includes("\n")) return head.length >= MINIFIED_LINE_LENGTH;
+  return head.split("\n").some((line) => line.length >= MINIFIED_LINE_LENGTH);
+};
+
 export const looksVendoredLibrary = (sourceText: string): boolean => {
   const head = sourceText.slice(0, VENDORED_PROBE_BYTES);
-  return VENDORED_SIGNALS.some((signal) => signal.test(head));
+  return VENDORED_SIGNALS.some((signal) => signal.test(head)) || hasMachineLengthLine(sourceText);
 };
