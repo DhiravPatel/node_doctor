@@ -114,8 +114,54 @@ is ECB, which is `no-weak-cipher`'s subject.
 **A correction to an earlier measurement.** I previously reported this family as
 having zero corpus population — "5 `createCipheriv` call sites, 0 with a constant
 IV" — and concluded it could not clear the population bar. That probe was wrong:
-the real first-party count is roughly 20 call sites, three of which have a literal
-IV. The rule ships because the population is real.
+the real first-party count is roughly 20 call sites, four of which have a literal
+IV, across two distinct defects. The rule ships because the population is real.
+
+The second defect needed the rule extended, and it is a shape no amount of binding
+resolution reaches — the IV lives on an object literal and is read back through
+`this`:
+
+```js
+var crypt = {
+  iv: "<16 characters>",
+  encrypt: function (data, key) {
+    var iv = this.iv;                     // ← one hop
+    var cipher = crypto.createCipheriv(algo, key, iv);
+```
+
+It is as fixed as a literal argument, and worse: every method on the object shares
+it. Resolving it means a property lookup on the object literal the method is
+defined in. Reaching it also meant accepting non-`const` bindings — the corpus
+writes `var iv = this.iv` — so a binding is now followed when it is `const`, or
+when nothing in the file ever assigns to it. A `var` that is later reassigned
+stays silent.
+
+### Scoped and rejected: `no-spoofable-ip-allowlist`
+
+Proposed as the survivor of two IP-spoofing rules, narrowed to the leftmost
+`X-Forwarded-For` entry reaching an allowlist or quota decision, and reported as
+"2 findings, 2/2 precision, 0 false positives on 38,820 files".
+
+The vulnerability is real and I verified the mechanism — proxies APPEND to
+`X-Forwarded-For`, so `split(",")[0]` is precisely the entry the client sent while
+`.pop()` is your own proxy's view:
+
+```
+header the app sees:  10.0.0.99, 203.0.113.7, 198.51.100.4
+leftmost split(",")[0] -> 10.0.0.99      ← the attacker chose this
+rightmost .pop()       -> 198.51.100.4   ← added by your own proxy
+```
+
+But the population does not reproduce. Across **25,952 first-party files there is
+exactly ONE leftmost-XFF extraction, and it reaches no allowlist or quota
+decision** — it is used for a log record, which the proposal itself excluded as a
+noise source. Two of the four originally claimed true positives rest on
+`X-Real-IP`, which the same review had already ruled undecidable because it would
+flag correct Cloudflare code.
+
+So the rule would fire on nothing, which this project treats as a failure in its
+own right. Not shipped — the fifth candidate rejected on measured population
+rather than on taste.
 
 ### `no-prototype-pollution` was built on a false premise
 

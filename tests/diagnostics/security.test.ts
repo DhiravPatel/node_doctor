@@ -531,4 +531,37 @@ describe("no-static-cipher-iv", () => {
       expectSilent("no-static-cipher-iv", `const d = crypto.createDecipheriv('aes-256-cbc', key, '1234567812345678');`);
     });
   });
+
+  /**
+   * The second corpus defect, which the first version of this rule missed: the
+   * IV lives on an object literal and is read back through `this`. It is as fixed
+   * as a literal argument — more so, since every method on the object shares it.
+   */
+  test("fires: an IV declared on an object literal and read via `this`", () => {
+    expectFires(
+      "no-static-cipher-iv",
+      `var crypt = { iv: '1234567812345678', encrypt: function (data, key) { var iv = this.iv; return crypto.createCipheriv('aes-256-cbc', key, iv); } };`,
+    );
+    expectFires(
+      "no-static-cipher-iv",
+      `var crypt = { iv: '1234567812345678', encrypt: function (d, k) { return crypto.createCipheriv('aes-256-cbc', k, this.iv); } };`,
+    );
+  });
+  test("silent: the same shape with a per-message IV", () => {
+    expectSilent(
+      "no-static-cipher-iv",
+      `var crypt = { iv: crypto.randomBytes(16), encrypt: function (d, k) { var iv = this.iv; return crypto.createCipheriv('aes-256-cbc', k, iv); } };`,
+    );
+  });
+  test("silent: `this.iv` on a class is not decidable from a literal", () => {
+    expectSilent("no-static-cipher-iv", `class C { encrypt(k) { return crypto.createCipheriv('aes-256-cbc', k, this.iv); } }`);
+  });
+  test("silent: a `var` that is reassigned may hold a fresh IV", () => {
+    // Reaching the object-literal case meant accepting non-const bindings, so
+    // this is the guard that keeps that safe.
+    expectSilent(
+      "no-static-cipher-iv",
+      `var iv = '1234567812345678';\niv = crypto.randomBytes(16);\nconst c = crypto.createCipheriv('aes-256-cbc', key, iv);`,
+    );
+  });
 });
