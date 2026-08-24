@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 174,
-  "defaultOn": 123,
+  "total": 175,
+  "defaultOn": 124,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 65,
     "Maintainability": 16,
     "Reliability": 49,
-    "Bugs": 31
+    "Bugs": 32
   },
   "categoryWeights": {
     "Security": 2,
@@ -2214,6 +2214,22 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Default it (`process.env.FOO ?? fallback`), guard it (`if (process.env.FOO) …`), or validate all required vars once at startup. A non-null `!` or a direct member access crashes with `Cannot read properties of undefined` the first time the var is unset in an environment."
+    },
+    {
+      "id": "no-unclamped-month-shift",
+      "title": "Month shifted without bounding the day, so end-of-month dates overflow into the next month",
+      "category": "Bugs",
+      "severity": "warn",
+      "scope": "file",
+      "tags": [
+        "billing",
+        "correctness",
+        "date"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Bound the day around the shift. Set it to 1 first so the overflow cannot happen, then restore it clamped to the target month's length: `const day = d.getDate(); d.setDate(1); d.setMonth(d.getMonth() + n); d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()))`. The shorter repair-after form works too: `d.setMonth(d.getMonth() + n); if (d.getDate() !== day) d.setDate(0)`. `new Date(y, m + n, d)` is NOT a fix — it overflows identically."
     },
     {
       "id": "no-uncleared-module-interval",

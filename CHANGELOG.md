@@ -11,6 +11,66 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### A month added by `setMonth` skips a month for end-of-month dates
+
+New diagnostic `no-unclamped-month-shift` (Bugs / `warn` / confidence `high`).
+`setMonth` writes the month field and leaves the day where it was, so a day the
+target month does not have spills into the month **after** the intended one.
+Measured by running each case rather than argued:
+
+```
+new Date(2024, 0, 31).setMonth(m + 1)   → Sat Mar 02 2024   (February skipped)
+new Date(2024, 2, 31).setMonth(m - 1)   → Sat Mar 02 2024   (moves FORWARD)
+new Date(2024, 4, 31).setMonth(m + 1)   → Mon Jul 01 2024   (June has 30 days)
+```
+
+Note the second line: subtracting a month from March 31 lands two days *later*
+than it started. There is no direction in which the idiom is safe, and it is not
+only a February problem.
+
+**32 production sites across 8 corpus codebases**, and the true positives are
+dates written to a database that then govern money — a service-period end and a
+credit expiry (five sites in one service), a subscription expiry returned as
+`toISOString().split("T")[0]`, and the next charge date of a MONTHLY autopay
+mandate, so a mandate taken out on the 31st charges on the 2nd. Nothing throws,
+the value is a well-formed date, and it is correct for 27 days of every month.
+
+The rule ships because the same corpus contains **two hand-written correct
+implementations of the fix**, in production code by the same organization, and
+both stay silent: one normalizes the day to 1 before the shift and clamps back
+with `setDate(Math.min(day, lastDayOfMonth))`, the other shifts first and repairs
+after with `if (date.getDate() !== d) date.setDate(0)` (verified: Jan 31 plus a
+month, then `setDate(0)`, is Feb 29). A literal day of 1–28 written *before* the
+shift or any day write *after* it therefore silences the call, as do the
+two-argument `setMonth(m, 1)` form, a provable day from `new Date(y, m, <1–28>)`
+or from the literal text of `new Date("2026-03-01")` /
+`` new Date(`${month}-01`) ``, and one hop of copy propagation for the
+`monthStart.setDate(1); const monthEnd = new Date(monthStart)` idiom. Clamp
+checks are keyed by **binding identity**, not name, so a normalized `d` in one
+function cannot silence an unguarded `d` in another.
+
+`setFullYear` has the identical defect on Feb 29 and the identical fix. It was
+implemented, measured, and **cut**: 23 production sites, 16 of them year-over-year
+reporting windows in a single controller where a one-day drift once every four
+years governs nothing, against 5 that mattered — and three of those five sit
+within four lines of a month site the rule already reports. The month case
+triggers on three days of most months, the year case on one day in 1,461. A test
+pins the exclusion so it is not re-added without re-measuring.
+
+Complements `no-local-date-as-iso-datestring`, which deliberately removed its own
+`setMonth`/`setFullYear` branch: that rule is about rendering a local-midnight
+instant in UTC, this one is about the shift itself being wrong in any zone.
+
+Measured and rejected on the way to it, each at zero or near-zero corpus
+population: `findOneAndUpdate` without `new: true` (233 calls, 182 with the
+result used, **0** missing a return-shape key), a Mongoose extension of
+`no-untransacted-dependent-writes` (14 candidate first writes, **0** dependent
+pairs), an unfiltered `deleteMany({})` (6 sites, 5 in tests and 1 in a migration
+script), a moment-mutation aliasing rule (**0** occurrences of the aliasing shape
+in 125 moment-importing files), and a cleartext-`http://`-request rule (1,115
+files mention `http://`; the outbound-call sites are all `localhost`, `127.0.0.1`
+or example hosts).
+
 ### Taint is now keyed by BINDING, not by name
 
 The intra-file taint set was a file-global `Set<string>` of NAMES, and
