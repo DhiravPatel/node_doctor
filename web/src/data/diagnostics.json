@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 176,
-  "defaultOn": 125,
+  "total": 177,
+  "defaultOn": 126,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 65,
     "Maintainability": 16,
     "Reliability": 49,
-    "Bugs": 33
+    "Bugs": 34
   },
   "categoryWeights": {
     "Security": 2,
@@ -665,6 +665,21 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Either the body matters — use `200` — or it does not, and `res.status(204).end()` / `res.sendStatus(204)` says so. HTTP defines 204, 205 and 304 as bodiless and Node discards the payload, so the caller's `await res.json()` throws on an empty response."
+    },
+    {
+      "id": "no-broken-sort-comparator",
+      "title": "Sort comparator that provably cannot order the array",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "types"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "A comparator must return a NEGATIVE number for \"a first\", positive for \"b first\", and zero for equal, and it has to read BOTH elements. A boolean only ever gives 1 or 0, so nothing moves forward. Subtract for numbers (`(a, b) => a.total - b.total`), use `localeCompare` for strings (`(a, b) => a.name.localeCompare(b.name))`, or spell out all three cases: `(a, b) => (a.k > b.k ? 1 : a.k < b.k ? -1 : 0)`."
     },
     {
       "id": "no-cache-without-ttl",

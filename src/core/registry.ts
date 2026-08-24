@@ -34,6 +34,7 @@ import { noUnclonableWorkerMessage } from "../diagnostics/async/no-unclonable-wo
 import { requireFetchTimeout } from "../diagnostics/async/require-fetch-timeout.ts";
 // bugs
 import { noBigintPrecisionLoss } from "../diagnostics/bugs/no-bigint-precision-loss.ts";
+import { noBrokenSortComparator } from "../diagnostics/bugs/no-broken-sort-comparator.ts";
 import { noChunkStringConcat } from "../diagnostics/bugs/no-chunk-string-concat.ts";
 import { noConstantCondition } from "../diagnostics/bugs/no-constant-condition.ts";
 import { noDirnameInEsm } from "../diagnostics/bugs/no-dirname-in-esm.ts";
@@ -203,6 +204,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   requireFetchTimeout,
   // bugs
   noBigintPrecisionLoss,
+  noBrokenSortComparator,
   noChunkStringConcat,
   noConstantCondition,
   noDirnameInEsm,

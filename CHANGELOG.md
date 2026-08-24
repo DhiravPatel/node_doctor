@@ -11,6 +11,68 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### A sort comparator that provably cannot order the array
+
+New diagnostic `no-broken-sort-comparator` (Bugs / `error` / confidence `high`).
+`sort` needs three answers — negative for "a first", positive for "b first", zero
+for equal — and a boolean supplies only two, because `ToNumber(true)` is `1` and
+`ToNumber(false)` is `0`. Measured on `[5, 3, 9, 1, 7, 2, 8]`, running every form:
+
+```
+sort((a, b) => a > b)            → [5,3,9,1,7,2,8]   unchanged
+sort((a, b) => a < b)            → [5,3,9,1,7,2,8]   unchanged
+sort((a, b) => a >= b)           → [5,3,9,1,7,2,8]   unchanged
+sort((a, b) => a === b)          → [5,3,9,1,7,2,8]   unchanged
+sort((a, b) => a > b ? 1 : 0)    → [5,3,9,1,7,2,8]   unchanged
+sort((a, b) => a.p - a.q)        → [2,1,3]           garbage
+sort((a, b) => a > b ? 1 : -1)   → [1,2,3,5,7,8,9]   correct
+sort((a, b) => a - b)            → [1,2,3,5,7,8,9]   correct
+```
+
+Nothing throws. The array comes back with the right length and the right
+elements, and usually in *nearly* the right order — the rows came out of a query
+that already had an `ORDER BY`, so the symptom is a few items misplaced on one
+page rather than an obvious scramble. A test that checks `length`, or membership,
+or sorts an already-ordered fixture, passes. TypeScript catches it in a typed file
+and misses it wherever `any`, plain JS, or an untyped callback is involved.
+
+Two independent proofs, both from syntax alone. **Clause 1 — every value the
+comparator can return is provably non-negative:** a relational or equality
+comparison, `!x`, a non-negative numeric literal, `true`/`false`, a `&&`/`||`/`??`
+of those, or a conditional whose *both* branches qualify. `a > b ? 1 : 0` is the
+defect; `a > b ? 1 : -1` is not. **Clause 2 — the body never reads one of the two
+elements:** `rows.sort((a, b) => a.revenue - a.cost)` is scoring one element
+against itself. References are matched by **binding**, not name.
+
+Uncertainty resolves to silence throughout: a subtraction, a `localeCompare`, any
+call, an identifier or a unary minus is not provably non-negative, which also
+makes the `Math.random() - 0.5` shuffle idiom silent by construction. Zero-parameter
+comparators, rest parameters, and any body touching `arguments` are excluded —
+each reads the elements without going through the named parameters.
+
+Validated by running the rule over every readable `.sort(`/`.toSorted(` call on
+the machine — **166 files** including the TypeScript compiler, esbuild, rollup and
+the Vite bundle. That sweep produced exactly one clause-2 hit: vite's lockfile
+ordering, `.sort((_, { manager }) => …startsWith(manager) ? 1 : -1)`. It is
+genuinely non-antisymmetric and therefore implementation-defined, but its author
+wrote `_` to mean "ignored on purpose", and a rule that argues with an explicit
+`_` is a rule people switch off — so a parameter named `_`/`_x` is now taken at
+its word. Final sweep: **0 findings in 166 files, 0 parse failures.**
+
+One recall gap is documented and pinned by a test rather than left to be
+discovered: the scope resolver models module/function/`catch` scopes but not
+nested blocks, so a `{ const b = … }` shadowing a parameter — the only legal way
+to write that shadow, since a top-level `const b` beside a parameter `b` is a
+SyntaxError — reads as the parameter and stays quiet. It under-reports rather than
+reporting correct code.
+
+> Same corpus caveat as the wave below: filesystem access outside the project
+> directory still returns `Operation not permitted`, so population could not be
+> measured across the ~29.6k-file local corpus. This rule was selected on the §201
+> criterion — the claim has to be an always-wrong fact about the language — and
+> its precision is established by executing every firing and silencing shape and
+> by the 166-file false-positive sweep, not by corpus sampling.
+
 ### A `toFixed` result used as a number, so `+` concatenates
 
 New diagnostic `no-tofixed-as-number` (Bugs / `error` / confidence `high`).
