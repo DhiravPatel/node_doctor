@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 177,
-  "defaultOn": 126,
+  "total": 178,
+  "defaultOn": 127,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 65,
     "Maintainability": 16,
     "Reliability": 49,
-    "Bugs": 34
+    "Bugs": 35
   },
   "categoryWeights": {
     "Security": 2,
@@ -2417,6 +2417,24 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Release it in a `finally` so the error path cannot skip it: `const client = await pool.connect(); try { … } finally { client.release(); }`. A resource that is only released on the happy path is released until the first exception, and then never again."
+    },
+    {
+      "id": "no-unreturned-hono-response",
+      "title": "Hono handler builds a response and never returns it, so the caller gets a 404",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "hono",
+        "http"
+      ],
+      "requires": [
+        "hono"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Return the response: `return c.json(…)`, or drop the braces so the arrow returns it (`(c) => c.json(…)`). Unlike Express's `res.json(…)`, which sends, Hono's `c.json(…)` only CONSTRUCTS a `Response` — Hono replies with whatever the handler returns, so a discarded one leaves nothing to reply with and the caller gets a 404 even though the handler ran."
     },
     {
       "id": "no-unsafe-archive-extraction",

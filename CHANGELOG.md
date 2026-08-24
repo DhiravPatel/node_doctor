@@ -11,6 +11,79 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Hono and AdonisJS coverage
+
+Both frameworks already had a capability token and working handler recognition,
+and neither had any coverage of its own. Two gaps closed, each verified by
+running the framework rather than by reading its docs.
+
+**Hono — the response that is built and never sent.** New diagnostic
+`no-unreturned-hono-response` (Bugs / `error` / confidence `high`, gated on the
+`hono` token). `res.json(x)` **sends**; `c.json(x)` **constructs a `Response` and
+hands it back**, and Hono replies with whatever the handler returns. MEASURED
+against Hono 4.13.4 by running each form through `app.request()`:
+
+```
+(c) => { c.json({ ok: true }); }        → 404  "404 Not Found"
+(c) => { c.text("hi"); }                → 404  "404 Not Found"
+(c) => { c.html("<p>hi</p>"); }         → 404  "404 Not Found"
+(c) => { c.redirect("/other"); }        → 404  "404 Not Found"
+(c) => { c.body("raw"); }               → 404  "404 Not Found"
+async (c) => { await save(…); c.json(…); }  → 404  "404 Not Found"
+(c) => c.json({ ok: true })             → 200  {"ok":true}
+```
+
+The async row is the expensive one: the `await` already ran, so the row was
+written or the payment taken, and the caller is told the route does not exist —
+and a client that retries on 404 does all of it again. It survives review because
+the handler reads like Express and the 404 reads like a routing problem, so the
+search starts in the router rather than in the handler that already ran.
+
+Three structural conditions: the method must **produce** a Response
+(`json`/`text`/`html`/`body`/`redirect`/`notFound`/`newResponse`), the result must
+be **discarded**, and the receiver must be the **first parameter** of a function
+the engine already recognizes as a handler. That last anchor is what keeps the
+rule off every other framework in the same repo — Express and Fastify both put
+their response object *second*, so `res.json(…)` and `reply.send(…)` can never
+match. The side-effecting context methods are excluded on measured evidence:
+`c.header("x-trace","1")` and `c.status(201)` before a returned `c.json(…)`
+produce a 201 with the right body, and `c.set(…)` stores a variable `c.get(…)`
+reads back — discarding those is the intended usage.
+
+Two measured non-defects are deliberately **not** claimed. `throw new
+HTTPException(401)` produces a real 401. And middleware calling `next()` *without*
+`await` still reaches the handler and answers 200 — so the obvious "missing await
+on `next()`" rule would be reporting correct code, and is not shipped.
+
+**AdonisJS — the body spelled as a call.** `no-mass-assignment` was blind to the
+entire framework, and the reason was one line: `isBodyMember` looks for a
+MemberExpression (`req.body`), while Adonis spells the body as a **call**
+(`request.all()`). Verified before the fix — a textbook controller doing
+`User.create(request.all())` and `user.merge(request.body())` produced **zero
+findings from all 178 diagnostics**. That is the framework's headline security
+footgun going unreported on every Adonis project the tool has ever scanned.
+
+The rule now recognizes the zero-argument accessors `request.all()`,
+`request.body()`, `request.qs()` and `request.params()`, plus Lucid's assignment
+sinks `merge` and `fill`. Both sets are gated on the `adonis` capability, because
+`merge` and `fill` are ordinary words elsewhere (`_.merge`,
+`Array.prototype.fill`) and adding them to the global write list would trade this
+framework's coverage for another framework's noise — a test pins that
+`_.merge(config, req.body)` on an Express project stays silent. Only the
+zero-argument forms count: `request.only([...])`, `request.except([...])` and
+`request.validateUsing(validator)` pick fields, so they join `NARROWING_CALLS` and
+are the fix this rule recommends rather than the bug.
+
+**Documentation corrected.** §2's framework table claimed Koa as **Core** with
+"dedicated diagnostics". There are none, and Koa's `(ctx, next)` signature is not
+matched by `looksLikeExpressHandler` either (`FIRST_PARAM_NAMES` is
+`{req, request}`) — Koa handlers are found only through router registration. The
+table now separates the three things that were being conflated: the capability
+token, handler recognition, and dedicated coverage. They do not have the same
+answer for any framework, and the middle column is where most of the value is:
+handler recognition is what gates the ~165 framework-independent rules, and it
+works framework-agnostically for any `x.get(path, handler)` registration.
+
 ### A sort comparator that provably cannot order the array
 
 New diagnostic `no-broken-sort-comparator` (Bugs / `error` / confidence `high`).

@@ -118,6 +118,104 @@ describe("no-mass-assignment — TypeScript assertions are erased", () => {
   });
 });
 
+/**
+ * AdonisJS spells the body as a CALL, not a member, so `isBodyMember` never
+ * matched it and the whole framework was invisible to this rule. Verified before
+ * the fix: a textbook Adonis controller doing `User.create(request.all())` and
+ * `user.merge(request.body())` produced ZERO findings from all 177 diagnostics.
+ *
+ * The accessor spellings and Lucid's `merge`/`fill` sinks are gated on the
+ * `adonis` capability — `merge` and `fill` are ordinary words elsewhere, and the
+ * gate is what keeps this framework's coverage from becoming another's noise.
+ */
+describe("no-mass-assignment — AdonisJS", () => {
+  const ADONIS = new Set(["node", "esm", "typescript", "adonis"]);
+  const adonisFindings = (source: string, caps: Set<string> = ADONIS) =>
+    lintSource({
+      filePath: "/repo/app/controllers/users_controller.ts",
+      sourceText: source,
+      diagnostics: [noMassAssignment],
+      capabilities: caps,
+    }).findings.filter((f) => f.diagnostic === "no-mass-assignment");
+
+  const controller = (body: string) => `
+    export default class UsersController {
+      async store({ request, response, params }: HttpContext) {
+        ${body}
+      }
+    }
+  `;
+  const adonisFires = (body: string) => {
+    const found = adonisFindings(controller(body));
+    assert.ok(found.length > 0, `expected a FIRE on:\n${body}`);
+    return found;
+  };
+  const adonisSilent = (body: string): void => {
+    const found = adonisFindings(controller(body));
+    assert.equal(found.length, 0, `expected SILENCE, got ${found.length}:\n${body}`);
+  };
+
+  test("`request.all()` into a Lucid create", () => {
+    adonisFires(`await User.create(request.all())`);
+  });
+
+  test("`request.body()` into a Lucid create", () => {
+    adonisFires(`await User.create(request.body())`);
+  });
+
+  test("`request.qs()` and `request.params()` are whole objects too", () => {
+    adonisFires(`await Audit.create(request.qs())`);
+    adonisFires(`await Audit.create(request.params())`);
+  });
+
+  test("Lucid's `merge` and `fill` are assignment sinks", () => {
+    adonisFires(`const user = await User.findOrFail(params.id)\n  user.merge(request.all())\n  await user.save()`);
+    adonisFires(`const user = await User.findOrFail(params.id)\n  user.fill(request.body())\n  await user.save()`);
+  });
+
+  test("a spread of the Adonis body carries every key", () => {
+    adonisFires(`await User.create({ ...request.all(), tenantId })`);
+  });
+
+  test("an alias binding is followed", () => {
+    adonisFires(`const data = request.all()\n  await User.create(data)`);
+  });
+
+  test("`request.only([...])` is the fix, not the bug", () => {
+    adonisSilent(`await User.create(request.only(['email', 'fullName']))`);
+  });
+
+  test("`request.except([...])` and `validateUsing` narrow too", () => {
+    adonisSilent(`await User.create(request.except(['role']))`);
+    adonisSilent(`const payload = await request.validateUsing(createUserValidator)\n  await User.create(payload)`);
+  });
+
+  test("`request.input(...)` is a single field, assembled by hand", () => {
+    adonisSilent(`await User.create({ email: request.input('email'), fullName: request.input('fullName') })`);
+  });
+
+  test("an argument means it is not the whole-object form", () => {
+    // `request.body(x)` is not Adonis's zero-argument accessor.
+    adonisSilent(`await User.create(request.body(schema))`);
+  });
+
+  test("silent on a project that does not depend on Adonis", () => {
+    // The gate is the point: `merge` and `fill` are ordinary words elsewhere.
+    const noAdonis = new Set(["node", "esm", "typescript", "express"]);
+    assert.equal(adonisFindings(controller(`await User.create(request.all())`), noAdonis).length, 0);
+    assert.equal(
+      adonisFindings(controller(`user.merge(request.all())`), noAdonis).length,
+      0,
+    );
+  });
+
+  test("`merge`/`fill` stay off the global write list", () => {
+    // On an Express+Prisma project a `_.merge(cfg, req.body)` must not become a
+    // mass-assignment finding just because Adonis uses the same verb.
+    assert.equal(findings(handler(`_.merge(config, req.body);`)).length, 0);
+  });
+});
+
 describe("no-mass-assignment — determinism", () => {
   test("identical source yields identical findings", () => {
     const source = handler(`await prisma.user.create({ data: req.body });\nawait prisma.post.create({ data: req.body });`);

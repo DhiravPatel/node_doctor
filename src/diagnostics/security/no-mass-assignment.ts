@@ -1,6 +1,6 @@
 import { defineDiagnostic } from "../../core/types.ts";
 import type { AstNode } from "../../core/types.ts";
-import { getMethodName, getReceiverName, REQUEST_ROOTS } from "../../core/ast.ts";
+import { getMethodName, getReceiverName, REQUEST_ROOTS, unwrapChain } from "../../core/ast.ts";
 
 /**
  * §6 — the whole request body written straight into a record.
@@ -87,6 +87,12 @@ const NARROWING_CALLS = new Set([
   "sanitize",
   "strip",
   "clean",
+  // AdonisJS: `request.only([...])` / `request.except([...])` pick fields, and
+  // `request.validateUsing(validator)` returns the validator's known shape.
+  // Listing them can only make the rule quieter, never louder.
+  "only",
+  "except",
+  "validateUsing",
 ]);
 
 /**
@@ -123,6 +129,50 @@ const unwrapErased = (node: AstNode | null | undefined): AstNode | null | undefi
 /** The request members that are the caller's own object, whole. */
 const BODY_MEMBERS = new Set(["body", "query", "params"]);
 
+/**
+ * AdonisJS spells the body as a CALL, not a member.
+ *
+ * `request.all()`, `request.body()`, `request.qs()` and `request.params()` each
+ * return the caller's whole object, so `User.create(request.all())` is exactly
+ * the defect this rule exists for — but `isBodyMember` looks for a
+ * MemberExpression and found none, so the entire framework was invisible to it.
+ * Verified before the fix: a textbook Adonis controller doing
+ * `User.create(request.all())` and `user.merge(request.body())` produced **zero
+ * findings from all 177 diagnostics**.
+ *
+ * Only the ZERO-ARGUMENT forms are the whole object. `request.only([...])` and
+ * `request.except([...])` pick fields — those are the fix, and they are in
+ * `NARROWING_CALLS`.
+ */
+const ADONIS_BODY_CALLS = new Set(["all", "body", "qs", "params"]);
+
+const isAdonisBodyCall = (raw: AstNode | null | undefined): boolean => {
+  const node = unwrapErased(raw);
+  if (!node || node.type !== "CallExpression") return false;
+  if (((node.arguments as AstNode[] | undefined) ?? []).length > 0) return false;
+  const callee = unwrapChain(node.callee as AstNode);
+  if (!callee || callee.type !== "MemberExpression" || callee.computed) return false;
+  const object = callee.object as AstNode | undefined;
+  const property = callee.property as AstNode | undefined;
+  return (
+    object?.type === "Identifier" &&
+    REQUEST_ROOTS.has(object.name as string) &&
+    property?.type === "Identifier" &&
+    ADONIS_BODY_CALLS.has(property.name as string)
+  );
+};
+
+/**
+ * Lucid's assignment sinks, active only on an AdonisJS project.
+ *
+ * `user.merge(attrs)` assigns the given attributes onto the model and
+ * `user.fill(attrs)` replaces them all — both followed by `.save()`. They are
+ * gated on the `adonis` capability because `merge` and `fill` are ordinary words
+ * elsewhere (`_.merge`, `Array.prototype.fill`), and adding them to the global
+ * write list would trade this framework's coverage for other frameworks' noise.
+ */
+const LUCID_WRITE_METHODS = new Set(["merge", "fill"]);
+
 /** Is this literally `<requestRoot>.body` / `.query` / `.params`? */
 const isBodyMember = (raw: AstNode | null | undefined): boolean => {
   const node = unwrapErased(raw);
@@ -155,10 +205,14 @@ export const noMassAssignment = defineDiagnostic({
      * assembled from request FIELDS is a different object with the keys they
      * chose, which is the fix, not the bug.
      */
+    /** AdonisJS accessor spellings, only on a project that depends on Adonis. */
+    const adonis = ctx.hasCapability("adonis");
+
     const isWholeBody = (raw: AstNode | null | undefined, depth = 0): boolean => {
       const node = unwrapErased(raw);
       if (!node || depth > 4) return false;
       if (isBodyMember(node)) return true;
+      if (adonis && isAdonisBodyCall(node)) return true;
       if (node.type === "ObjectExpression") {
         // `{ ...req.body, id }` still carries every attacker-settable key.
         return ((node.properties as AstNode[] | undefined) ?? []).some(
@@ -215,7 +269,8 @@ export const noMassAssignment = defineDiagnostic({
           return;
         }
 
-        if (method === null || !WRITE_METHODS.has(method)) return;
+        const isWrite = WRITE_METHODS.has(method ?? "") || (adonis && LUCID_WRITE_METHODS.has(method ?? ""));
+        if (method === null || !isWrite) return;
         // A narrowing call in the chain means this is no longer the raw body.
         if (NARROWING_CALLS.has(method)) return;
 

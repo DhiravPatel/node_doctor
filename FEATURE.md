@@ -96,26 +96,41 @@ Understands what a codebase *is* before analyzing it, so rules activate correctl
 - **Runtime detection** — Node vs Bun vs Deno vs edge runtimes (`bun.lockb`/`bunfig.toml`, `deno.json(c)`, `wrangler.toml`, `@vercel/edge`), surfaced as capability tokens that gate runtime-specific diagnostics.
 
 ## 2. Framework Detection
-**Status: Core** for Express, Fastify, NestJS, AdonisJS, Koa (detection + dedicated diagnostics). The rest are **Detected** — the capability token is set and gates rule selection and route extraction, but no framework-specific diagnostics exist for them yet.
+**Status: Core** for Express, Fastify, NestJS, AdonisJS and Hono. The rest are **Detected** — the capability token is set and gates rule selection and route extraction, but no framework-specific coverage exists for them yet.
 
-Capability tokens are derived per framework and gate framework-specific rules.
+**Framework support is three separate things, and they do not have the same answer.** Most of the value is in the middle column: *handler recognition* is what tells the other ~165 framework-independent rules "this code runs per HTTP request", which is the gate on sync I/O in a handler, unbounded body parsing, secrets in logs, and every injection rule. Dedicated rules are the thin top layer.
 
-| Framework | Tier |
-| --- | --- |
-| Express (4 and 5, version-aware) | Core |
-| Fastify | Core |
-| NestJS | Core |
-| AdonisJS | Core |
-| Koa | Core |
-| Hapi | Detected |
-| Restify | Detected |
-| Sails.js | Detected |
-| Feathers | Detected |
-| LoopBack | Detected |
-| Meteor | Planned |
-| Next.js API routes / Route Handlers | Detected |
-| Remix API / actions & loaders | Detected |
-| Serverless Framework | Detected |
+| Framework | Token | Handlers recognized | Dedicated coverage |
+| --- | --- | --- | --- |
+| Express (4 and 5, version-aware) | ✅ | signature `(req, res)` + registration | **7 rules** |
+| Fastify | ✅ | signature `(request, reply)` + `route({})` | 1 rule |
+| NestJS | ✅ | decorators | 1 rule |
+| AdonisJS | ✅ | `HttpContext` type + decorators | **mass assignment** (`request.all()`/`body()`/`qs()`/`params()`, Lucid `merge`/`fill`) |
+| Hono | ✅ | registration | **1 rule** (`no-unreturned-hono-response`) |
+| Hapi | ✅ | `server.route({})` | 2 rules |
+| Restify | ✅ | registration | 1 rule |
+| Koa | ✅ | registration only — *not* the `(ctx, next)` signature | — |
+| Sails.js | ✅ | registration | — |
+| Feathers | ✅ | registration | — |
+| LoopBack | ✅ | registration | — |
+| Next.js API routes / Route Handlers | ✅ | exported `GET`/`POST`/… in a route file | — |
+| Remix API / actions & loaders | ✅ | `loader` / `action` signature | — |
+| Serverless Framework | ✅ | registration | — |
+| Meteor | Planned | — | — |
+
+Route registration is matched **framework-agnostically** — any `x.get/post/put/patch/delete(path, handler)` call carrying a function — so a framework needs no special support to have its handlers found. That is why Hono's handlers were already reaching the request-path rules before Hono had a rule of its own, and it is why Koa's router handlers are covered even though `looksLikeExpressHandler` only accepts `{req, request}` × `{res, response, reply}` and so does not match Koa's `(ctx, next)`.
+
+### Hono — the response that is built and never sent
+
+`no-unreturned-hono-response` (Bugs/**error**/high, gated on the `hono` token). This is the one API difference that catches every developer arriving from Express: `res.json(x)` **sends**, while `c.json(x)` **constructs a `Response` and hands it back**. Hono replies with whatever the handler returns, so discarding it leaves nothing to reply with. MEASURED against Hono 4.13.4 by running each form through `app.request()`: a discarded `c.json`, `c.text`, `c.html`, `c.redirect` or `c.body` all answer **404 "404 Not Found"**, while `return c.json({ ok: true })` answers 200 with the body. The async row is the expensive one — the `await` already ran, so the row was written or the payment taken, and the caller is told the route does not exist; a client that retries on 404 does all of it again. It survives review because the handler reads like Express and the 404 reads like a routing problem, so the search starts in the router rather than in the handler that already ran.
+
+Three structural conditions, and the exclusions were measured rather than assumed. The method must **produce** a Response (`json`/`text`/`html`/`body`/`redirect`/`notFound`/`newResponse`) — the context's side-effecting methods are verified correct when discarded, since `c.header("x-trace","1")` and `c.status(201)` before a returned `c.json(…)` produce a 201 with the right body, and `c.set(…)` stores a variable `c.get(…)` reads back. The result must be **discarded**. And the receiver must be the **first parameter** of a function the engine already recognizes as a handler — the anchor that keeps the rule off every other framework in the same repo, because Express and Fastify both put their response object *second*. Two measured non-defects are deliberately not claimed: `throw new HTTPException(401)` produces a real 401, and middleware calling `next()` **without** `await` still reaches the handler and answers 200 — so the obvious "missing await on next()" rule would be reporting correct code and is not shipped.
+
+### AdonisJS — the body spelled as a call
+
+Adonis was invisible to `no-mass-assignment`, and the reason was one line: `isBodyMember` looks for a MemberExpression (`req.body`), while Adonis spells the body as a **call** (`request.all()`). Verified before the fix — a textbook controller doing `User.create(request.all())` and `user.merge(request.body())` produced **zero findings from all 178 diagnostics**. That is mass assignment, the framework's headline security footgun, going unreported on every Adonis project the tool has ever scanned.
+
+The rule now recognizes the zero-argument accessors `request.all()`, `request.body()`, `request.qs()` and `request.params()`, plus Lucid's assignment sinks `merge` and `fill`. Both sets are gated on the `adonis` capability, because `merge` and `fill` are ordinary words elsewhere (`_.merge`, `Array.prototype.fill`) and adding them to the global write list would trade this framework's coverage for another's noise — a test pins that `_.merge(config, req.body)` on an Express project stays silent. Only the zero-argument forms count: `request.only([...])`, `request.except([...])` and `request.validateUsing(validator)` pick fields, so they join `NARROWING_CALLS` and are the fix this rule recommends rather than the bug.
 
 ## 46. Language Support
 **Status: Core** (JS/TS/ESM/CJS/hybrid); type-aware analysis Planned.
