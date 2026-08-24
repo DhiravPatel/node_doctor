@@ -47,6 +47,7 @@ import { noShadowedRoute } from "../diagnostics/bugs/no-shadowed-route.ts";
 import { noSparseArrayIteration } from "../diagnostics/bugs/no-sparse-array-iteration.ts";
 import { noStringLengthAsContentLength } from "../diagnostics/bugs/no-string-length-as-content-length.ts";
 import { noThrowLiteral } from "../diagnostics/bugs/no-throw-literal.ts";
+import { noTofixedAsNumber } from "../diagnostics/bugs/no-tofixed-as-number.ts";
 import { noUnclampedMonthShift } from "../diagnostics/bugs/no-unclamped-month-shift.ts";
 import { noUnreachableCleanupAfterExit } from "../diagnostics/bugs/no-unreachable-cleanup-after-exit.ts";
 import { noUnreachableCode } from "../diagnostics/bugs/no-unreachable-code.ts";
@@ -215,6 +216,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noSparseArrayIteration,
   noStringLengthAsContentLength,
   noThrowLiteral,
+  noTofixedAsNumber,
   noUnclampedMonthShift,
   noUnreachableCleanupAfterExit,
   noUnreachableCode,

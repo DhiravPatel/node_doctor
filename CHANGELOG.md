@@ -11,6 +11,70 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### A `toFixed` result used as a number, so `+` concatenates
+
+New diagnostic `no-tofixed-as-number` (Bugs / `error` / confidence `high`).
+`Number.prototype.toFixed` returns a **string** — that is its entire purpose, and
+it is the half everyone forgets. Verified by running each form:
+
+```
+(100).toFixed(2) + (18).toFixed(2)          → "100.0018.00"
+(1.5).toFixed(2) + 5                        → "1.505"
+let sum = 0; sum += (1.5).toFixed(2)        → "01.50"
+(1.5).toFixed(2) + (2 * 3)                  → "1.506"
+[1,2].reduce((a,b) => a + b.toFixed(2), 0)  → "01.002.00"
+(1234.5).toLocaleString() + 1               → "1,234.51"
+(100).toFixed(2) === 100                    → false, always
+```
+
+Nothing throws. MySQL will coerce `"100.0018.00"` into a DECIMAL column on the way
+in, so the corruption surfaces later as a total that does not add up rather than
+as an error anyone can trace. The leading zero from a `sum` seeded at `0` is the
+tell.
+
+The claim at every firing shape is a fact about the language rather than an
+inference about the data: this operand is a string, the other is **provably** a
+number, and `+` on that pair concatenates. Two clauses only — a `+`/`+=` whose
+other operand is provably numeric (a numeric literal, an arithmetic expression, a
+`Number`/`parseInt`/`parseFloat` call, a unary `+`/`-`, a binding initialized to a
+numeric literal, or a `reduce` accumulator with a numeric seed), and `===`/`!==`
+against a numeric literal. Two formatted operands also count, since digits jammed
+together with no separator are meaningless as display.
+
+`==`/`!=` and the relational operators are **excluded** because they coerce and
+therefore work — verified: `(100).toFixed(2) == 100` is `true` and
+`(100).toFixed(2) > 99` is `true`, so reporting either would be reporting correct
+code. Silent on display formatting (a string literal or template operand; template
+interpolation is not a `+` at all), on the standard unwraps (`Number(...)`,
+`parseFloat`, `parseInt`, unary `+` — verified to give `6.5` where the raw form
+gives `"1.505"`), and on any operand merely *unknown* — a bare identifier, a
+member read, an arbitrary call — because it could be a string label, and then the
+concatenation is correct. Uncertainty resolves to silence, never to a report.
+`toString()` is deliberately not treated as a formatter: its name says what it
+returns, so concatenating it is plausibly deliberate.
+
+One hop of indirection is followed — `const t = tax.toFixed(2); … subtotal.toFixed(2) + t`
+— because that is how the shape is actually written. The hop is keyed by
+**binding**, not name, and requires `const`: a `let` reassigned elsewhere is not
+provably a string at the use site.
+
+Measured against every readable file in the repo tree (36 files use
+`toFixed`/`toPrecision`/`toLocaleString`, including the TypeScript compiler and
+the build toolchain): **0 findings, 0 parse failures**. The only real
+concatenations there are `` `${(x * 100).toFixed(1)}` `` and `.toFixed(2) + "%"`,
+both correctly silent.
+
+> **Corpus caveat for this wave.** The usual population measurement across the
+> ~29.6k-file local corpus could not be run: filesystem access outside the
+> project directory now returns `Operation not permitted`, so only the repo's own
+> tree was readable. This rule was therefore selected on the criterion the §201
+> wave used — *the claim has to be an always-wrong fact about the language, not
+> an inference about the data* — and its precision is established by executing
+> every firing and silencing shape rather than by corpus sampling. An earlier
+> probe in the same session measured `.toFixed(` at **3,733 occurrences across
+> 475 corpus files**, so the surrounding population is large, but the share
+> matching these two clauses is unverified.
+
 ### A month added by `setMonth` skips a month for end-of-month dates
 
 New diagnostic `no-unclamped-month-shift` (Bugs / `warn` / confidence `high`).

@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 175,
-  "defaultOn": 124,
+  "total": 176,
+  "defaultOn": 125,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 65,
     "Maintainability": 16,
     "Reliability": 49,
-    "Bugs": 32
+    "Bugs": 33
   },
   "categoryWeights": {
     "Security": 2,
@@ -2100,6 +2100,22 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Compare secrets in constant time: `crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b))` after a length check. `===` leaks a prefix oracle through its early exit."
+    },
+    {
+      "id": "no-tofixed-as-number",
+      "title": "A toFixed string used as a number, so `+` concatenates instead of adding",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "money",
+        "types"
+      ],
+      "requires": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "`toFixed` returns a string. Do the arithmetic on numbers and format once at the end — `Math.round((a + b) * 100) / 100`, or `Number(a.toFixed(2)) + Number(b.toFixed(2))` if the rounding has to happen first. For money, prefer integer minor units (cents) or a decimal library over floats entirely. For an equality check, compare numbers (`Number(x.toFixed(2)) === 0`) or compare the string to a string (`x.toFixed(2) === \"0.00\"`)."
     },
     {
       "id": "no-trust-proxy-true",
