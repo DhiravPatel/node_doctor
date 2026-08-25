@@ -103,7 +103,7 @@ Understands what a codebase *is* before analyzing it, so rules activate correctl
 | Framework | Token | Handlers recognized | Dedicated coverage |
 | --- | --- | --- | --- |
 | Express (4 and 5, version-aware) | ✅ | signature `(req, res)` + registration | **7 rules** |
-| Fastify | ✅ | signature `(request, reply)` + `route({})` | 1 rule |
+| Fastify | ✅ | signature `(request, reply)` + `route({})` | 2 rules |
 | NestJS | ✅ | decorators | 1 rule |
 | AdonisJS | ✅ | `HttpContext` type + decorators | **mass assignment** (`request.all()`/`body()`/`qs()`/`params()`, Lucid `merge`/`fill`) |
 | Hono | ✅ | registration | **1 rule** (`no-unreturned-hono-response`) |
@@ -125,6 +125,24 @@ Route registration is matched **framework-agnostically** — any `x.get/post/put
 `no-unreturned-hono-response` (Bugs/**error**/high, gated on the `hono` token). This is the one API difference that catches every developer arriving from Express: `res.json(x)` **sends**, while `c.json(x)` **constructs a `Response` and hands it back**. Hono replies with whatever the handler returns, so discarding it leaves nothing to reply with. MEASURED against Hono 4.13.4 by running each form through `app.request()`: a discarded `c.json`, `c.text`, `c.html`, `c.redirect` or `c.body` all answer **404 "404 Not Found"**, while `return c.json({ ok: true })` answers 200 with the body. The async row is the expensive one — the `await` already ran, so the row was written or the payment taken, and the caller is told the route does not exist; a client that retries on 404 does all of it again. It survives review because the handler reads like Express and the 404 reads like a routing problem, so the search starts in the router rather than in the handler that already ran.
 
 Three structural conditions, and the exclusions were measured rather than assumed. The method must **produce** a Response (`json`/`text`/`html`/`body`/`redirect`/`notFound`/`newResponse`) — the context's side-effecting methods are verified correct when discarded, since `c.header("x-trace","1")` and `c.status(201)` before a returned `c.json(…)` produce a 201 with the right body, and `c.set(…)` stores a variable `c.get(…)` reads back. The result must be **discarded**. And the receiver must be the **first parameter** of a function the engine already recognizes as a handler — the anchor that keeps the rule off every other framework in the same repo, because Express and Fastify both put their response object *second*. Two measured non-defects are deliberately not claimed: `throw new HTTPException(401)` produces a real 401, and middleware calling `next()` **without** `await` still reaches the handler and answers 200 — so the obvious "missing await on next()" rule would be reporting correct code and is not shipped.
+
+### Fastify — the guard that responds without returning
+
+No new rule; a gate that was excluding the framework whose logic it already handled. `express-missing-return-after-response` has always had `reply` in its `RESPONSE_ROOTS` and `send` in its `TERMINAL` set, so a Fastify guard was matched by its logic — and `requires: ["express"]` meant it never ran on a Fastify project. Exactly the shape of the AdonisJS mass-assignment gap: the analysis was there, the gate wasn't.
+
+MEASURED against Fastify 5.12.1 through `app.inject()`, because the framework's forgiveness is the whole story:
+
+| handler | result |
+| --- | --- |
+| `async: return payload` | 200 `{"ok":true}` |
+| `async: reply.send(), no return` | 200 `{"ok":true}` |
+| `async: reply.send(a) then return b` | 200 **`{"from":"send"}`** — the return is discarded |
+| `async: reply.send() twice` | 200 `{"n":1}` — the second is discarded |
+| `async: neither sends nor returns` | 200, **empty body** |
+
+Fastify 5 does not throw on any of these, which is precisely why the defect survives. In the real shape — a validation guard that sends a 400 without returning — the caller gets the 400 while the protected code below it has already run (the order created, the mail sent), and the value the handler meant to return is dropped with nothing in the logs to mark it. Express at least announces itself with `ERR_HTTP_HEADERS_SENT`.
+
+The gate is now `requiresAny: ["express", "fastify"]`, the family form added to the engine for this (see §45). The recommendation names both spellings and both runtime behaviours, since they differ: Express responds twice and errors, Fastify keeps the first response silently.
 
 ### Koa — the `next()` that is called but not awaited
 
@@ -844,6 +862,7 @@ A **shallow checkout suppresses the report entirely** rather than dating every f
 - **Rule suppression** — inline (with mandatory reason) and config-level. *(Planned; config gating is Core)*
 - **Organization-wide rule packs** *(Vision)*.
 - **Framework-specific rules** — gated by capability tokens. *(Core)*
+- **Capability gates** — three forms, all evaluated before the explicit-config escape hatch. `requires` is **ALL** (every token must be present), `disabledWhen` is **ANY** (one is enough to disable), and `requiresAny` is **AT LEAST ONE** — the *family* gate. That third form exists because some defects are shared by frameworks that spell them identically: a guard that responds without returning is the same bug, and the same fix, on Express (`res.json`) and Fastify (`reply.send`), and `requires` being ALL could not express it. The alternative — dropping the gate and relying on the structural check alone — would have let the rule run on projects with no HTTP framework at all. An empty `requiresAny` array is treated as *no constraint* rather than as unsatisfiable, so a mistaken `requiresAny: []` cannot silently kill a rule the way an ungrantable token once did; the gate-integrity test checks its tokens for grantability exactly as it checks `requires`. Both `capabilitiesSatisfied` and `shouldEnableDiagnostic` honour it, text-scan diagnostics support it, and `node-doctor diagnostics --framework <f>` and `explain` surface it ("requires one of express, fastify"). *(Core)*
 
 ---
 

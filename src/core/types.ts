@@ -193,6 +193,16 @@ export interface Diagnostic {
   scope?: Scope;
   /** ALL of these capability tokens must be present for the diagnostic to run. */
   requires?: string[];
+  /**
+   * AT LEAST ONE of these must be present — the family gate.
+   *
+   * Some defects are shared by frameworks that spell them identically: a guard
+   * that responds without returning is the same bug, and the same fix, on Express
+   * and Fastify. `requires` is ALL, so it cannot express that, and dropping the
+   * gate would let the rule run on projects with no HTTP framework at all.
+   * Combines with `requires` (both must hold). An empty array is no constraint.
+   */
+  requiresAny?: string[];
   /** ANY of these present disables the diagnostic. */
   disabledWhen?: string[];
   /** Families for `--ignore-tag`. */

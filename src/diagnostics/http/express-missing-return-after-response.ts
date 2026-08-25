@@ -10,6 +10,20 @@ import { getMethodName, rootObjectName } from "../../core/ast.ts";
  * ❌ if (!req.body.email) { res.status(400).json({ error: "email required" }); }
  *    const user = await db.user.findUnique(...); // runs even when email is missing
  * ✅ if (!req.body.email) { return res.status(400).json({ error: "email required" }); }
+ *
+ * FASTIFY IS THE SAME BUG, and the rule's logic always covered it — `reply` is in
+ * `RESPONSE_ROOTS` and `send` is in `TERMINAL` — but `requires: ["express"]` meant
+ * it never ran on a Fastify project. Verified against Fastify 5.12.1 through
+ * `app.inject()`: a handler that calls `reply.send(a)` and then returns `b`
+ * answers with **`a`**, silently discarding the return. So the guard's 400 is
+ * what the caller sees while the protected code below it has already run — the
+ * order was created, the mail was sent — and the value the author meant to
+ * return is dropped without a warning. Fastify 5 does not throw here, which is
+ * precisely why it survives: nothing in the logs says anything happened.
+ *
+ * The gate is now `requiresAny: ["express", "fastify"]` — the family form added
+ * for exactly this, since `requires` is ALL and dropping the gate entirely would
+ * let the rule run on projects with no HTTP framework at all.
  */
 
 const TERMINAL = new Set(["json", "send", "end", "redirect", "render", "sendFile", "sendStatus", "jsonp", "download"]);
@@ -35,10 +49,10 @@ export const expressMissingReturnAfterResponse = defineDiagnostic({
   title: "Response sent in a guard without a return",
   severity: "error",
   category: "Bugs",
-  requires: ["express"],
-  tags: ["express"],
+  requiresAny: ["express", "fastify"],
+  tags: ["express", "fastify"],
   recommendation:
-    "Prefix the guard's response with `return` (`return res.status(400).json(...)`). A response call does not stop the handler — without `return`, the 'rejected' request runs the protected logic and responds twice.",
+    "Prefix the guard's response with `return` (`return res.status(400).json(...)`, `return reply.code(400).send(...)`). A response call does not stop the handler — without `return`, the 'rejected' request runs the protected logic anyway. Express then responds twice (`ERR_HTTP_HEADERS_SENT`); Fastify 5 silently keeps the first response and discards whatever the handler returns, so nothing in the logs marks it.",
   create: (ctx) => ({
     IfStatement: (node) => {
       if (node.alternate) return; // has else → not a fall-through guard

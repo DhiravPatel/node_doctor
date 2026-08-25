@@ -37,6 +37,8 @@ export interface TextDiagnostic {
   category: Category;
   tags?: string[];
   requires?: string[];
+  /** AT LEAST ONE of these must be present — the family gate. See `Diagnostic`. */
+  requiresAny?: string[];
   disabledWhen?: string[];
   /** false → opt-in only. Default true. */
   defaultEnabled?: boolean;
@@ -89,6 +91,7 @@ const trackedFiles = async (rootDirectory: string): Promise<Set<string>> => {
 
 const capabilityOk = (d: TextDiagnostic, capabilities: Set<string>): boolean => {
   if (d.requires && !d.requires.every((r) => capabilities.has(r))) return false;
+  if (d.requiresAny?.length && !d.requiresAny.some((r) => capabilities.has(r))) return false;
   if (d.disabledWhen && d.disabledWhen.some((t) => capabilities.has(t))) return false;
   return true;
 };

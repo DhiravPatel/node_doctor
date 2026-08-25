@@ -32,6 +32,7 @@
       "requires": [
         "ai"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Batch the work into one call (fold the items into a single prompt) or bound a parallel fan-out with `Promise.all(items.map(...))` plus a concurrency limit. A model call per iteration is N round trips, N× the cost, and a rate-limit risk."
@@ -47,6 +48,7 @@
         "supply-chain"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Either switch the trigger to `pull_request`, which runs the fork's code with a read-only token and no secrets, or keep `pull_request_target` and do not check out the head — restrict the job to the metadata work (labelling, commenting) that needs the write token. If you genuinely need both, split them: an untrusted `pull_request` job that builds and uploads an artifact, and a separate `workflow_run` job that consumes it without executing it."
@@ -62,6 +64,7 @@
         "injection"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Bind the value to a step-level `env:` entry (TITLE: ${{ github.event.issue.title }}) and reference it in the script as a quoted shell variable (\"$TITLE\"). The runner then hands the text to the process as an environment value, so the shell never parses it as syntax."
@@ -77,6 +80,7 @@
         "supply-chain"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Pin the action to a full 40-character commit SHA and keep the human-readable version in a trailing comment (`uses: owner/repo@<sha>  # v4.1.1`). Dependabot understands that form and will raise a PR when the tag moves, so you get updates without giving the upstream repository the ability to change what runs today."
@@ -92,6 +96,7 @@
         "cors"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Do not combine `credentials: true` with a reflected origin. Use an explicit allowlist (`origin: ['https://app.example.com']`) or a validating function that only calls back `true` for known origins."
@@ -106,6 +111,7 @@
         "complexity"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Flatten the nesting: return early / use guard clauses, extract inner blocks into helper functions, or invert conditions. Deeply nested branches are hard to follow and test."
@@ -122,6 +128,7 @@
         "secrets"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Do not put the file in the image. Supply the values as runtime environment variables (compose `environment:`, a k8s Secret, your platform's config), or mount them at build time with `RUN --mount=type=secret,id=env …`, which never lands in a layer. A later `RUN rm .env` does not help — the earlier layer still contains the file, and `docker history` will show it. Rotate anything an already-built image carries."
@@ -138,6 +145,7 @@
         "reproducibility"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Pin the base to a specific version (`FROM node:20.11-alpine3.19`) and, for release images, to a digest (`FROM node:20-alpine@sha256:…`) so the build is byte-reproducible. Let a bot (Renovate/Dependabot) raise the pin as a reviewable pull request instead of letting the tag drift silently."
@@ -153,6 +161,7 @@
         "docker"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Create an unprivileged user in the final stage and switch to it before the entrypoint — `RUN adduser -D app` then `USER app` (official Node images already ship a `node` user). Give the user ownership of only the paths it must write, and keep the build steps that genuinely need root above the `USER` line."
@@ -169,6 +178,7 @@
         "secrets"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Remove the value from the Dockerfile and rotate the credential — it is already in the image history and in git. Feed build-time credentials through BuildKit secrets (`RUN --mount=type=secret,id=…`), which never land in a layer, and inject runtime credentials from the orchestrator's secret store rather than `ENV`."
@@ -187,6 +197,7 @@
       "requires": [
         "express"
       ],
+      "requiresAny": [],
       "disabledWhen": [
         "express:5"
       ],
@@ -200,14 +211,17 @@
       "severity": "error",
       "scope": "file",
       "tags": [
-        "express"
+        "express",
+        "fastify"
       ],
-      "requires": [
-        "express"
+      "requires": [],
+      "requiresAny": [
+        "express",
+        "fastify"
       ],
       "disabledWhen": [],
       "optIn": false,
-      "recommendation": "Prefix the guard's response with `return` (`return res.status(400).json(...)`). A response call does not stop the handler — without `return`, the 'rejected' request runs the protected logic and responds twice."
+      "recommendation": "Prefix the guard's response with `return` (`return res.status(400).json(...)`, `return reply.code(400).send(...)`). A response call does not stop the handler — without `return`, the 'rejected' request runs the protected logic anyway. Express then responds twice (`ERR_HTTP_HEADERS_SENT`); Fastify 5 silently keeps the first response and discards whatever the handler returns, so nothing in the logs marks it."
     },
     {
       "id": "fastify-missing-schema",
@@ -221,6 +235,7 @@
       "requires": [
         "fastify"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Attach a JSON `schema` to the route (`{ schema: { body, querystring, params } }`). Fastify validates and serializes against it before the handler runs; without one the route accepts arbitrary input."
@@ -236,6 +251,7 @@
         "info-leak"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Tie introspection to the environment instead of hardcoding it: `introspection: process.env.NODE_ENV !== \"production\"`. On Yoga, add the `useDisableIntrospection` plugin (and `blockFieldSuggestions`) for production builds."
@@ -251,6 +267,7 @@
         "graphql"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Bound the query shape before it reaches your resolvers: add `validationRules: [depthLimit(7)]` (graphql-depth-limit), a cost rule (`createComplexityLimitRule`, graphql-query-complexity), or `@escape.tech/graphql-armor` — and reject anything over the limit at validation time."
@@ -267,6 +284,7 @@
         "info-leak"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Log the error server-side and surface a stable, generic message instead — `throw new GraphQLError(\"Could not load user\", { extensions: { code: \"INTERNAL_SERVER_ERROR\" } })`. Never place `err.stack` in a returned payload or an error extension: GraphQL serializes it straight to the caller."
@@ -283,6 +301,7 @@
         "transport"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Terminate TLS on the gRPC connection itself: `grpc.ServerCredentials.createSsl(rootCerts, keyCertPairs, checkClientCertificate)` on the server and `grpc.credentials.createSsl(...)` on the channel. If a plaintext hop is genuinely required, restrict it to loopback or a dev-only branch."
@@ -301,6 +320,7 @@
       "requires": [
         "hapi"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Remove `auth: false` so the route inherits the server's default strategy, or name the strategy explicitly (`auth: \"jwt\"`). If the endpoint really is public, scope it to a dedicated public path prefix."
@@ -319,6 +339,7 @@
       "requires": [
         "hapi"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Add `options: { validate: { payload: Joi.object({ ... }) } }` to the route. Hapi rejects a non-conforming body with a 400 before the handler runs; without it the handler receives arbitrary input."
@@ -333,6 +354,7 @@
         "complexity"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Reduce branching: extract sub-decisions into well-named helper functions, replace flag chains with a lookup table or polymorphism, and use guard clauses. Aim for a cyclomatic complexity at or below 15."
@@ -348,6 +370,7 @@
         "maintainability"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Rename the `@param` to match the signature, or delete it. A doc comment naming parameters that do not exist misdirects every reader — and every coding agent, which has no way to tell a stale doc from a current one and will generate calls that match the comment rather than the code."
@@ -365,6 +388,7 @@
       "requires": [
         "jsonwebtoken"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Give every token a lifetime: `jwt.sign(payload, key, { expiresIn: '15m' })`, or set an `exp` claim in the payload. A token with no expiry stays valid forever if leaked."
@@ -380,6 +404,7 @@
         "k8s"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Remove the host-namespace flag and reach the workload through a Service (NodePort or LoadBalancer if you need a fixed port on the node). Where host visibility is genuinely the job — a metrics agent, a CNI plugin — keep it in a dedicated DaemonSet with its own service account rather than in an application pod."
@@ -395,6 +420,7 @@
         "k8s"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Give the container `resources.limits.memory` (and `limits.cpu` where it is CPU-bound) alongside `resources.requests`, so the scheduler can place it and the kubelet evicts the workload that actually misbehaved. If limits are set centrally, enforce them with a namespace `LimitRange` rather than leaving them implicit."
@@ -410,6 +436,7 @@
         "k8s"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Drop `privileged` and set `allowPrivilegeEscalation: false`, then `capabilities.drop: [ALL]` and add back only what the process actually needs (typically NET_BIND_SERVICE, or nothing at all). If the workload genuinely needs node access — a CNI agent, a node exporter — run it as its own tightly scoped DaemonSet with its own service account instead of privileging an application pod."
@@ -424,6 +451,7 @@
         "complexity"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Extract cohesive blocks into named helper functions so each function does one thing. Aim for functions that fit on a screen."
@@ -443,6 +471,7 @@
       "requires": [
         "mcp"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Never pass a tool argument straight into `exec`/`spawn`, an `fs` write/delete, a raw SQL string, or `eval`. Constrain the value with a `z.enum(...)` schema or an explicit allowlist, and prefer array-argument, shell-free APIs (`execFile`) with a fixed command."
@@ -459,6 +488,7 @@
         "migration"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Split it into three deploys: add the column nullable (or with a cheap constant DEFAULT), backfill in bounded batches, then add the NOT NULL constraint — on Postgres 12+ as a NOT VALID CHECK followed by VALIDATE CONSTRAINT so no long ACCESS EXCLUSIVE lock is taken."
@@ -475,6 +505,7 @@
         "migration"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "There is no concurrent form of this statement. Add a new column of the target type, backfill it in batches, dual-write, then swap — the same multi-deploy split the NOT NULL rule recommends. An in-place change takes ACCESS EXCLUSIVE, which blocks reads as well as writes, for the whole rewrite: measured at 2,464 ms on a 2.4M-row table, with 401 MB of WAL from the one statement."
@@ -491,6 +522,7 @@
         "migration"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Split the destructive step into its own reviewed migration and stage it: stop writing the column in application code, deploy, verify nothing reads it, then drop it. Keep a restorable copy (a dated backup or a renamed table) until the drop is confirmed safe, and make sure the down migration can actually recreate what it removed."
@@ -507,6 +539,7 @@
         "migration"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Add the constraint `NOT VALID` first — a catalog-only change — then run `ALTER TABLE … VALIDATE CONSTRAINT …` in a later migration, where the same scan happens under a lock that does not block writes. Validating inline blocks writes to BOTH tables for the length of the scan: measured at 2,065 ms on the referenced parent, which the statement never names."
@@ -524,6 +557,7 @@
         "migration"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use `CREATE INDEX CONCURRENTLY` for an index on a table that already holds data. A plain `CREATE INDEX` blocks every write to the table until the build finishes — measured at 3,093 ms against 21 ms on a 600,000-row table. `CONCURRENTLY` cannot run inside a transaction block, so with Prisma it needs its own migration file, and it can leave an INVALID index behind if it fails, which is dropped and retried."
@@ -540,6 +574,7 @@
         "migration"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Create an index on the referencing column in the same migration (`CREATE INDEX CONCURRENTLY … ON child (parent_id)` on Postgres, so no long write lock is taken). If the index already exists in another migration or is declared on the ORM model, no change is needed."
@@ -556,6 +591,7 @@
         "migration"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Add the column with no default, backfill in batches, then set the default for new rows. A VOLATILE default is evaluated per row, so Postgres rewrites the whole table under a lock that blocks reads as well as writes — measured at 244 ms on 400,000 rows, against 18 ms for a non-volatile default, which takes the Postgres 11 fast path and does not rewrite at all."
@@ -572,6 +608,7 @@
       "requires": [
         "nest"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Apply a global `ValidationPipe` (`app.useGlobalPipes(new ValidationPipe())`) and type the parameter with a DTO class (`@Body() dto: CreateUserDto`) so class-validator diagnostics run before the handler."
@@ -588,6 +625,7 @@
         "testing"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Assert something about the result. A test with no assertion passes forever and proves only that the code did not throw — while still counting toward coverage, which makes the coverage number actively misleading. If the test exists to prove a call does not throw, say so explicitly (`await expect(fn()).resolves.toBeDefined()`); if it is a placeholder, mark it `it.todo(...)`."
@@ -603,6 +641,7 @@
         "concurrency"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use `for...of` with `await` for sequential work, or `await Promise.all(collection.map(fn))` for parallel work. For an async predicate, resolve first (`const flags = await Promise.all(items.map(pred))`) then filter synchronously."
@@ -617,6 +656,7 @@
         "async"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Keep the executor synchronous and do the async work inside with explicit `resolve`/`reject` (`new Promise((resolve, reject) => { work().then(resolve, reject); })`), or drop the constructor and use an async IIFE wrapped in try/catch."
@@ -632,6 +672,7 @@
         "performance"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Collect the promises and `await Promise.all(items.map((x) => work(x)))` instead of awaiting inside the loop. If the collection is caller-sized, bound the fan-out with `p-limit`."
@@ -646,6 +687,7 @@
         "numeric"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Keep 64-bit ids as BigInt or convert losslessly with `String(x)` / `x.toString()`. `Number(x)` rounds any value above 2^53 to the nearest double, and `+x` throws `TypeError` on a BigInt."
@@ -662,6 +704,7 @@
         "http"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Either the body matters — use `200` — or it does not, and `res.status(204).end()` / `res.sendStatus(204)` says so. HTTP defines 204, 205 and 304 as bodiless and Node discards the payload, so the caller's `await res.json()` throws on an empty response."
@@ -677,6 +720,7 @@
         "types"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "A comparator must return a NEGATIVE number for \"a first\", positive for \"b first\", and zero for equal, and it has to read BOTH elements. A boolean only ever gives 1 or 0, so nothing moves forward. Subtract for numbers (`(a, b) => a.total - b.total`), use `localeCompare` for strings (`(a, b) => a.name.localeCompare(b.name))`, or spell out all three cases: `(a, b) => (a.k > b.k ? 1 : a.k < b.k ? -1 : 0)`."
@@ -692,6 +736,7 @@
         "memory"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Give every cache entry an expiry: `redis.set(key, value, 'EX', 60)` / `redis.setex(key, 60, value)`, or the client's TTL option (`cache.set(key, value, { ttl: 300 })`). Without one the entry never expires — memory grows without bound and stale data is served indefinitely."
@@ -708,6 +753,7 @@
         "streams"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Collect the chunks and decode once: `const chunks = []; stream.on(\"data\", (c) => chunks.push(c)); … Buffer.concat(chunks).toString(\"utf8\")`. Or call `stream.setEncoding(\"utf8\")` first, which installs a decoder that carries a partial character across the boundary. `+=` decodes each chunk on its own, so a character split by the boundary becomes replacement characters — and because `U+FFFD` is legal inside a JSON string, nothing throws and the corrupted value is stored."
@@ -723,6 +769,7 @@
         "imports"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Break the cycle: extract the shared symbols into a third module both import, use a type-only import (`import type`) if it's only for types, or defer the import to call time. Cyclic value imports evaluate to `undefined` at load and cause TDZ errors under ESM."
@@ -737,6 +784,7 @@
         "secrets"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Remove the secret from the committed .env and rotate it (it's in git history). Keep only a `.env.example` with placeholder values, gitignore the real `.env`, and load secrets from the environment or a secret manager."
@@ -751,6 +799,7 @@
         "secrets"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Remove the key from the repo and rotate it now — a committed key is compromised. Store keys outside the repo (a secret manager, or an untracked gitignored path) and load them at runtime."
@@ -767,6 +816,7 @@
         "supply-chain"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Remove the `devDependencies` entry. npm resolves a package declared in both as a DEV dependency and marks it `dev: true` in the lockfile, so `npm install --omit=dev` drops it from the production image — and the first `require` of a dependency your manifest calls a runtime one fails with `MODULE_NOT_FOUND`."
@@ -781,6 +831,7 @@
         "hygiene"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Remove the stray `console.log`/`console.debug`, or route it through a structured logger (`logger.info(...)`). Keep `console.error`/`console.warn` for real findings."
@@ -795,6 +846,7 @@
         "control-flow"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Make the test depend on runtime state, or delete the dead branch. If you meant to compare, use `===` instead of `=`; if assigning a constant in the condition is deliberate, wrap it in extra parentheses: `while ((x = 0))`."
@@ -810,6 +862,7 @@
         "state"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Keep request data on the request: use a `const` local inside the handler, hang it off `req`/`res.locals`, or thread it through `AsyncLocalStorage`. A module-scope `let`/`var` is shared by every concurrent request, so one caller's write is another caller's read."
@@ -825,6 +878,7 @@
         "security"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Include the user/tenant identifier in the cache key (e.g. `orders:${req.user.id}:${status}`) so each tenant's value is keyed separately. A key that omits the id lets one user be served another user's cached data."
@@ -840,6 +894,7 @@
         "performance"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Construct the client/pool once at module scope and reuse the singleton across requests (e.g. `const prisma = new PrismaClient();`). A per-request client opens a new connection every time and exhausts the pool."
@@ -855,6 +910,7 @@
         "hygiene"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Drop the `async` keyword if the function never awaits. Keep it only when the body uses `await`/`for await` or genuinely returns a promise."
@@ -870,6 +926,7 @@
         "modernization"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Replace the deprecated API with its modern equivalent. These calls keep working until the runtime upgrade that removes them, at which point they become an outage rather than a warning."
@@ -886,6 +943,7 @@
         "reliability"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Call `child.unref()` after spawning. `detached: true` lets the child outlive the parent, but the parent's event loop still holds a reference to it — so the parent hangs until the child exits, which is the opposite of what detaching was for."
@@ -902,6 +960,7 @@
         "modules"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Derive the directory from the module's own URL: `import { fileURLToPath } from \"node:url\"; const here = dirname(fileURLToPath(import.meta.url));` — or `import.meta.dirname` on Node 20.11+. `__dirname` and `__filename` are CommonJS wrapper parameters and do not exist in an ES module."
@@ -917,6 +976,7 @@
         "network"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Keep verification on. If the peer uses a private CA, provide it via the `ca` option (`{ ca: fs.readFileSync('ca.pem') }`) instead of disabling verification. `rejectUnauthorized: false` accepts any certificate and enables man-in-the-middle."
@@ -932,6 +992,7 @@
         "reliability"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Forward the received `AbortSignal` into the outbound request — pass `{ signal }` (or add `signal` to the existing options/config object) so an abort by the caller actually cancels the request instead of leaving it running."
@@ -947,6 +1008,7 @@
         "hygiene"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Remove or merge the duplicate route — the later registration shadows the earlier one. Keep one handler per (method, path)."
@@ -963,6 +1025,7 @@
         "reliability"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Attach the original as the cause: `throw new Error(\"failed to load user\", { cause: err })`. Without it the stack starts at your re-throw and the real failure — the connection reset, the parse error — is gone, leaving whoever is on call at 3am with a message and no thread to pull."
@@ -978,6 +1041,7 @@
         "info-leak"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Log the error server-side and return a generic message (`res.status(500).json({ error: 'Internal error' })`). Never send `err.stack` or the raw error object — they leak paths, versions, and internal details."
@@ -994,6 +1058,7 @@
         "observability"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Return a status that matches what happened — 500 for an unexpected failure, 4xx where the caller can fix it. A 2xx makes `res.ok` true, resolves axios instead of rejecting, and records a success in APM and uptime checks, so the endpoint reports a 100% success rate while it is failing and no alert fires. The JSON body saying `success: false` is read by nothing that routes, retries, or alerts."
@@ -1008,6 +1073,7 @@
         "injection"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Never eval() dynamic input. Parse structured data with JSON.parse, and replace dynamic dispatch with an explicit lookup table keyed on a validated string."
@@ -1022,6 +1088,7 @@
         "injection"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use `execFile`/`spawn` with an argument array: `execFile('git', ['clone', url])`. There is no shell to re-parse the arguments, so an interpolated value cannot become a second command."
@@ -1037,6 +1104,7 @@
         "reliability"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Do the external I/O before the transaction (pass the result in) or after it commits — keep the `$transaction` callback pure DB work. A network round trip inside it pins the connection and holds row locks for the upstream's full latency."
@@ -1052,6 +1120,7 @@
         "performance"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Move the predicate into the query's `where` (e.g. `db.user.findMany({ where: { active: true } })`) so the database returns only the rows you keep instead of streaming the whole table into JS."
@@ -1068,6 +1137,7 @@
         "testing"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Make the test deterministic: wait for a condition rather than a fixed duration (`await waitFor(() => …)`), freeze the clock (`vi.useFakeTimers()` / `jest.useFakeTimers()`) instead of comparing against `Date.now()`, and use a fixed seed or a literal instead of `Math.random()`. A test that fails once in fifty runs teaches the team to re-run CI, which is how a real regression gets retried away."
@@ -1083,6 +1153,7 @@
         "typed"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Await the call, or make the fire-and-forget explicit. `await save(user)` when the caller depends on it; `void save(user)` plus a `.catch()` when it genuinely runs in the background. An unhandled rejection terminates the process on modern Node."
@@ -1099,6 +1170,7 @@
         "error-handling"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "`await` the call so the catch can actually see the rejection, or handle it where it happens with `.catch(…)`. An async function signals failure by rejecting its promise, never by throwing — so a try/catch around a discarded call catches nothing and the rejection becomes an unhandledRejection, which terminates the process by default."
@@ -1113,6 +1185,7 @@
         "injection"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Avoid the Function constructor for dynamic input — it compiles its arguments as source. Use a fixed dispatch table or a purpose-built safe expression interpreter instead."
@@ -1127,6 +1200,7 @@
         "secrets"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Load secrets from the environment (`process.env.X`) or a secret manager (AWS Secrets Manager, Vault). Never commit a credential — it lives forever in git history and cannot be rotated without a code change."
@@ -1141,6 +1215,7 @@
         "reliability"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Add exponential backoff between attempts (`await sleep(base * 2 ** attempt)`) and a maximum-attempt cap so a downed dependency does not trigger a tight retry storm."
@@ -1157,6 +1232,7 @@
         "reliability"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Fix the cron expression so every field is inside its range (minute 0-59, hour 0-23, day-of-month 1-31, month 1-12, day-of-week 0-7) and the expression has 5 fields (or 6 with a leading seconds field). Most schedulers throw on a malformed expression at startup; the ones that do not simply never run the job."
@@ -1172,6 +1248,7 @@
         "timeout"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Make timeouts decrease down the chain: give the inner call a timeout shorter than the outer budget (leaving headroom for retries/parsing), or derive it from the outer one. When the outer wrapper wins the race, also abort the inner request (pass the same AbortSignal) so the orphaned HTTP call does not keep holding a socket."
@@ -1189,6 +1266,7 @@
       "requires": [
         "jsonwebtoken"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use `jwt.verify(token, key, { algorithms: [...] })` for any decision that trusts the claims. `jwt.decode` skips the signature check, so its claims are attacker-controlled."
@@ -1206,6 +1284,7 @@
       "requires": [
         "jsonwebtoken"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Never allow the `none` algorithm. Pin a specific allowlist, e.g. `jwt.verify(token, key, { algorithms: ['RS256'] })`, and sign with a real algorithm. `none` disables signature verification, so any token is accepted."
@@ -1220,6 +1299,7 @@
         "event-loop"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Enforce a body size limit (e.g. `express.json({ limit: '100kb' })`) before parsing, and move parsing of large payloads off the hot path (a worker thread or a streaming parser). Synchronous `JSON.parse` blocks the single event-loop thread for the whole parse."
@@ -1235,6 +1315,7 @@
         "memory"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Register listeners once at startup, or use `emitter.once(...)` inside the handler and remove it with `removeListener` when the request completes."
@@ -1251,6 +1332,7 @@
         "memory"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Hold the listener in a variable and pass that same reference to both calls: `const onData = …; emitter.on(\"data\", onData); emitter.off(\"data\", onData);`. Removal matches by reference identity, so a function literal — or a fresh `.bind(…)` — never matches what was added."
@@ -1265,6 +1347,7 @@
         "reliability"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Keep the liveness probe trivial — return 200 without touching any dependency, so it only proves the process is alive. Move the DB/HTTP/Redis check to a separate readiness endpoint (`/readyz`): a failing readiness probe pulls the pod out of rotation instead of restarting it, so a shared-dependency blip degrades capacity gracefully rather than restarting the whole fleet."
@@ -1282,6 +1365,7 @@
       "requires": [
         "ai"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Treat model output as untrusted. Never eval/exec it or splice it into SQL, HTML, or a URL. Parse structured output and dispatch through an explicit allowlist, parameterize SQL, escape before rendering, and validate a URL's host against an allowlist."
@@ -1298,6 +1382,7 @@
         "timezone"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [
         "tz:utc"
       ],
@@ -1315,6 +1400,7 @@
         "reliability"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Capture the store into a local BEFORE registering the listener (`const ctx = als.getStore(); emitter.on(evt, () => use(ctx))`), or bind the callback to the current context with `als.bind(fn)` / `new AsyncResource(name).runInAsyncScope(fn)` so it runs in the registration-time context instead of the emit-time context."
@@ -1331,6 +1417,7 @@
         "security"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Pick the fields explicitly — `const { email, name } = req.body` — or validate into a known shape (`schema.parse(req.body)`) before the write. Passing the whole body lets the caller set every column the model has, including the ones no form shows: `role`, `credits`, `emailVerified`, `tenantId`."
@@ -1346,6 +1433,7 @@
         "secrets"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use a CSPRNG: `crypto.randomBytes(n)` / `crypto.randomUUID()` / `crypto.randomInt()`. `Math.random()` is predictable, so any token, OTP, or session id derived from it can be guessed."
@@ -1361,6 +1449,7 @@
         "db"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "`await` the query (or `return` its promise, or chain `.then`/`.catch`). A bare query statement floats its promise: the write may not finish before you respond and a rejection becomes an unhandledRejection."
@@ -1378,6 +1467,7 @@
       "requires": [
         "express"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Pass an explicit cap: `express.json({ limit: '1mb' })` (or the size your API actually needs). An unbounded body parser buffers the whole request in memory and is a denial-of-service / OOM vector."
@@ -1393,6 +1483,7 @@
         "lifecycle"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Attach a `.catch(err => ...)` to the invocation, or wrap the whole body in a `try/catch`. A floating async IIFE turns any rejection into an unhandledRejection, which crashes the process by default."
@@ -1407,6 +1498,7 @@
         "lifecycle"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use `stream.pipeline(src, dest, cb)` (it forwards errors and cleans up), or attach `.on('error', handler)` to both the source and destination stream."
@@ -1423,6 +1515,7 @@
         "websocket"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Register an `error` listener on every websocket: `ws.on(\"error\", (err) => logger.error({ err }, \"socket error\"))`. A socket is an EventEmitter, so an `error` event with no listener is re-thrown as an uncaught exception — one client dropping its connection would otherwise take down the process and every other socket with it."
@@ -1438,6 +1531,7 @@
         "testing"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Rename the mocked member to match the real export, or delete it. A mock that stubs a name the module no longer exports keeps the suite green while testing a stub of something that does not exist — the coverage number does not move, and the confidence is false."
@@ -1454,6 +1548,7 @@
         "modules"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "A module namespace object is sealed, and ES module code is strict, so assigning to one of its properties throws. Build a new object instead (`{ ...ns, fn: wrapped }`), or reach the mutable CommonJS export object through `createRequire(import.meta.url)` if you really are monkeypatching."
@@ -1469,6 +1564,7 @@
         "numeric"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use `Number.isNaN(value)` — or `Object.is(value, NaN)`. `NaN` is not equal to itself, so `=== NaN` is always false and `!== NaN` is always true: one guard never runs and the other never stops anything."
@@ -1486,6 +1582,7 @@
       "requires": [
         "edge"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Replace the Node built-in with a Web API available at the edge (`fetch`, `crypto.subtle`, `Request`/`Response`, `WebSocketPair`), or run this module on a Node runtime instead of the edge."
@@ -1501,6 +1598,7 @@
         "crypto"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Build the key from the stable logical inputs only. Sign/cache/deduplicate over the request's identifying fields; never seed a stable key with `Math.random()`/`crypto.randomUUID()` at call time. For an idempotency key, use the value the CLIENT sends (stable across its retries), not a fresh random draw."
@@ -1516,6 +1614,7 @@
         "injection"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Never pass a raw request object as a filter. Whitelist expected fields and cast each to a scalar (e.g. `String(req.body.email)`), and never build a `$where` clause from input."
@@ -1530,6 +1629,7 @@
         "injection"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Redirect only to a fixed allowlist of paths or origins: compare the target against a known-good set, or resolve it and assert `new URL(target).origin` is one you trust before calling redirect."
@@ -1545,6 +1645,7 @@
         "network"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Restrict the CIDR to the networks that actually need access (a VPC range, a bastion, an office block). If the service is genuinely public, terminate it behind a load balancer or WAF rather than opening the instance's security group."
@@ -1561,6 +1662,7 @@
         "process"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use a code in `0..255`. A process exit status is one byte, so Node keeps only `code & 0xFF` — `process.exit(256)` reports SUCCESS to the shell and to CI, and `process.exit(300)` reports 44."
@@ -1576,6 +1678,7 @@
         "iam"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Scope the statement: list the specific actions the principal needs and the specific resource ARNs they apply to. `Action: \"*\"` with `Resource: \"*\"` is administrator access — grant it deliberately and never to a service role."
@@ -1592,6 +1695,7 @@
         "timers"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Node stores a timer delay in a signed 32-bit int, so anything above 2147483647 ms (24.85 days) is clamped to 1 ms — the callback runs on the next tick instead of next month. Schedule it with a cron/queue, or re-arm a shorter timer until the deadline is reached."
@@ -1607,6 +1711,7 @@
         "injection"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Resolve against a root and enforce containment: `const full = path.resolve(root, name); if (!full.startsWith(root + path.sep)) reject;` — or strip traversal with `path.basename(name)`. `join`/`resolve` normalize but do not confine."
@@ -1623,6 +1728,7 @@
         "reliability"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Wrap this handler the way its siblings are wrapped, or — if it genuinely should differ — say so with an inline suppression and a reason. Every other route on this router routes its rejections through the wrapper; an unwrapped async handler that rejects never reaches the error middleware, and on Express 4 the request hangs until the client gives up."
@@ -1638,6 +1744,7 @@
         "lifecycle"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Never call `process.exit`/`process.abort` from a handler. Respond, then drain and shut down outside the request (`scheduleGracefulShutdown()` → `server.close()` on SIGTERM). Reserve `process.exit` for top-level fatal handlers."
@@ -1655,6 +1762,7 @@
       "requires": [
         "ai"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Keep untrusted input out of the instructions. Put user text only in a distinct `user`-role message (`messages: [{ role: 'user', content: input }]`), never interpolated into the `system` prompt or a `prompt` string, and keep your instructions in a static `system` prompt the caller cannot reach."
@@ -1670,6 +1778,7 @@
         "prototype-pollution"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Reject the dangerous keys before the write (`if (key === '__proto__' || key === 'constructor') continue;`), use a `Map`, or build on `Object.create(null)`. A single `obj[key] = value` is harmless on its own — what reaches `Object.prototype` is writing THROUGH such a key, which is why deep-merge and path-setter helpers are the classic sinks."
@@ -1685,6 +1794,7 @@
         "storage"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Set the ACL to `private` and leave every public-access block enabled. Serve public objects through a CDN with a signed origin instead of exposing the bucket itself."
@@ -1701,6 +1811,7 @@
         "performance"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Fetch the set in one round trip: a JOIN, a `WHERE id IN (...)`, or the ORM's eager-load (`include` / `with` / `populate`). A query per iteration is N round trips for one request."
@@ -1715,6 +1826,7 @@
         "async"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Add an explicit timeout branch to the race — a `setTimeout`/`AbortSignal.timeout(ms)` promise or a `timeout(ms)` helper — so a stuck upstream call cannot hang the race forever."
@@ -1730,6 +1842,7 @@
         "security"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Rewrite to remove the nested quantifier (`(\\w+)*` → `\\w*`), anchor the pattern, or bound the tested input length. For untrusted input use a linear-time matcher (RE2) instead of the backtracking engine."
@@ -1744,6 +1857,7 @@
         "error-handling"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Remove the redundant try/catch and let the error propagate, or add real handling (log, wrap with `{ cause }`, or recover)."
@@ -1758,6 +1872,7 @@
         "reliability"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Retry at exactly ONE layer. Disable the inner client's built-in retries (AWS SDK `maxAttempts: 1`, got `retry: 0`, Stripe `maxNetworkRetries: 0`) or remove the outer retry wrapper, and add jitter to the single remaining retry so failures do not synchronize into a herd on the failing dependency."
@@ -1772,6 +1887,7 @@
         "secrets"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Move the secret out of the committed config into an injected secret (CI secret store, environment variable, or secret manager) and reference it. Never commit a provider key or private key."
@@ -1788,6 +1904,7 @@
       "requires": [
         "express"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Return when you delegate: `return next(err)` (or return after responding). A bare `next()` does not stop the handler, so the later `res.*` writes to an already-finished response and throws ERR_HTTP_HEADERS_SENT."
@@ -1804,6 +1921,7 @@
         "secrets"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Never log the credential itself. Log a presence check or a fingerprint instead (`{ hasToken: Boolean(token) }`, `token.slice(-4)`), or run the payload through a redaction step — pino's `redact` option, or an explicit `redact()`/`mask()` helper."
@@ -1819,6 +1937,7 @@
         "performance"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Fire the independent round trips together and await them once: `const [a, b] = await Promise.all([fetchA(), fetchB()])`. The serial cost is the sum of the latencies; the parallel cost is the max."
@@ -1836,6 +1955,7 @@
       "requires": [
         "express"
       ],
+      "requiresAny": [],
       "disabledWhen": [
         "fastify"
       ],
@@ -1853,6 +1973,7 @@
         "privacy"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "For an authenticated or personalized response, set `Cache-Control: private, no-store` (or drop `public`/`s-maxage`) so a CDN/shared proxy cannot store and re-serve it. If it must be shared-cacheable, key it per user with `Vary: Authorization`."
@@ -1868,6 +1989,7 @@
         "correctness"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use `Array.from({ length: n }, (_, i) => …)`, or materialise the holes first with `new Array(n).fill(0)`. `new Array(n)` produces holes rather than `undefined`s, and every callback-taking method on `Array.prototype` skips holes — so the callback never runs and the result is another array of holes."
@@ -1883,6 +2005,7 @@
         "injection"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use parameter binding: `db.query('SELECT ... WHERE id = $1', [id])`, Prisma's tagged `$queryRaw` template, or the query builder. Interpolation loses the data/grammar boundary before the driver sees it."
@@ -1898,6 +2021,7 @@
         "network"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Validate the destination before the request: parse it with `new URL(target)` and assert its host is in an explicit allowlist, rejecting internal/link-local ranges and non-http(s) schemes."
@@ -1913,6 +2037,7 @@
         "http"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Move the write to POST/PUT/PATCH/DELETE (and protect it with a CSRF token). GET must stay safe and idempotent: prefetchers, crawlers and a cross-site `<img src>` all trigger it with the victim's cookies, and CSRF defenses do not cover GET."
@@ -1927,6 +2052,7 @@
         "correctness"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Drop the `g`/`y` flag for a membership check (`/^\\d+$/` instead of `/^\\d+$/g`) — a stateless regex gives the same answer every call. If you truly need the flag, reset `re.lastIndex = 0` before each `.test()`, or match against a fresh literal."
@@ -1942,6 +2068,7 @@
         "encryption"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Generate the IV per message — `const iv = crypto.randomBytes(16)` — and store it alongside the ciphertext; it is not secret, only unique. A fixed IV makes the cipher deterministic, so equal plaintexts produce equal ciphertexts and shared prefixes stay shared. In GCM or any counter mode a repeated nonce repeats the keystream, which reveals the XOR of two plaintexts and lets the authentication key be recovered. If you genuinely need deterministic encryption for searching, use a construction designed for it (AES-SIV) rather than a fixed IV."
@@ -1958,6 +2085,7 @@
         "http"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use `Buffer.byteLength(body)`. `String.prototype.length` counts UTF-16 code units, and `Content-Length` counts bytes — the two agree only for ASCII, and when they disagree the header is too small, so the client truncates the body or desynchronises a keep-alive connection."
@@ -1972,6 +2100,7 @@
         "error-handling"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Do something with the error: log it (`log.error(err)`), rethrow it (`throw err`), forward it (`next(err)`), or return a meaningful fallback. An empty catch hides the failure entirely."
@@ -1987,6 +2116,7 @@
         "event-loop"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use the async KDF (`await bcrypt.hash(...)` / `await bcrypt.compare(...)`), which offloads the CPU-bound work to the libuv thread pool. The `*Sync` form runs the whole cost factor inline and blocks every concurrent request."
@@ -2003,6 +2133,7 @@
         "performance"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use the async form (`await fs.promises.readFile(...)`, `await execFile(...)`). The synchronous call blocks the single event-loop thread, freezing every concurrent request, the timers, and the liveness probe."
@@ -2019,6 +2150,7 @@
         "performance"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Make the helper async and have the handler await it (`await fs.promises.readFile(...)`, `await execFile(...)`). A synchronous call in a helper on the request path blocks the event loop exactly as one written inline does."
@@ -2037,6 +2169,7 @@
       "requires": [
         "ai"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Never return, log, or embed the `system` prompt in a caller-visible value. Send only the model's answer back, and keep any secret interpolated into the prompt out of responses and logs."
@@ -2052,6 +2185,7 @@
         "taint"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Parameterize the sink where it lives: bind SQL parameters (`db.query('… = $1', [value])`), use `execFile`/`spawn` with an argument array instead of a shell string, and never pass request data to `eval`/`Function`. Validating in the handler is not enough — the helper is the sink."
@@ -2068,6 +2202,7 @@
         "testing"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Assert on the output of the code under test, not on the mock you configured. Passing the mock's value through your own function and asserting the result is what makes the test meaningful; asserting the mock's return value only re-states the setup. If the intent is to verify how your code *uses* the collaborator, assert that instead: `expect(getUser).toHaveBeenCalledWith(1)`."
@@ -2082,6 +2217,7 @@
         "error-handling"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Do not `throw` or `return` from `finally`; let the original completion of the try/catch propagate. Do side-effect cleanup (e.g. `await cleanup()`) there instead."
@@ -2096,6 +2232,7 @@
         "error-handling"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Throw an Error instance: `throw new Error(message)` (or a subclass). Only an Error carries a stack trace, satisfies `instanceof Error` handlers, and serializes to a readable message."
@@ -2112,6 +2249,7 @@
         "secrets"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Compare secrets in constant time: `crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b))` after a length check. `===` leaks a prefix oracle through its early exit."
@@ -2128,6 +2266,7 @@
         "types"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "`toFixed` returns a string. Do the arithmetic on numbers and format once at the end — `Math.round((a + b) * 100) / 100`, or `Number(a.toFixed(2)) + Number(b.toFixed(2))` if the rounding has to happen first. For money, prefer integer minor units (cents) or a decimal library over floats entirely. For an equality check, compare numbers (`Number(x.toFixed(2)) === 0`) or compare the string to a string (`x.toFixed(2) === \"0.00\"`)."
@@ -2145,6 +2284,7 @@
       "requires": [
         "express"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Set `trust proxy` to the exact number of proxies in front of the app (e.g. `1`), a trusted subnet string, or a predicate function — not `true`. Trusting every hop lets any client spoof `X-Forwarded-For` and thus `req.ip`."
@@ -2160,6 +2300,7 @@
         "injection"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Anchor the pattern at the start (`/^https:\\/\\/trusted\\.com$/`) so it matches the whole input, not a substring — or, better, parse the value (`new URL(target).host`) and compare the host against an explicit allowlist instead of matching a regex."
@@ -2178,6 +2319,7 @@
       "requires": [
         "koa"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Await it — `await next()` — or return it (`return next()`, or a concise arrow body `(ctx, next) => next()`). `next()` is a promise for the entire downstream chain, and Koa only builds the response after it settles: without the await, Koa answers before any downstream handler that awaits has set `ctx.body` (measured: 404), and a downstream throw escapes your `try` to become an unhandled rejection that exits the process."
@@ -2196,6 +2338,7 @@
       "requires": [
         "ai"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Bound the loop with a step budget — `for (let step = 0; step < MAX_STEPS; step++)`, or a counter that throws when it is exceeded. An agent loop whose only exit is the model deciding to stop runs until the request times out or the spend cap does, and a tool that keeps returning an error the model keeps trying to fix will get there."
@@ -2211,6 +2354,7 @@
         "memory"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Give the cache an eviction story: a TTL sweep (`setInterval(() => cache.clear(), ...)`), a bounded `LRUCache({ max })`, or a `WeakMap` that self-evicts. A write-only module-scope Map/Set grows without bound."
@@ -2227,6 +2371,7 @@
         "network"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Bound the fan-out instead of removing the parallelism: wrap each task with a concurrency limiter (`p-limit`), e.g. `collection.map((x) => limit(() => work(x)))`, so at most N run at once."
@@ -2243,6 +2388,7 @@
         "signals"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Move the cleanup to `SIGTERM` (and `SIGINT` for a local Ctrl-C). `SIGKILL` and `SIGSTOP` are handled by the kernel and cannot be caught — Node throws `EINVAL` from `uv_signal_start` at the point of registration, so this line crashes the process rather than protecting it."
@@ -2260,6 +2406,7 @@
       "requires": [
         "node"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Default it (`process.env.FOO ?? fallback`), guard it (`if (process.env.FOO) …`), or validate all required vars once at startup. A non-null `!` or a direct member access crashes with `Cannot read properties of undefined` the first time the var is unset in an environment."
@@ -2276,6 +2423,7 @@
         "date"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Bound the day around the shift. Set it to 1 first so the overflow cannot happen, then restore it clamped to the target month's length: `const day = d.getDate(); d.setDate(1); d.setMonth(d.getMonth() + n); d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()))`. The shorter repair-after form works too: `d.setMonth(d.getMonth() + n); if (d.getDate() !== day) d.setDate(0)`. `new Date(y, m + n, d)` is NOT a fix — it overflows identically."
@@ -2291,6 +2439,7 @@
         "memory"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Store the handle and `clearInterval(handle)` on shutdown, or call `handle.unref()` so the interval does not by itself keep the process alive."
@@ -2307,6 +2456,7 @@
         "crash"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Remove the function from the payload and coordinate over messages instead: post the data, and reply with `worker.once(\"message\", …)`. `postMessage` runs the structured clone algorithm, which throws `DataCloneError` on a function — synchronously, at the call, on whichever path carries the callback."
@@ -2325,6 +2475,7 @@
       "requires": [
         "ai"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Wrap it in `try`/`catch` and decide what a malformed response should do, or use a schema-validating helper (`generateObject` on the Vercel AI SDK, a Zod `safeParse` on the parsed value). A model returns text: a JSON mode changes the odds, not the type, and a response truncated at the token cap is never valid JSON."
@@ -2341,6 +2492,7 @@
         "streams"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Use `stream.pipeline(source, destination, callback)` instead of `.pipe()` — it forwards errors, destroys every stream in the chain, and calls back once. If you must keep `.pipe()`, register an `error` listener on the source: `src.on(\"error\", next)`. Bare `.pipe()` does not forward errors, so a failing source leaves the destination open — a leaked file descriptor and a request that hangs until the client gives up."
@@ -2357,6 +2509,7 @@
         "maintainability"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Implement it, or make the gap loud — `throw new Error(\"applyDiscount is not implemented\")` fails on the first call instead of returning `undefined` into arithmetic three layers away. An empty body that a comment admits is unfinished passes type checking, passes a test written against the same misunderstanding, and ships."
@@ -2372,6 +2525,7 @@
         "unicode"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Normalize both sides before comparing: `a.normalize(\"NFKC\").toLowerCase() === b.normalize(\"NFKC\").toLowerCase()` (normalize first, case-fold after), or compare a stored canonical form. Case-folding and trimming do not collapse homoglyphs or compatibility characters, so `admin` and `аdmin` (Cyrillic `а`) stay distinct."
@@ -2386,6 +2540,7 @@
         "supply-chain"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Pin the dependency to an exact or registry semver range (e.g. `^1.2.3`, `~1.2.0`, `1.2.3`) so the install is reproducible from package.json + lockfile and every version resolves through the registry."
@@ -2402,6 +2557,7 @@
         "reliability"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Move the cleanup above the exit and await it: `server.close(); await db.end(); await logger.flush(); process.exit(0);`. `process.exit()` terminates immediately without waiting for pending I/O, so anything written below it never runs — and the things written below it are usually the drain, the flush and the close."
@@ -2416,6 +2572,7 @@
         "control-flow"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Delete the dead statements, or move them above the return/throw/break/continue if they were meant to run. Control flow leaves the statement list at the terminator, so nothing after it executes (hoisted `function` and `var` declarations excepted)."
@@ -2432,6 +2589,7 @@
         "resource-leak"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Release it in a `finally` so the error path cannot skip it: `const client = await pool.connect(); try { … } finally { client.release(); }`. A resource that is only released on the happy path is released until the first exception, and then never again."
@@ -2450,6 +2608,7 @@
       "requires": [
         "hono"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Return the response: `return c.json(…)`, or drop the braces so the arrow returns it (`(c) => c.json(…)`). Unlike Express's `res.json(…)`, which sends, Hono's `c.json(…)` only CONSTRUCTS a `Response` — Hono replies with whatever the handler returns, so a discarded one leaves nothing to reply with and the caller gets a 404 even though the handler ran."
@@ -2466,6 +2625,7 @@
         "security"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Resolve the entry against the destination and confirm it stayed inside before writing: `const out = resolve(dest, entry.path); if (relative(dest, out).startsWith(\"..\")) throw new Error(\"unsafe entry\")`. With `tar`, simply do not set `preservePaths` — the default already strips absolute paths, rejects `..`, and refuses to extract through a symlink."
@@ -2481,6 +2641,7 @@
         "injection"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Never deserialize untrusted input with a code-executing deserializer. Use `JSON.parse` for data; for YAML use `js-yaml` v4+ `load` (safe by default) or pass `{ schema: JSON_SCHEMA }`. Drop `node-serialize`/`funcster` `unserialize` on request data entirely."
@@ -2496,6 +2657,7 @@
         "injection"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Never build a RegExp from raw input. Escape the value with an escape-regexp helper before interpolating it, or match against a fixed pattern and treat input as data."
@@ -2510,6 +2672,7 @@
         "correctness"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Give every `skip`/`OFFSET` query a stable, unique sort key (e.g. `orderBy: { id: 'asc' }` or `ORDER BY id`), or switch to keyset/cursor pagination. Without a deterministic order, rows inserted or deleted between page fetches shift the window, so pages silently drop and duplicate records."
@@ -2529,6 +2692,7 @@
       "requires": [
         "prisma"
       ],
+      "requiresAny": [],
       "disabledWhen": [
         "ambient-transaction"
       ],
@@ -2547,6 +2711,7 @@
         "filesystem"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Convert it first: `import { fileURLToPath } from \"node:url\"` and pass `fileURLToPath(import.meta.url)`, or hand `fs` a `new URL(…)` object rather than the string. `import.meta.url` is a `file://` URL, and `node:path` treats it as an ordinary relative segment."
@@ -2561,6 +2726,7 @@
         "injection"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Do not treat `vm` as a sandbox. Run untrusted code in a real isolate (isolated-vm) or a separate OS process with a memory/CPU/time budget and no ambient credentials."
@@ -2575,6 +2741,7 @@
         "crypto"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use an authenticated cipher with a random IV: `crypto.createCipheriv('aes-256-gcm', key, iv)`. DES/3DES and RC4 are broken, ECB leaks structure, and `createCipher` derives keys insecurely."
@@ -2591,6 +2758,7 @@
         "tls"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Leave `minVersion` unset — Node already defaults to TLSv1.2 — or set it to `TLSv1.2`/`TLSv1.3`. For key generation use a modulus of at least 2048 bits. Both of these are silent when wrong: the handshake completes and the key generates, so nothing fails until somebody reads the parameter."
@@ -2606,6 +2774,7 @@
         "secrets"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use a slow, salted, memory-hard KDF for passwords: `argon2.hash(pw)`, `scrypt`, or `bcrypt`. MD5/SHA-1 are GPU-crackable at billions of guesses per second."
@@ -2621,6 +2790,7 @@
         "injection"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Scope the parser to the media type it actually handles — `express.json({ type: 'application/json' })`, a scoped subtype like `'application/*+json'` / `'text/*'`, or an explicit list. A `type` of `'*/*'` (or a `() => true` predicate) parses every body regardless of its declared Content-Type, so a mislabeled request bypasses content-type-based validation."
@@ -2636,6 +2806,7 @@
         "injection"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Escape the value before it reaches the markup (`escapeHtml(value)`, `DOMPurify.sanitize(value)`), or render through an auto-escaping template engine with `res.render`. Concatenating request data into HTML hands the caller script execution in your origin."
@@ -2650,6 +2821,7 @@
         "hygiene"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Prefix the specifier with `node:` (e.g. `import fs from 'node:fs'`). The protocol form is unambiguous with npm packages and resolves faster."
@@ -2666,6 +2838,7 @@
       "requires": [
         "express"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Register a terminal error handler: `app.use((err, req, res, next) => { ... })`. Its 4-argument signature is how Express routes thrown errors and `next(err)` to your logging and shaped 500 response."
@@ -2681,6 +2854,7 @@
         "network"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Pass an abort signal: `fetch(url, { signal: AbortSignal.timeout(5_000) })` (Node 18+). Without it a stalled upstream pins a request slot, then a connection, then the whole pool."
@@ -2698,6 +2872,7 @@
       "requires": [
         "jsonwebtoken"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Always pass an explicit allowlist, e.g. `jwt.verify(token, key, { algorithms: ['RS256'] })`. Without it, an RS256 verifier can be confused into accepting an HS256 token signed with the public key."
@@ -2716,6 +2891,7 @@
       "requires": [
         "ai"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Set an output cap — `max_tokens` on the OpenAI and Anthropic clients, `maxTokens` on the Vercel AI SDK, `maxOutputTokens` on Google's. Without one the ceiling is the model's default maximum, which differs per model and changes under you: the same code implicitly capped at 4k today is capped at 64k after a model swap, and the difference arrives as a bill."
@@ -2733,6 +2909,7 @@
       "requires": [
         "prisma"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Always pass a `take` (or SQL `LIMIT`) and paginate with a cursor/offset. An unbounded `findMany` grows with the table and eventually drains the pool, the heap, and the event loop."
@@ -2747,6 +2924,7 @@
         "auth"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Set `{ httpOnly: true, secure: true, sameSite: 'lax' }` on auth cookies. `httpOnly` blocks JavaScript from reading the session (XSS theft) and `secure` keeps it off plaintext HTTP."
@@ -2761,6 +2939,7 @@
         "lifecycle"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "On `process.on('SIGTERM', ...)`, stop accepting connections and call `server.close(() => process.exit(0))` so in-flight requests drain before the process exits."
@@ -2778,6 +2957,7 @@
       "requires": [
         "restify"
       ],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Wire the server's error events: `server.on(\"restifyError\", (req, res, err, next) => { … })` for shaped error responses, and `server.on(\"uncaughtException\", (req, res, route, err) => { … })` so a throwing handler answers the request instead of killing the process."
@@ -2793,6 +2973,7 @@
         "secrets"
       ],
       "requires": [],
+      "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Fail fast at boot instead of degrading silently: `if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is required')`. A `|| \"fallback\"` ships a working key that anyone can read from source."

@@ -11,6 +11,50 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### `requiresAny` — a family gate for the engine, and Fastify coverage that needed it
+
+**Engine.** Capability gating had two forms: `requires` (ALL of these tokens) and
+`disabledWhen` (ANY of these disables). Neither can express "this framework OR
+that one", and some defects are shared by frameworks that spell them identically.
+`requiresAny` is the third form — **at least one** of the listed tokens must be
+present. It combines with `requires` (both must hold), `disabledWhen` still wins
+over it, and an **empty array is no constraint** rather than an unsatisfiable one,
+so a mistaken `requiresAny: []` cannot silently kill a rule the way an ungrantable
+token once did. The gate-integrity test now checks its tokens for grantability
+exactly as it checks `requires` — same hazard, same guard. Threaded through every
+consumer: `capabilitiesSatisfied`, `shouldEnableDiagnostic`, text-scan gating, the
+MCP server, `explain`, `diagnostics --framework`, and the web rule data.
+
+**Fastify.** No new rule — a gate that was excluding the framework whose logic it
+already handled. `express-missing-return-after-response` has always had `reply` in
+its `RESPONSE_ROOTS` and `send` in its `TERMINAL` set, so a Fastify guard matched
+its logic, and `requires: ["express"]` meant it never ran on a Fastify project.
+Exactly the shape of the AdonisJS mass-assignment gap: the analysis was there, the
+gate was not.
+
+MEASURED against Fastify 5.12.1 through `app.inject()`, because the framework's
+forgiveness is the whole story:
+
+```
+async: return payload                    → 200 {"ok":true}
+async: reply.send(), no return           → 200 {"ok":true}
+async: reply.send(a) then return b       → 200 {"from":"send"}   ← return discarded
+async: reply.send() twice                → 200 {"n":1}           ← second discarded
+async: neither sends nor returns         → 200, empty body
+```
+
+Fastify 5 throws on none of these, which is why the defect survives. In the real
+shape — a validation guard that sends a 400 without returning — the caller gets
+the 400 while the protected code below has already run (the order created, the
+mail sent), and the value the handler meant to return is dropped with nothing in
+the logs to mark it. Express at least announces itself with
+`ERR_HTTP_HEADERS_SENT`; Fastify is silent.
+
+The gate is now `requiresAny: ["express", "fastify"]`, and the recommendation
+names both spellings and both runtime behaviours, since they differ.
+`node-doctor diagnostics --framework fastify` goes from 1 rule to 2, and `explain`
+reads "requires one of express, fastify".
+
 ### Koa coverage
 
 Koa was the last framework the docs claimed as **Core** without any coverage
