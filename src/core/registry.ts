@@ -34,6 +34,7 @@ import { noUnclonableWorkerMessage } from "../diagnostics/async/no-unclonable-wo
 import { requireFetchTimeout } from "../diagnostics/async/require-fetch-timeout.ts";
 // bugs
 import { noBigintPrecisionLoss } from "../diagnostics/bugs/no-bigint-precision-loss.ts";
+import { noBrokenSortComparator } from "../diagnostics/bugs/no-broken-sort-comparator.ts";
 import { noChunkStringConcat } from "../diagnostics/bugs/no-chunk-string-concat.ts";
 import { noConstantCondition } from "../diagnostics/bugs/no-constant-condition.ts";
 import { noDirnameInEsm } from "../diagnostics/bugs/no-dirname-in-esm.ts";
@@ -47,6 +48,8 @@ import { noShadowedRoute } from "../diagnostics/bugs/no-shadowed-route.ts";
 import { noSparseArrayIteration } from "../diagnostics/bugs/no-sparse-array-iteration.ts";
 import { noStringLengthAsContentLength } from "../diagnostics/bugs/no-string-length-as-content-length.ts";
 import { noThrowLiteral } from "../diagnostics/bugs/no-throw-literal.ts";
+import { noTofixedAsNumber } from "../diagnostics/bugs/no-tofixed-as-number.ts";
+import { noUnclampedMonthShift } from "../diagnostics/bugs/no-unclamped-month-shift.ts";
 import { noUnreachableCleanupAfterExit } from "../diagnostics/bugs/no-unreachable-cleanup-after-exit.ts";
 import { noUnreachableCode } from "../diagnostics/bugs/no-unreachable-code.ts";
 import { noUnstableOffsetPagination } from "../diagnostics/bugs/no-unstable-offset-pagination.ts";
@@ -72,6 +75,9 @@ import { requirePaginationLimit } from "../diagnostics/event-loop/require-pagina
 import { hapiRouteAuthDisabled } from "../diagnostics/frameworks/hapi-route-auth-disabled.ts";
 import { hapiRouteMissingValidation } from "../diagnostics/frameworks/hapi-route-missing-validation.ts";
 import { noPeerInconsistentHandler } from "../diagnostics/frameworks/no-peer-inconsistent-handler.ts";
+import { noUnawaitedKoaNext } from "../diagnostics/frameworks/no-unawaited-koa-next.ts";
+import { noUnawaitedNextDynamicApi } from "../diagnostics/frameworks/no-unawaited-next-dynamic-api.ts";
+import { noUnreturnedHonoResponse } from "../diagnostics/frameworks/no-unreturned-hono-response.ts";
 import { restifyMissingErrorHandler } from "../diagnostics/frameworks/restify-missing-error-handler.ts";
 // http
 import { corsCredentialsReflect } from "../diagnostics/http/cors-credentials-reflect.ts";
@@ -201,6 +207,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   requireFetchTimeout,
   // bugs
   noBigintPrecisionLoss,
+  noBrokenSortComparator,
   noChunkStringConcat,
   noConstantCondition,
   noDirnameInEsm,
@@ -214,6 +221,8 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noSparseArrayIteration,
   noStringLengthAsContentLength,
   noThrowLiteral,
+  noTofixedAsNumber,
+  noUnclampedMonthShift,
   noUnreachableCleanupAfterExit,
   noUnreachableCode,
   noUnstableOffsetPagination,
@@ -239,6 +248,9 @@ export const DIAGNOSTICS: Diagnostic[] = [
   hapiRouteAuthDisabled,
   hapiRouteMissingValidation,
   noPeerInconsistentHandler,
+  noUnawaitedKoaNext,
+  noUnawaitedNextDynamicApi,
+  noUnreturnedHonoResponse,
   restifyMissingErrorHandler,
   // http
   corsCredentialsReflect,

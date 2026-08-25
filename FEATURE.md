@@ -96,26 +96,104 @@ Understands what a codebase *is* before analyzing it, so rules activate correctl
 - **Runtime detection** — Node vs Bun vs Deno vs edge runtimes (`bun.lockb`/`bunfig.toml`, `deno.json(c)`, `wrangler.toml`, `@vercel/edge`), surfaced as capability tokens that gate runtime-specific diagnostics.
 
 ## 2. Framework Detection
-**Status: Core** for Express, Fastify, NestJS, AdonisJS, Koa (detection + dedicated diagnostics). The rest are **Detected** — the capability token is set and gates rule selection and route extraction, but no framework-specific diagnostics exist for them yet.
+**Status: Core** for Express, Fastify, NestJS, AdonisJS, Hono, Koa and Next.js Route Handlers. The rest are **Detected** — the capability token is set and gates rule selection and route extraction, but no framework-specific coverage exists for them yet.
 
-Capability tokens are derived per framework and gate framework-specific rules.
+**Framework support is three separate things, and they do not have the same answer.** Most of the value is in the middle column: *handler recognition* is what tells the other ~165 framework-independent rules "this code runs per HTTP request", which is the gate on sync I/O in a handler, unbounded body parsing, secrets in logs, and every injection rule. Dedicated rules are the thin top layer.
 
-| Framework | Tier |
+| Framework | Token | Handlers recognized | Dedicated coverage |
+| --- | --- | --- | --- |
+| Express (4 and 5, version-aware) | ✅ | signature `(req, res)` + registration | **7 rules** |
+| Fastify | ✅ | signature `(request, reply)` + `route({})` | 2 rules |
+| NestJS | ✅ | decorators | 1 rule |
+| AdonisJS | ✅ | `HttpContext` type + decorators | **mass assignment** (`request.all()`/`body()`/`qs()`/`params()`, Lucid `merge`/`fill`) |
+| Hono | ✅ | registration | **1 rule** (`no-unreturned-hono-response`) |
+| Koa | ✅ | registration + `(ctx, next)` signature, behind Koa evidence | **1 rule** (`no-unawaited-koa-next`) |
+| Hapi | ✅ | `server.route({})` | 2 rules |
+| Restify | ✅ | registration | 1 rule |
+| Sails.js | ✅ | registration | — |
+| Feathers | ✅ | registration | — |
+| LoopBack | ✅ | registration | — |
+| Next.js API routes / Route Handlers | ✅ | exported `GET`/`POST`/… in a route file | **1 rule** (`no-unawaited-next-dynamic-api`) |
+| Remix API / actions & loaders | ✅ | `loader` / `action` signature | — |
+| Serverless Framework | ✅ | registration | — |
+| Meteor | Planned | — | — |
+
+Route registration is matched **framework-agnostically** — any `x.get/post/put/patch/delete(path, handler)` call carrying a function — so a framework needs no special support to have its handlers found. That is why Hono's handlers were already reaching the request-path rules before Hono had a rule of its own, and it is why Koa's router handlers are covered even though `looksLikeExpressHandler` only accepts `{req, request}` × `{res, response, reply}` and so does not match Koa's `(ctx, next)`.
+
+### Hono — the response that is built and never sent
+
+`no-unreturned-hono-response` (Bugs/**error**/high, gated on the `hono` token). This is the one API difference that catches every developer arriving from Express: `res.json(x)` **sends**, while `c.json(x)` **constructs a `Response` and hands it back**. Hono replies with whatever the handler returns, so discarding it leaves nothing to reply with. MEASURED against Hono 4.13.4 by running each form through `app.request()`: a discarded `c.json`, `c.text`, `c.html`, `c.redirect` or `c.body` all answer **404 "404 Not Found"**, while `return c.json({ ok: true })` answers 200 with the body. The async row is the expensive one — the `await` already ran, so the row was written or the payment taken, and the caller is told the route does not exist; a client that retries on 404 does all of it again. It survives review because the handler reads like Express and the 404 reads like a routing problem, so the search starts in the router rather than in the handler that already ran.
+
+Three structural conditions, and the exclusions were measured rather than assumed. The method must **produce** a Response (`json`/`text`/`html`/`body`/`redirect`/`notFound`/`newResponse`) — the context's side-effecting methods are verified correct when discarded, since `c.header("x-trace","1")` and `c.status(201)` before a returned `c.json(…)` produce a 201 with the right body, and `c.set(…)` stores a variable `c.get(…)` reads back. The result must be **discarded**. And the receiver must be the **first parameter** of a function the engine already recognizes as a handler — the anchor that keeps the rule off every other framework in the same repo, because Express and Fastify both put their response object *second*. Two measured non-defects are deliberately not claimed: `throw new HTTPException(401)` produces a real 401, and middleware calling `next()` **without** `await` still reaches the handler and answers 200 — so the obvious "missing await on next()" rule would be reporting correct code and is not shipped.
+
+### Next.js — the dynamic API that is a Promise now
+
+`no-unawaited-next-dynamic-api` (Bugs/**error**/high, gated on the `next` token). Since Next 15, `cookies()`, `headers()` and `draftMode()` from `next/headers` return **Promises**, so every property read on the un-awaited call is `undefined`. Verified twice over, against Next 16.3.2: the shipped declarations export `cookies(): Promise<ReadonlyRequestCookies>`, and a running dev server confirmed the behaviour end to end —
+
+| handler | result |
 | --- | --- |
-| Express (4 and 5, version-aware) | Core |
-| Fastify | Core |
-| NestJS | Core |
-| AdonisJS | Core |
-| Koa | Core |
-| Hapi | Detected |
-| Restify | Detected |
-| Sails.js | Detected |
-| Feathers | Detected |
-| LoopBack | Detected |
-| Meteor | Planned |
-| Next.js API routes / Route Handlers | Detected |
-| Remix API / actions & loaders | Detected |
-| Serverless Framework | Detected |
+| `const c = cookies()` | `typeof c.get` → **`"undefined"`** |
+| `const h = headers()` | `typeof h.get` → **`"undefined"`** |
+| `const c = await cookies()` | `typeof c.get` → `"function"` |
+
+with the server logging, verbatim: *Route "/api/sync" used `cookies().get`. `cookies()` returns a Promise and must be unwrapped with `await` or `React.use()` before accessing its properties.* The temporary synchronous-access shim Next 15 shipped is **gone in Next 16**, so this is a hard failure rather than a deprecation warning.
+
+**The expensive spelling is the one that does not throw.** `cookies().get("session")` gives a loud 500. But `const c = cookies(); if (c?.get?.("role") === "admin")` throws nothing — the optional chain swallows it and the check silently always fails, turning a broken authorization test into one that quietly denies, or (inverted) quietly allows. This is the single commonest Next 14 → 15 migration defect, and a codemod that missed a file leaves exactly this shape behind.
+
+Two structural claims, no inference. The callee must resolve to an import of `cookies`/`headers`/`draftMode` **from `next/headers`** — matched by local binding name, so an aliased `import { cookies as getCookies }` is covered and a same-named function from anywhere else is not — and the Promise must be consumed **synchronously**: a member access on the call, a destructure of it, or a binding that is later member-accessed. Everything that treats it as a Promise is silent by construction: `await`, `return`, `.then`/`.catch`/`.finally`, `use(cookies())` and `React.use(cookies())` (the documented alternative), `Promise.all([cookies(), headers()])`, and a binding that is passed onward without ever being read. Not version-gated: the async signature landed in 15, `next` in a modern manifest means 15 or 16, and a Next 14 project that upgrades gets a finding already true of the version it is moving to.
+
+### Fastify — the guard that responds without returning
+
+No new rule; a gate that was excluding the framework whose logic it already handled. `express-missing-return-after-response` has always had `reply` in its `RESPONSE_ROOTS` and `send` in its `TERMINAL` set, so a Fastify guard was matched by its logic — and `requires: ["express"]` meant it never ran on a Fastify project. Exactly the shape of the AdonisJS mass-assignment gap: the analysis was there, the gate wasn't.
+
+MEASURED against Fastify 5.12.1 through `app.inject()`, because the framework's forgiveness is the whole story:
+
+| handler | result |
+| --- | --- |
+| `async: return payload` | 200 `{"ok":true}` |
+| `async: reply.send(), no return` | 200 `{"ok":true}` |
+| `async: reply.send(a) then return b` | 200 **`{"from":"send"}`** — the return is discarded |
+| `async: reply.send() twice` | 200 `{"n":1}` — the second is discarded |
+| `async: neither sends nor returns` | 200, **empty body** |
+
+Fastify 5 does not throw on any of these, which is precisely why the defect survives. In the real shape — a validation guard that sends a 400 without returning — the caller gets the 400 while the protected code below it has already run (the order created, the mail sent), and the value the handler meant to return is dropped with nothing in the logs to mark it. Express at least announces itself with `ERR_HTTP_HEADERS_SENT`.
+
+The gate is now `requiresAny: ["express", "fastify"]`, the family form added to the engine for this (see §45). The recommendation names both spellings and both runtime behaviours, since they differ: Express responds twice and errors, Fastify keeps the first response silently.
+
+### Koa — the `next()` that is called but not awaited
+
+`no-unawaited-koa-next` (Bugs/**error**/high, gated on the `koa` token). `next()` returns a promise for the entire downstream chain, and Koa builds its response from `ctx` only after that promise settles. A middleware that does not wait hands control back immediately, and Koa answers with whatever `ctx` held at that moment. MEASURED against Koa 3.2.1, each case served over a real socket:
+
+| middleware | downstream | result |
+| --- | --- | --- |
+| `await next()` | sets `ctx.body` synchronously | 200 `"downstream"` |
+| `next()` | sets `ctx.body` synchronously | 200 `"downstream"` |
+| `await next()` | awaits, then sets `ctx.body` | 200 `"downstream after await"` |
+| `return next()` | awaits, then sets `ctx.body` | 200 `"downstream after await"` |
+| `next()` | awaits, then sets `ctx.body` | **404 `"Not Found"`** |
+
+Row two is why it survives review: with a synchronous downstream the un-awaited form works, so the smoke test passes and the middleware looks fine — until any handler below it awaits a database, which every real handler does, and the route starts 404-ing. The error path is worse and was measured the same way: with `await next()` inside a `try`, a downstream throw is caught and answers 503; **without** the await the `try` catches nothing, because the rejection lands after the middleware has already returned. It became an unhandled rejection that *terminated the probe process*. So the un-awaited form does not merely mis-order the response — it converts every downstream error from a caught 500 into a process exit.
+
+The rule fires only when a call's direct parent is an `ExpressionStatement`, so everything that consumes the promise is silent by construction: `await next()`, `return next()`, a concise arrow body, `.then(…)`, `.catch(…)`, `const p = next()`, and `Promise.all([next(), …])`. Arity two is load-bearing — Express middleware is `(req, res, next)` and its error form `(err, req, res, next)`, where a bare `next()` is the CORRECT call, so requiring exactly `(ctx | context, next)` keeps the rule off both and a project running Koa and Express side by side is not misreported.
+
+**The signature is not sufficient, and shipping as if it were would have been this rule's one real defect.** The `koa` capability comes from package.json and is therefore PROJECT-wide, so the first version reported every two-parameter `(ctx, next)` function anywhere in a Koa repo at severity `error`. An adversarial review reproduced nine, all correct code — wizard steps, validator chains, in-memory reducers, a canvas layer pipeline, an `async.eachSeries` iteratee, a class method implementing an in-house `Middleware` interface, a test stub. For a `next` that returns void there is no promise in existence, so the advice was wrong rather than merely noisy, and `function step(ctx: JobContext, next: () => void): void` fired despite annotations that positively disprove Koa. The rule now also requires membership in the engine's request-handler set, which already encodes the per-function Koa evidence — the same anchor the sibling Hono rule uses. Known recall gaps, each measured and each toward silence: `void next()`, `next?.()`, `(ctx, next = noop)`, `next()` inside a nested callback, a destructured context, `@koa/router`'s three-parameter `router.param`, and a first parameter named `c`.
+
+**Note the contrast with Hono**, whose middleware was probed identically: there an un-awaited `next()` still reaches the handler and answers 200, so the equivalent rule would report correct code and was deliberately not shipped. Two frameworks, the same spelling, opposite verdicts — which is exactly why each was run rather than reasoned about.
+
+**Recognition, and the gate that took two attempts.** Koa middleware registered inline was always covered, because `use` is one of the registration methods. The gap was the standard project layout, where middleware lives in its own file and is registered elsewhere — measured on a standalone `export async function auth(ctx, next)`, the Express spelling produced two findings and the identical Koa spelling produced **zero**.
+
+`(ctx, next)` is a generic middleware shape, though, and `collectRequestHandlers` is substrate: nine rules gate on `isOnRequestPath`, and the handler set also feeds `collectModuleFacts` and the Phase-B project graph, so a wrong answer surfaces as noise in rules that have nothing to do with Koa. The first version of the gate was wrong in two ways, both caught by an adversarial review of the uncommitted change and both reproduced before being fixed:
+
+- **A bare type NAME carried the evidence.** Accepting an annotation called `Context` or `Next` without checking where the type came from promoted a locally-declared `export type Context = { files: string[] }` in a build pipeline, `import { Context } from "telegraf"`, and `import type { Context } from "@opentelemetry/api"` — and since this module never sees the capability set, it did so in projects with **no koa dependency at all**. Confirmed misfires on correct non-HTTP code: `no-sync-io-in-request-path` on a boot-time build step, `no-process-exit-in-request-path` on CLI middleware (where `process.exit` on a missing flag is exactly right), `no-cross-request-state-mutation` on a single-process CLI, `no-listener-added-per-request` on a job pipeline. The docblock claimed to be following the Adonis discipline while doing no such thing — `importsAdonisContext` requires an adonis-named module source *and* the specifier name together. It now does the same: an annotation counts only when its type **resolves to an import from `koa`/`@koa/*`**, `Koa.Context` included via the namespace binding.
+- **File-level evidence leaked across the file.** One `import Koa from "koa"` promoted every `(ctx, next)` function in it — a fixture helper in a test file, a migration script, a closure nested in an unrelated factory, an in-memory reducer 400 lines below a `@koa/router` import. Evidence is now **per-function**: the file-level import must be joined by that function's own body touching a distinctive Koa context member (`ctx.body`, `ctx.throw`, `ctx.state`, `ctx.request`, …). A reducer reading `ctx.snapshot` no longer qualifies; plain-JS middleware setting `ctx.body` still does.
+
+The remaining recall gaps are stated rather than hidden: a plain-JS standalone middleware that neither annotates its parameters nor touches a distinctive context member is not recognized, and neither is a CommonJS `require("koa")` app (`importsKoa` walks only `ImportDeclaration`, exactly as the Adonis helper does). Both under-report, which is the acceptable direction.
+
+### AdonisJS — the body spelled as a call
+
+Adonis was invisible to `no-mass-assignment`, and the reason was one line: `isBodyMember` looks for a MemberExpression (`req.body`), while Adonis spells the body as a **call** (`request.all()`). Verified before the fix — a textbook controller doing `User.create(request.all())` and `user.merge(request.body())` produced **zero findings from all 178 diagnostics**. That is mass assignment, the framework's headline security footgun, going unreported on every Adonis project the tool has ever scanned.
+
+The rule now recognizes the zero-argument accessors `request.all()`, `request.body()`, `request.qs()` and `request.params()`, plus Lucid's assignment sinks `merge` and `fill`. Both sets are gated on the `adonis` capability, because `merge` and `fill` are ordinary words elsewhere (`_.merge`, `Array.prototype.fill`) and adding them to the global write list would trade this framework's coverage for another's noise — a test pins that `_.merge(config, req.body)` on an Express project stays silent. Only the zero-argument forms count: `request.only([...])`, `request.except([...])` and `request.validateUsing(validator)` pick fields, so they join `NARROWING_CALLS` and are the fix this rule recommends rather than the bug.
 
 ## 46. Language Support
 **Status: Core** (JS/TS/ESM/CJS/hybrid); type-aware analysis Planned.
@@ -596,11 +674,19 @@ A per-module *score* is deliberately still not offered. `calculateScore` applies
 Dockerfile optimization, multi-stage builds, root-user detection, image size, layer optimization, healthcheck presence, image security scanning.
 
 ## 24b. Date, Timezone & Locale Correctness
-**Status: Detected** (`no-local-date-as-iso-datestring`)
+**Status: Detected** (`no-local-date-as-iso-datestring`, `no-unclamped-month-shift`)
 
 **Shipped:** the first rule in a previously empty area of the catalog. `new Date(y, m, d)` builds an instant from **local** wall-clock components while `toISOString()` renders **UTC**, so on any host east of Greenwich, truncating to `YYYY-MM-DD` produces the PREVIOUS day. Measured under five timezones rather than argued: `Asia/Kolkata`, `Europe/Berlin` and `Australia/Sydney` all turn the month range `2026-08-01 .. 2026-08-31` into `2026-07-31 .. 2026-08-30`, while `UTC` and `America/Los_Angeles` are correct. The upper bound is the costly half — `new Date(y, m + 1, 0)` is the standard "last day of this month" idiom, and the emitted bound silently **excludes the last day**, so a month-to-date report quietly drops its final day every month.
 
 Both halves must hold: a 2–3 argument construction (pinning 00:00 local) and truncation to exactly the date part (`slice(0, 10)`, `substring(0, 10)`, `split("T")[0]`, `.shift()`, array-destructuring, `replace(/T.*/, "")`). That truncation is the proof of intent — the author discarded the time, so the value is a calendar date. Silent on `Date.UTC(...)` (414 corpus uses, the correct idiom sitting next to a defect in the same codebase), on 4+-argument end-of-day constructions which are correct under a positive offset, on `new Date()`/parsed strings which are deliberate UTC, and on relative `setDate`/`setMonth`/`setFullYear` shifts which preserve the existing offset — 25 of those were flagged by an earlier pass, read, and the entire branch removed. Severity is `warn`, not `error`, because on a `TZ=UTC` or negative-offset host the string is correct and the host is not in the file.
+
+**A month shifted without bounding the day** (`no-unclamped-month-shift`) is the second rule here, and it takes the branch the first one deliberately dropped. `setMonth` writes the month field and leaves the day alone, so a day the target month does not have spills into the month **after** the intended one. Measured by running it rather than argued: `new Date(2024, 0, 31)` plus one month is **Mar 2** (February skipped entirely), `new Date(2024, 2, 31)` **minus** one month is **also Mar 2** — subtraction lands two days later than it started — and `new Date(2024, 4, 31)` plus one month is Jul 1, because June has 30 days. There is no direction in which the idiom is safe, and it is not only a February problem. Unlike §24b's first rule this is timezone-independent, so there is no `tz:` gate.
+
+The corpus population is **32 production sites across 8 codebases**, and the true positives are dates written to a database that then govern money: `credit_payment_service.ts` computes a service-period end and a credit expiry this way at five sites, `renewal_activation_service.ts` computes a new subscription expiry and returns it as `toISOString().split("T")[0]`, and an autopay controller computes the next charge date of a MONTHLY mandate — so a mandate taken out on the 31st charges on the 2nd. It never throws, the value is a well-formed date, and it is right for 27 days of every month.
+
+What makes the rule shippable is that the same corpus contains **two hand-written correct implementations of the fix**, in production code by the same organization, and both must stay silent. `ReconciliationService.addMonths` normalizes the day to 1 before the shift (with a comment naming the trap) and clamps back with `setDate(Math.min(day, lastDayOfMonth))`; `RazorpayWebhookService.addMonths` shifts first and repairs after with `if (date.getDate() !== d) date.setDate(0)` (verified: Jan 31 plus a month, then `setDate(0)`, is Feb 29). So a literal day of 1–28 written **before** the shift, or any day write **after** it, silences the call — as do the two-argument `setMonth(m, 1)` form, a provable day from `new Date(y, m, <1–28>)` or from the literal text of `new Date("2026-03-01")` / `` new Date(`${month}-01`) ``, and one hop of copy propagation for the `monthStart.setDate(1); const monthEnd = new Date(monthStart)` idiom. Clamp checks are keyed by **binding identity**, not name, so a normalized `d` in one function cannot silence an unguarded `d` in another; that costs the rule non-identifier receivers such as `this.date`, which it does not claim.
+
+`setFullYear` has the identical defect on Feb 29 (`new Date(2024, 1, 29)` a year forward is Mar 1 2025) and the identical fix. It was implemented, measured, and **cut**: 23 production sites, of which 16 were year-over-year reporting windows in a single controller where a one-day drift once every four years governs nothing, against 5 that mattered — and three of those five sit within four lines of a month site the rule already reports. The month case triggers on three days of most months; the year case on one day in 1,461. A test pins the exclusion so it is not quietly re-added without re-measuring.
 
 ## 25. Kubernetes Analysis
 **Status: Detected** (`k8s-privileged-container`, `k8s-host-namespace`, `k8s-missing-resource-limits`)
@@ -792,6 +878,7 @@ A **shallow checkout suppresses the report entirely** rather than dating every f
 - **Rule suppression** — inline (with mandatory reason) and config-level. *(Planned; config gating is Core)*
 - **Organization-wide rule packs** *(Vision)*.
 - **Framework-specific rules** — gated by capability tokens. *(Core)*
+- **Capability gates** — three forms, all evaluated before the explicit-config escape hatch. `requires` is **ALL** (every token must be present), `disabledWhen` is **ANY** (one is enough to disable), and `requiresAny` is **AT LEAST ONE** — the *family* gate. That third form exists because some defects are shared by frameworks that spell them identically: a guard that responds without returning is the same bug, and the same fix, on Express (`res.json`) and Fastify (`reply.send`), and `requires` being ALL could not express it. The alternative — dropping the gate and relying on the structural check alone — would have let the rule run on projects with no HTTP framework at all. An empty `requiresAny` array is treated as *no constraint* rather than as unsatisfiable, so a mistaken `requiresAny: []` cannot silently kill a rule the way an ungrantable token once did; the gate-integrity test checks its tokens for grantability exactly as it checks `requires`. Both `capabilitiesSatisfied` and `shouldEnableDiagnostic` honour it, text-scan diagnostics support it, and `node-doctor diagnostics --framework <f>` and `explain` surface it ("requires one of express, fastify"). *(Core)*
 
 ---
 
@@ -1566,11 +1653,15 @@ Offset pagination over mutable data silently drops and duplicates rows as record
 Statically extract every query the code can issue, reconstruct it against the parsed schema, and reason about the plan without a live database: full scans on unindexed predicates, joins missing an index, `SELECT *` on wide tables, sorts that will spill. Turns §14's "missing index" heuristic into an evidence-backed claim.
 
 ## 145. Serialization & Precision Safety ★
-**Status: Detected** (`no-bigint-precision-loss`) · ⚙️ Now
+**Status: Detected** (`no-bigint-precision-loss`, `no-tofixed-as-number`) · ⚙️ Now
 
 The quiet data-corruption class at the JSON boundary: `BigInt` (or a 64-bit DB id) serialized into a JS number and silently losing precision above 2^53, `Date` objects crossing a boundary and becoming strings that are then compared as dates, `undefined` vs `null` asymmetry through `JSON.stringify`, circular references that throw only on a rare code path, and `Decimal`/`NUMERIC` columns coerced to float on the way out.
 
 **Shipped:** `no-bigint-precision-loss` (Bugs/warn/high) flags `Number(x)`/`+x`/`parseInt(x)` where `x` is a provably-BigInt value (a `123n` literal, a `BigInt(...)` call, or a binding to either) — the exact `2^53` precision-loss coercion. It stays silent on `String(bigint)`/`.toString()` and any operand it cannot prove is a BigInt (including a catch-parameter that shadows an outer BigInt const — the scope resolver now models `catch` bindings). The remaining sub-classes (Date/undefined/Decimal boundaries) are still Planned.
+
+**Shipped:** `no-tofixed-as-number` (Bugs/**error**/high) takes the coercion from the other direction — a *string* used where a number was meant. `Number.prototype.toFixed` returns a **string**, which is its entire purpose and the half everyone forgets, so `+` concatenates. Verified by running each form: `(100).toFixed(2) + (18).toFixed(2)` is `"100.0018.00"`, `(1.5).toFixed(2) + 5` is `"1.505"`, a `sum` seeded at `0` becomes `"018.00"`, `items.reduce((a, i) => a + i.price.toFixed(2), 0)` is `"01.002.00"`, and `(100).toFixed(2) === 100` is **always false**. Nothing throws; MySQL will coerce `"100.0018.00"` into a DECIMAL column on the way in, so the corruption surfaces later as a total that does not add up rather than as an error anyone can trace. The leading zero is the tell.
+
+The claim at every firing shape is a fact about the language, not an inference about the data: this operand is a string, the other is *provably* a number, and `+` on that pair concatenates. Two clauses only — a `+`/`+=` whose other operand is provably numeric (a numeric literal, an arithmetic expression, a `Number`/`parseInt`/`parseFloat` call, a unary `+`/`-`, a binding initialized to a numeric literal, or a `reduce` accumulator with a numeric seed), and `===`/`!==` against a numeric literal. Two formatted operands also count, since digits jammed together with no separator are meaningless as display. `==`/`!=` and the relational operators are **excluded** because they coerce and therefore work — verified: `(100).toFixed(2) == 100` is `true` and `(100).toFixed(2) > 99` is `true`, so reporting either would be reporting correct code. Silent on display formatting (a string literal or template operand, and template interpolation, which is not a `+` at all), on the standard unwraps (`Number(...)`, `parseFloat`, `parseInt`, unary `+`), and on any operand merely *unknown* — a bare identifier, a member read, an arbitrary call — because it could be a string label, and then the concatenation is correct. `toString()` is deliberately not treated as a formatter: its name says what it returns, so concatenating it is plausibly deliberate. One hop of indirection is followed (`const t = tax.toFixed(2); … subtotal.toFixed(2) + t`), keyed by **binding** rather than name and requiring `const`, because that is how the shape is actually written. `toPrecision` and `toLocaleString` are included, and the latter is worse — it inserts group separators too (`(1234.5).toLocaleString() + 1` is `"1,234.51"`).
 
 ---
 
@@ -2154,13 +2245,19 @@ A relative `fs` path resolved against `process.cwd()` rather than the module, `_
 **What did ship is a fact about holes rather than about size.** `new Array(5)` creates five **holes**, not five `undefined`s, and every callback-taking method on `Array.prototype` skips holes — so `new Array(5).map((_, i) => i)` returns five holes and `new Array(3).forEach(seed)` runs the callback **zero** times. Both measured. It reads as obviously correct, which is why it survives review, and it fails quietly: `.length` is the number the author expected, and `JSON.stringify` renders the holes as `null`. Only a single positive-integer **literal** counts, because `new Array(n)` might be `new Array(0)` — and `fill`, `join` and `keys` visit holes, so `new Array(n).fill(0)`, the standard fix, is silent by construction.
 
 ## 201. Numeric-Boundary & Coercion Correctness ★ Differentiator
-**Status: Partially shipped** · `no-nan-comparison`
+**Status: Partially shipped** · `no-nan-comparison`, `no-broken-sort-comparator`
 
 The layer below §145: `parseInt` without a radix, `Number()` on a value that can be `""` (which is `0`, not `NaN`), integer division assumed where floats result, `%` on a negative operand, `Math.max()` of an empty array, an off-by-one in a `slice` bound from user input, and a comparison against `NaN`.
 
 **One of the seven is a fact about the language rather than a guess about the data, and that is the one that shipped.** `NaN` is the only value not equal to itself, so every comparison against it has a constant answer: `=== NaN` is a validation branch that never runs, so the `NaN` flows onward and surfaces three layers away as a `null` in JSON or an `Invalid Date`; `!== NaN` is a guard that never rejects anything while reading like a check that was performed. Both shapes are silent, and they fail in opposite directions. The hunt found the rule's own precision model was only half-implemented: it excluded a rebound `NaN` but not a rebound `Number`, so a file declaring its own `Number` — a value namespace, an interpreter class, a schema object — was reported for comparing object identity, and applying the rule's advice there is a `TypeError`. Both roots are now checked, including the TypeScript `namespace`/`enum` declarations the scope resolver does not record. A **test file is inert**: `expect(NaN === NaN).toBe(false)` pins the constant down on purpose and has no branch at all.
 
 **Not shipped, with reasons.** The other six all require knowing something about the VALUE, and this engine reasons about syntax. *`parseInt` without a radix* is a provable omission but not a provable defect — since ES5 the default is 10 unless the string carries an `0x` prefix, and ESLint's `radix` rule already owns the style question. *`Number("")` being `0`* needs proof that the operand can be the empty string. *Integer division*, *`%` on a negative operand* and *an off-by-one `slice` bound* are claims about ranges. *`Math.max()` of an empty array* needs proof the array can be empty, which is the emptiness analysis §145 already declines to fake.
+
+**A second fact about the language shipped here:** `no-broken-sort-comparator` (Bugs/**error**/high). `sort` needs three answers — negative for "a first", positive for "b first", zero for equal — and a boolean supplies only two, because `ToNumber(true)` is `1` and `ToNumber(false)` is `0`. So `rows.sort((a, b) => a.total > b.total)` can say "b first" or "equal" and never "a first", nothing moves toward the front, and the sort is a **no-op**. Measured on `[5,3,9,1,7,2,8]`, running every form: `a > b`, `a < b`, `a >= b`, `a === b` and `a > b ? 1 : 0` all return the array **unchanged**, while `a - b` and `a > b ? 1 : -1` return `[1,2,3,5,7,8,9]`. Nothing throws; the array comes back with the right length and the right elements, and usually in nearly the right order, because the rows came out of a query that already had an `ORDER BY` — so the symptom is a few items misplaced on one page. A test that checks `length`, or membership, or sorts an already-ordered fixture, passes. TypeScript catches this in a typed file (the comparator's return type is wrong) and misses it everywhere `any`, JS, or an untyped callback is involved, which in a real backend is most places.
+
+Two independent proofs, both from syntax alone. **Clause 1 — every value the comparator can return is provably non-negative:** a relational or equality comparison, `!x`, a non-negative numeric literal, `true`/`false`, a `&&`/`||`/`??` of those, or a conditional whose *both* branches qualify. `a > b ? 1 : 0` is the defect; `a > b ? 1 : -1` is not, and is silent. A subtraction, a `localeCompare`, any call, an identifier, or a unary minus is not provably non-negative and the comparator is left alone — which also makes the `Math.random() - 0.5` shuffle idiom silent by construction. **Clause 2 — the body never reads one of the two elements:** `rows.sort((a, b) => a.revenue - a.cost)` is scoring one element against itself, verified to return `[2,1,3]` on `[{p:3},{p:1},{p:2}]`. References are matched by **binding**, not name.
+
+The silencers came out of running the rule over every readable `.sort(` call on the machine — 166 files including the TypeScript compiler, esbuild, rollup and the Vite bundle. Zero-parameter comparators are excluded (that is how the deliberate shuffle is spelled), as are rest parameters and any body touching `arguments` (both read the elements without going through the named parameters). That sweep produced exactly **one** clause-2 hit, vite's lockfile ordering — `.sort((_, { manager }) => …startsWith(manager) ? 1 : -1)` — which is genuinely non-antisymmetric and therefore implementation-defined, but whose author wrote `_` to say "ignored on purpose". A rule that argues with an explicit `_` is a rule people switch off, so a parameter named `_`/`_x` is now taken at its word; that costs nothing on the shapes that matter, where the parameter is named as if it were going to be used. Final sweep: **0 findings in 166 files, 0 parse failures.** One known recall gap is documented and pinned by a test: the scope resolver models module/function/`catch` scopes but not nested blocks, so a `{ const b = … }` shadowing a parameter — the only legal way to write that shadow, since a top-level `const b` beside a parameter `b` is a SyntaxError — reads as the parameter and stays quiet. It under-reports rather than reporting correct code.
 
 ## 202. Encoding & Buffer-Semantics Correctness ★
 **Status: Partially shipped** · `no-string-length-as-content-length`, `no-chunk-string-concat`

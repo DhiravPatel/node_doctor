@@ -31,6 +31,7 @@ const diagnostics = [...DIAGNOSTICS, ...ALL_TEXT_DIAGNOSTICS]
     scope: "files" in r ? "text" : (r.scope ?? "file"),
     tags: (r.tags ?? []).slice().sort(),
     requires: r.requires ?? [],
+    requiresAny: r.requiresAny ?? [],
     disabledWhen: r.disabledWhen ?? [],
     optIn: r.defaultEnabled === false,
     recommendation: r.recommendation,

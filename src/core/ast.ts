@@ -247,6 +247,33 @@ export const looksCallerControlled = (
   return findDescendant(node, isTaintedIdent, isFunctionLike) !== null;
 };
 
+/**
+ * Does anything inside `root` DECLARE `name`, shadowing an outer binding of it?
+ *
+ * This exists because `ScopeResolver` models module, function and `catch` scopes
+ * but not nested BLOCKS. A `{ const c = …; }` inside a function — the only legal
+ * way to shadow that function's parameter, since a top-level `const c` beside a
+ * parameter `c` is a SyntaxError — is hoisted to the function scope, so the inner
+ * reference resolves to the PARAMETER's binding. Any rule that concludes "this
+ * identifier is the parameter" from binding identity alone will therefore be
+ * wrong there, in the false-positive direction.
+ *
+ * Deliberately over-broad — it looks through nested functions too — because its
+ * only job is to make a caller bail when the name might not mean what it thinks.
+ */
+export const declaresName = (root: AstNode, name: string): boolean =>
+  findDescendant(root, (n) => {
+    if (n.type === "VariableDeclarator") {
+      const id = n.id as AstNode | undefined;
+      return id?.type === "Identifier" && String(id.name) === name;
+    }
+    if (n.type === "FunctionDeclaration" || n.type === "ClassDeclaration") {
+      const id = n.id as AstNode | undefined;
+      return id?.type === "Identifier" && String(id.name) === name;
+    }
+    return false;
+  }) !== null;
+
 /** The name of a binding target (Identifier) if simple, else null. */
 export const bindingName = (node: AstNode | null | undefined): string | null =>
   node && node.type === "Identifier" ? node.name : null;

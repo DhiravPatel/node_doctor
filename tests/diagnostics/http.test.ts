@@ -68,6 +68,37 @@ describe("express-missing-return-after-response", () => {
        });`,
     );
   });
+
+  /**
+   * The same bug on Fastify. The rule's logic always covered it — `reply` is in
+   * `RESPONSE_ROOTS`, `send` is in `TERMINAL` — but `requires: ["express"]` meant
+   * it never ran on a Fastify project. MEASURED against Fastify 5.12.1 through
+   * `app.inject()`: a handler that calls `reply.send(a)` and then returns `b`
+   * answers with **`a`**, silently discarding the return. Fastify 5 does not
+   * throw, which is exactly why it survives — nothing in the logs marks it.
+   */
+  test("fires on Fastify, whose capability the family gate now admits", () => {
+    expectFires(
+      "express-missing-return-after-response",
+      `fastify.post("/orders", async (req, reply) => {
+         if (!req.body.sku) { reply.code(400).send({ error: "sku required" }); }
+         const order = await createOrder(req.body);
+         return order;
+       });`,
+      { capabilities: ["node", "esm", "fastify"] },
+    );
+  });
+
+  test("silent on Fastify when the guard returns", () => {
+    expectSilent(
+      "express-missing-return-after-response",
+      `fastify.post("/orders", async (req, reply) => {
+         if (!req.body.sku) { return reply.code(400).send({ error: "sku required" }); }
+         return createOrder(req.body);
+       });`,
+      { capabilities: ["node", "esm", "fastify"] },
+    );
+  });
 });
 
 describe("cors-credentials-reflect", () => {

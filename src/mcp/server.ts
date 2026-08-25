@@ -160,6 +160,7 @@ const callTool = async (name: string, args: Record<string, unknown>): Promise<To
       if (!diagnostic) return text(`Unknown diagnostic: ${args.diagnostic}. Call node_doctor_diagnostics for the catalog.`, true);
       const gating = [
         diagnostic.requires?.length ? `requires ${diagnostic.requires.join(", ")}` : "",
+        diagnostic.requiresAny?.length ? `requires one of ${diagnostic.requiresAny.join(", ")}` : "",
         diagnostic.disabledWhen?.length ? `off on ${diagnostic.disabledWhen.join(", ")}` : "",
         diagnostic.defaultEnabled === false ? "opt-in" : "",
       ]

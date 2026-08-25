@@ -405,6 +405,7 @@ interface DiagnosticRow {
   defaultEnabled: boolean;
   tags: string[];
   requires: string[];
+  requiresAny: string[];
   disabledWhen: string[];
 }
 
@@ -446,6 +447,7 @@ const runDiagnostics = async (args: ParsedArgs): Promise<number> => {
         defaultEnabled: d.defaultEnabled !== false,
         tags: d.tags ?? [],
         requires: d.requires ?? [],
+        requiresAny: d.requiresAny ?? [],
         disabledWhen: d.disabledWhen ?? [],
       };
     });
@@ -459,7 +461,7 @@ const runDiagnostics = async (args: ParsedArgs): Promise<number> => {
     rows = rows.filter((r) => args.tags.some((t) => r.tags.includes(t)));
   }
   if (args.framework) {
-    rows = rows.filter((r) => r.requires.includes(args.framework!));
+    rows = rows.filter((r) => r.requires.includes(args.framework!) || r.requiresAny.includes(args.framework!));
   }
   if (args.configured) {
     rows = rows.filter((r) => r.source === "config");
@@ -476,6 +478,7 @@ const runDiagnostics = async (args: ParsedArgs): Promise<number> => {
   for (const r of rows) {
     const gates: string[] = [];
     if (r.requires.length) gates.push(`requires ${r.requires.join(", ")}`);
+    if (r.requiresAny.length) gates.push(`requires one of ${r.requiresAny.join(", ")}`);
     if (r.disabledWhen.length) gates.push(`off when ${r.disabledWhen.join(", ")}`);
     if (!r.defaultEnabled) gates.push("opt-in");
     if (r.scope === "project") gates.push("cross-file");
@@ -1042,6 +1045,7 @@ const runExplain = async (args: ParsedArgs): Promise<number> => {
   }
   const gate = [
     diagnostic.requires?.length ? `requires ${diagnostic.requires.join(", ")}` : "",
+    diagnostic.requiresAny?.length ? `requires one of ${diagnostic.requiresAny.join(", ")}` : "",
     diagnostic.disabledWhen?.length ? `off on ${diagnostic.disabledWhen.join(", ")}` : "",
     "scope" in diagnostic && diagnostic.scope === "project" ? "project-scope (cross-file)" : "",
     "files" in diagnostic ? "text-scan (whole file, not source)" : "",

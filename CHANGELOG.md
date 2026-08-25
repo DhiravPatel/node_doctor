@@ -11,6 +11,476 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Next.js Route Handlers: the dynamic API that is a Promise now
+
+New diagnostic `no-unawaited-next-dynamic-api` (Bugs / `error` / confidence
+`high`, gated on the `next` token). Since Next 15, `cookies()`, `headers()` and
+`draftMode()` from `next/headers` return **Promises**, so every property read on
+the un-awaited call is `undefined`.
+
+Verified twice over against Next 16.3.2 — the shipped declarations export
+`cookies(): Promise<ReadonlyRequestCookies>`, and a running dev server confirmed
+the behaviour end to end:
+
+```
+const c = cookies();        typeof c.get  → "undefined"
+const h = headers();        typeof h.get  → "undefined"
+const c = await cookies();  typeof c.get  → "function"
+```
+
+with the server logging, verbatim:
+
+> Route "/api/sync" used `cookies().get`. `cookies()` returns a Promise and must
+> be unwrapped with `await` or `React.use()` before accessing its properties.
+
+The temporary synchronous-access shim Next 15 shipped is **gone in Next 16**, so
+this is a hard failure rather than a deprecation warning. Reading the types alone
+would not have been enough to know that, which is why the server was run.
+
+**The expensive spelling is the one that does not throw.**
+`cookies().get("session")` gives a loud 500. But
+`const c = cookies(); if (c?.get?.("role") === "admin")` throws nothing — the
+optional chain swallows it and the check silently always fails, turning a broken
+authorization test into one that quietly denies, or inverted, quietly allows.
+This is the commonest Next 14 → 15 migration defect, and a codemod that missed a
+file leaves exactly this shape behind.
+
+Two structural claims, no inference. The callee must resolve to an import of
+`cookies`/`headers`/`draftMode` **from `next/headers`** — matched by local binding
+name, so an aliased `import { cookies as getCookies }` is covered and a same-named
+function from anywhere else is not — and the Promise must be consumed
+**synchronously**: a member access on the call, a destructure of it, or a binding
+later member-accessed. Silent by construction wherever it is treated as a
+Promise: `await`, `return`, `.then`/`.catch`/`.finally`, `use(cookies())` and
+`React.use(cookies())` (the documented alternative), `Promise.all([cookies(),
+headers()])`, and a binding passed onward without ever being read.
+
+Not version-gated: the async signature landed in 15, `next` in a modern manifest
+means 15 or 16, and a Next 14 project that upgrades gets a finding already true of
+the version it is moving to.
+
+Next.js route handlers already reached the request-path rules — `collectExportedHandlers`
+recognizes an exported `GET`/`POST`/… in a route file — so no substrate change was
+needed. Verified before writing anything: `no-sync-io-in-request-path` already
+fired on a Next route handler.
+
+### `requiresAny` — a family gate for the engine, and Fastify coverage that needed it
+
+**Engine.** Capability gating had two forms: `requires` (ALL of these tokens) and
+`disabledWhen` (ANY of these disables). Neither can express "this framework OR
+that one", and some defects are shared by frameworks that spell them identically.
+`requiresAny` is the third form — **at least one** of the listed tokens must be
+present. It combines with `requires` (both must hold), `disabledWhen` still wins
+over it, and an **empty array is no constraint** rather than an unsatisfiable one,
+so a mistaken `requiresAny: []` cannot silently kill a rule the way an ungrantable
+token once did. The gate-integrity test now checks its tokens for grantability
+exactly as it checks `requires` — same hazard, same guard. Threaded through every
+consumer: `capabilitiesSatisfied`, `shouldEnableDiagnostic`, text-scan gating, the
+MCP server, `explain`, `diagnostics --framework`, and the web rule data.
+
+**Fastify.** No new rule — a gate that was excluding the framework whose logic it
+already handled. `express-missing-return-after-response` has always had `reply` in
+its `RESPONSE_ROOTS` and `send` in its `TERMINAL` set, so a Fastify guard matched
+its logic, and `requires: ["express"]` meant it never ran on a Fastify project.
+Exactly the shape of the AdonisJS mass-assignment gap: the analysis was there, the
+gate was not.
+
+MEASURED against Fastify 5.12.1 through `app.inject()`, because the framework's
+forgiveness is the whole story:
+
+```
+async: return payload                    → 200 {"ok":true}
+async: reply.send(), no return           → 200 {"ok":true}
+async: reply.send(a) then return b       → 200 {"from":"send"}   ← return discarded
+async: reply.send() twice                → 200 {"n":1}           ← second discarded
+async: neither sends nor returns         → 200, empty body
+```
+
+Fastify 5 throws on none of these, which is why the defect survives. In the real
+shape — a validation guard that sends a 400 without returning — the caller gets
+the 400 while the protected code below has already run (the order created, the
+mail sent), and the value the handler meant to return is dropped with nothing in
+the logs to mark it. Express at least announces itself with
+`ERR_HTTP_HEADERS_SENT`; Fastify is silent.
+
+The gate is now `requiresAny: ["express", "fastify"]`, and the recommendation
+names both spellings and both runtime behaviours, since they differ.
+`node-doctor diagnostics --framework fastify` goes from 1 rule to 2, and `explain`
+reads "requires one of express, fastify".
+
+### Koa coverage
+
+Koa was the last framework the docs claimed as **Core** without any coverage
+behind it. Two gaps closed, both verified by serving real requests through Koa
+3.2.1 rather than by reading its docs.
+
+**`no-unawaited-koa-next`** (Bugs / `error` / confidence `high`, gated on the
+`koa` token). `next()` returns a promise for the entire downstream chain, and Koa
+builds its response from `ctx` only after that promise settles:
+
+| middleware | downstream | result |
+| --- | --- | --- |
+| `await next()` | sets `ctx.body` synchronously | 200 `"downstream"` |
+| `next()` | sets `ctx.body` synchronously | 200 `"downstream"` |
+| `await next()` | awaits, then sets `ctx.body` | 200 `"downstream after await"` |
+| `return next()` | awaits, then sets `ctx.body` | 200 `"downstream after await"` |
+| `next()` | awaits, then sets `ctx.body` | **404 `"Not Found"`** |
+
+Row two is why it survives review: with a synchronous downstream the un-awaited
+form works, so the smoke test passes — until any handler below awaits a database,
+which every real handler does, and the route starts 404-ing.
+
+The error path is worse. With `await next()` inside a `try`, a downstream throw is
+caught and answers 503. **Without** the await the `try` catches nothing, because
+the rejection lands after the middleware has already returned — it became an
+unhandled rejection that *terminated the probe process*. So the un-awaited form
+does not merely mis-order the response, it converts every downstream error from a
+caught 500 into a process exit.
+
+The rule fires only when a call's direct parent is an `ExpressionStatement`, so
+everything that consumes the promise is silent by construction: `await next()`,
+`return next()`, a concise arrow body, `.then(…)`, `.catch(…)`, `const p = next()`,
+`Promise.all([next(), …])`. Arity two is load-bearing — Express middleware is
+`(req, res, next)` and its error form `(err, req, res, next)`, where a bare
+`next()` is the CORRECT call — so requiring exactly `(ctx | context, next)` keeps
+the rule off both, and a project running Koa and Express side by side is not
+misreported.
+
+**Note the contrast with Hono**, probed identically in the wave below: there an
+un-awaited `next()` still reaches the handler and answers 200, so the equivalent
+rule would report correct code and was deliberately not shipped. Two frameworks,
+the same spelling, opposite verdicts — which is why each was run rather than
+reasoned about.
+
+**Request-path recognition for standalone middleware.** Koa middleware registered
+inline was always covered, because `use` is one of the registration methods. The
+gap was the standard project layout, where middleware lives in its own file and is
+registered elsewhere. Measured on a standalone `export async function auth(ctx, next)`:
+the Express spelling produced two findings and the identical Koa spelling produced
+**zero**.
+
+`(ctx, next)` is a generic middleware shape, though, and `collectRequestHandlers`
+is substrate: nine rules gate on `isOnRequestPath`, and the handler set also feeds
+`collectModuleFacts` and the Phase-B project graph, so a wrong answer surfaces as
+noise in rules that have nothing to do with Koa.
+
+**The gate took two attempts, and the first was not shippable.** An adversarial
+review of the uncommitted change returned three independent BLOCK verdicts, and
+every claim was reproduced before being acted on:
+
+- **A bare type NAME carried the evidence.** Accepting an annotation called
+  `Context` or `Next` without checking where the type came from promoted a
+  locally-declared `export type Context = { files: string[] }` in a build
+  pipeline, `import { Context } from "telegraf"`, and
+  `import type { Context } from "@opentelemetry/api"` — and because this module
+  never sees the capability set, it did so in projects with **no koa dependency
+  at all**. Confirmed misfires on correct non-HTTP code:
+  `no-sync-io-in-request-path` on a boot-time build step,
+  `no-process-exit-in-request-path` on CLI middleware (where `process.exit` on a
+  missing flag is exactly right), `no-cross-request-state-mutation` on a
+  single-process CLI, `no-listener-added-per-request` on a job pipeline. The
+  docblock claimed to follow the Adonis discipline while doing no such thing —
+  `importsAdonisContext` requires an adonis-named module source *and* the
+  specifier name together. It now does the same: an annotation counts only when
+  its type **resolves to an import** from `koa`/`@koa/*`, `Koa.Context` included
+  via its namespace binding.
+- **File-level evidence leaked across the file.** One `import Koa from "koa"`
+  promoted every `(ctx, next)` function in it — a fixture helper in a test file, a
+  migration script, a closure nested in an unrelated factory, an in-memory reducer
+  400 lines below a `@koa/router` import. Evidence is now **per-function**: the
+  file-level import must be joined by that function's own body touching a
+  distinctive Koa context member (`ctx.body`, `ctx.throw`, `ctx.state`, …). A
+  reducer reading `ctx.snapshot` no longer qualifies; plain-JS middleware setting
+  `ctx.body` still does.
+- **The rule bypassed the gate entirely.** `no-unawaited-koa-next` keyed on the
+  signature plus the project-wide `koa` capability, so it fired on files the
+  substrate had explicitly declined to call Koa. It now also requires membership
+  in the request-handler set — the one-line anchor the sibling Hono rule already
+  used, which this rule should have used from the start.
+- **Two housekeeping failures.** `check:schema` and `check:web` were stale, so CI
+  and release would have been red as committed. And the test named "a `next` from
+  an outer scope is not the parameter" asserted nothing — its function was
+  `(ctx, other)`, which bails on the signature before the binding check is ever
+  reached. Both fixed, and the binding path now has a test that actually reaches
+  it.
+
+Every reproduced false positive is pinned as a test, including the block-scoped
+shadow (`{ const next = …; next(); }`), which the resolver's lack of block scopes
+had resolved to the parameter. The `declaresName` guard that fixes it was lifted
+out of the Hono rule into `src/core/ast.ts` so both rules share one
+implementation.
+
+Remaining recall gaps are stated rather than hidden: plain-JS middleware that
+neither annotates its parameters nor touches a distinctive context member, a
+CommonJS `require("koa")` app, `void next()`, `next?.()`, `(ctx, next = noop)`,
+`next()` inside a nested callback, a destructured context, `@koa/router`'s
+three-parameter `router.param`, and a first parameter named `c`. All under-report,
+which is the acceptable direction.
+
+This also corrects the record from the wave below, which said Koa handlers were
+found "only through router registration". `use` is itself a registration method,
+so `app.use(async (ctx, next) => …)` was always covered; the gap was narrower than
+stated and specific to split-file middleware.
+
+### Hono and AdonisJS coverage
+
+Both frameworks already had a capability token and working handler recognition,
+and neither had any coverage of its own. Two gaps closed, each verified by
+running the framework rather than by reading its docs.
+
+**Hono — the response that is built and never sent.** New diagnostic
+`no-unreturned-hono-response` (Bugs / `error` / confidence `high`, gated on the
+`hono` token). `res.json(x)` **sends**; `c.json(x)` **constructs a `Response` and
+hands it back**, and Hono replies with whatever the handler returns. MEASURED
+against Hono 4.13.4 by running each form through `app.request()`:
+
+```
+(c) => { c.json({ ok: true }); }        → 404  "404 Not Found"
+(c) => { c.text("hi"); }                → 404  "404 Not Found"
+(c) => { c.html("<p>hi</p>"); }         → 404  "404 Not Found"
+(c) => { c.redirect("/other"); }        → 404  "404 Not Found"
+(c) => { c.body("raw"); }               → 404  "404 Not Found"
+async (c) => { await save(…); c.json(…); }  → 404  "404 Not Found"
+(c) => c.json({ ok: true })             → 200  {"ok":true}
+```
+
+The async row is the expensive one: the `await` already ran, so the row was
+written or the payment taken, and the caller is told the route does not exist —
+and a client that retries on 404 does all of it again. It survives review because
+the handler reads like Express and the 404 reads like a routing problem, so the
+search starts in the router rather than in the handler that already ran.
+
+Three structural conditions: the method must **produce** a Response
+(`json`/`text`/`html`/`body`/`redirect`/`notFound`/`newResponse`), the result must
+be **discarded**, and the receiver must be the **first parameter** of a function
+the engine already recognizes as a handler. That last anchor is what keeps the
+rule off every other framework in the same repo — Express and Fastify both put
+their response object *second*, so `res.json(…)` and `reply.send(…)` can never
+match. The side-effecting context methods are excluded on measured evidence:
+`c.header("x-trace","1")` and `c.status(201)` before a returned `c.json(…)`
+produce a 201 with the right body, and `c.set(…)` stores a variable `c.get(…)`
+reads back — discarding those is the intended usage.
+
+Two measured non-defects are deliberately **not** claimed. `throw new
+HTTPException(401)` produces a real 401. And middleware calling `next()` *without*
+`await` still reaches the handler and answers 200 — so the obvious "missing await
+on `next()`" rule would be reporting correct code, and is not shipped.
+
+**AdonisJS — the body spelled as a call.** `no-mass-assignment` was blind to the
+entire framework, and the reason was one line: `isBodyMember` looks for a
+MemberExpression (`req.body`), while Adonis spells the body as a **call**
+(`request.all()`). Verified before the fix — a textbook controller doing
+`User.create(request.all())` and `user.merge(request.body())` produced **zero
+findings from all 178 diagnostics**. That is the framework's headline security
+footgun going unreported on every Adonis project the tool has ever scanned.
+
+The rule now recognizes the zero-argument accessors `request.all()`,
+`request.body()`, `request.qs()` and `request.params()`, plus Lucid's assignment
+sinks `merge` and `fill`. Both sets are gated on the `adonis` capability, because
+`merge` and `fill` are ordinary words elsewhere (`_.merge`,
+`Array.prototype.fill`) and adding them to the global write list would trade this
+framework's coverage for another framework's noise — a test pins that
+`_.merge(config, req.body)` on an Express project stays silent. Only the
+zero-argument forms count: `request.only([...])`, `request.except([...])` and
+`request.validateUsing(validator)` pick fields, so they join `NARROWING_CALLS` and
+are the fix this rule recommends rather than the bug.
+
+**Documentation corrected.** §2's framework table claimed Koa as **Core** with
+"dedicated diagnostics". There are none, and Koa's `(ctx, next)` signature is not
+matched by `looksLikeExpressHandler` either (`FIRST_PARAM_NAMES` is
+`{req, request}`) — Koa handlers are found only through router registration. The
+table now separates the three things that were being conflated: the capability
+token, handler recognition, and dedicated coverage. They do not have the same
+answer for any framework, and the middle column is where most of the value is:
+handler recognition is what gates the ~165 framework-independent rules, and it
+works framework-agnostically for any `x.get(path, handler)` registration.
+
+### A sort comparator that provably cannot order the array
+
+New diagnostic `no-broken-sort-comparator` (Bugs / `error` / confidence `high`).
+`sort` needs three answers — negative for "a first", positive for "b first", zero
+for equal — and a boolean supplies only two, because `ToNumber(true)` is `1` and
+`ToNumber(false)` is `0`. Measured on `[5, 3, 9, 1, 7, 2, 8]`, running every form:
+
+```
+sort((a, b) => a > b)            → [5,3,9,1,7,2,8]   unchanged
+sort((a, b) => a < b)            → [5,3,9,1,7,2,8]   unchanged
+sort((a, b) => a >= b)           → [5,3,9,1,7,2,8]   unchanged
+sort((a, b) => a === b)          → [5,3,9,1,7,2,8]   unchanged
+sort((a, b) => a > b ? 1 : 0)    → [5,3,9,1,7,2,8]   unchanged
+sort((a, b) => a.p - a.q)        → [2,1,3]           garbage
+sort((a, b) => a > b ? 1 : -1)   → [1,2,3,5,7,8,9]   correct
+sort((a, b) => a - b)            → [1,2,3,5,7,8,9]   correct
+```
+
+Nothing throws. The array comes back with the right length and the right
+elements, and usually in *nearly* the right order — the rows came out of a query
+that already had an `ORDER BY`, so the symptom is a few items misplaced on one
+page rather than an obvious scramble. A test that checks `length`, or membership,
+or sorts an already-ordered fixture, passes. TypeScript catches it in a typed file
+and misses it wherever `any`, plain JS, or an untyped callback is involved.
+
+Two independent proofs, both from syntax alone. **Clause 1 — every value the
+comparator can return is provably non-negative:** a relational or equality
+comparison, `!x`, a non-negative numeric literal, `true`/`false`, a `&&`/`||`/`??`
+of those, or a conditional whose *both* branches qualify. `a > b ? 1 : 0` is the
+defect; `a > b ? 1 : -1` is not. **Clause 2 — the body never reads one of the two
+elements:** `rows.sort((a, b) => a.revenue - a.cost)` is scoring one element
+against itself. References are matched by **binding**, not name.
+
+Uncertainty resolves to silence throughout: a subtraction, a `localeCompare`, any
+call, an identifier or a unary minus is not provably non-negative, which also
+makes the `Math.random() - 0.5` shuffle idiom silent by construction. Zero-parameter
+comparators, rest parameters, and any body touching `arguments` are excluded —
+each reads the elements without going through the named parameters.
+
+Validated by running the rule over every readable `.sort(`/`.toSorted(` call on
+the machine — **166 files** including the TypeScript compiler, esbuild, rollup and
+the Vite bundle. That sweep produced exactly one clause-2 hit: vite's lockfile
+ordering, `.sort((_, { manager }) => …startsWith(manager) ? 1 : -1)`. It is
+genuinely non-antisymmetric and therefore implementation-defined, but its author
+wrote `_` to mean "ignored on purpose", and a rule that argues with an explicit
+`_` is a rule people switch off — so a parameter named `_`/`_x` is now taken at
+its word. Final sweep: **0 findings in 166 files, 0 parse failures.**
+
+One recall gap is documented and pinned by a test rather than left to be
+discovered: the scope resolver models module/function/`catch` scopes but not
+nested blocks, so a `{ const b = … }` shadowing a parameter — the only legal way
+to write that shadow, since a top-level `const b` beside a parameter `b` is a
+SyntaxError — reads as the parameter and stays quiet. It under-reports rather than
+reporting correct code.
+
+> Same corpus caveat as the wave below: filesystem access outside the project
+> directory still returns `Operation not permitted`, so population could not be
+> measured across the ~29.6k-file local corpus. This rule was selected on the §201
+> criterion — the claim has to be an always-wrong fact about the language — and
+> its precision is established by executing every firing and silencing shape and
+> by the 166-file false-positive sweep, not by corpus sampling.
+
+### A `toFixed` result used as a number, so `+` concatenates
+
+New diagnostic `no-tofixed-as-number` (Bugs / `error` / confidence `high`).
+`Number.prototype.toFixed` returns a **string** — that is its entire purpose, and
+it is the half everyone forgets. Verified by running each form:
+
+```
+(100).toFixed(2) + (18).toFixed(2)          → "100.0018.00"
+(1.5).toFixed(2) + 5                        → "1.505"
+let sum = 0; sum += (1.5).toFixed(2)        → "01.50"
+(1.5).toFixed(2) + (2 * 3)                  → "1.506"
+[1,2].reduce((a,b) => a + b.toFixed(2), 0)  → "01.002.00"
+(1234.5).toLocaleString() + 1               → "1,234.51"
+(100).toFixed(2) === 100                    → false, always
+```
+
+Nothing throws. MySQL will coerce `"100.0018.00"` into a DECIMAL column on the way
+in, so the corruption surfaces later as a total that does not add up rather than
+as an error anyone can trace. The leading zero from a `sum` seeded at `0` is the
+tell.
+
+The claim at every firing shape is a fact about the language rather than an
+inference about the data: this operand is a string, the other is **provably** a
+number, and `+` on that pair concatenates. Two clauses only — a `+`/`+=` whose
+other operand is provably numeric (a numeric literal, an arithmetic expression, a
+`Number`/`parseInt`/`parseFloat` call, a unary `+`/`-`, a binding initialized to a
+numeric literal, or a `reduce` accumulator with a numeric seed), and `===`/`!==`
+against a numeric literal. Two formatted operands also count, since digits jammed
+together with no separator are meaningless as display.
+
+`==`/`!=` and the relational operators are **excluded** because they coerce and
+therefore work — verified: `(100).toFixed(2) == 100` is `true` and
+`(100).toFixed(2) > 99` is `true`, so reporting either would be reporting correct
+code. Silent on display formatting (a string literal or template operand; template
+interpolation is not a `+` at all), on the standard unwraps (`Number(...)`,
+`parseFloat`, `parseInt`, unary `+` — verified to give `6.5` where the raw form
+gives `"1.505"`), and on any operand merely *unknown* — a bare identifier, a
+member read, an arbitrary call — because it could be a string label, and then the
+concatenation is correct. Uncertainty resolves to silence, never to a report.
+`toString()` is deliberately not treated as a formatter: its name says what it
+returns, so concatenating it is plausibly deliberate.
+
+One hop of indirection is followed — `const t = tax.toFixed(2); … subtotal.toFixed(2) + t`
+— because that is how the shape is actually written. The hop is keyed by
+**binding**, not name, and requires `const`: a `let` reassigned elsewhere is not
+provably a string at the use site.
+
+Measured against every readable file in the repo tree (36 files use
+`toFixed`/`toPrecision`/`toLocaleString`, including the TypeScript compiler and
+the build toolchain): **0 findings, 0 parse failures**. The only real
+concatenations there are `` `${(x * 100).toFixed(1)}` `` and `.toFixed(2) + "%"`,
+both correctly silent.
+
+> **Corpus caveat for this wave.** The usual population measurement across the
+> ~29.6k-file local corpus could not be run: filesystem access outside the
+> project directory now returns `Operation not permitted`, so only the repo's own
+> tree was readable. This rule was therefore selected on the criterion the §201
+> wave used — *the claim has to be an always-wrong fact about the language, not
+> an inference about the data* — and its precision is established by executing
+> every firing and silencing shape rather than by corpus sampling. An earlier
+> probe in the same session measured `.toFixed(` at **3,733 occurrences across
+> 475 corpus files**, so the surrounding population is large, but the share
+> matching these two clauses is unverified.
+
+### A month added by `setMonth` skips a month for end-of-month dates
+
+New diagnostic `no-unclamped-month-shift` (Bugs / `warn` / confidence `high`).
+`setMonth` writes the month field and leaves the day where it was, so a day the
+target month does not have spills into the month **after** the intended one.
+Measured by running each case rather than argued:
+
+```
+new Date(2024, 0, 31).setMonth(m + 1)   → Sat Mar 02 2024   (February skipped)
+new Date(2024, 2, 31).setMonth(m - 1)   → Sat Mar 02 2024   (moves FORWARD)
+new Date(2024, 4, 31).setMonth(m + 1)   → Mon Jul 01 2024   (June has 30 days)
+```
+
+Note the second line: subtracting a month from March 31 lands two days *later*
+than it started. There is no direction in which the idiom is safe, and it is not
+only a February problem.
+
+**32 production sites across 8 corpus codebases**, and the true positives are
+dates written to a database that then govern money — a service-period end and a
+credit expiry (five sites in one service), a subscription expiry returned as
+`toISOString().split("T")[0]`, and the next charge date of a MONTHLY autopay
+mandate, so a mandate taken out on the 31st charges on the 2nd. Nothing throws,
+the value is a well-formed date, and it is correct for 27 days of every month.
+
+The rule ships because the same corpus contains **two hand-written correct
+implementations of the fix**, in production code by the same organization, and
+both stay silent: one normalizes the day to 1 before the shift and clamps back
+with `setDate(Math.min(day, lastDayOfMonth))`, the other shifts first and repairs
+after with `if (date.getDate() !== d) date.setDate(0)` (verified: Jan 31 plus a
+month, then `setDate(0)`, is Feb 29). A literal day of 1–28 written *before* the
+shift or any day write *after* it therefore silences the call, as do the
+two-argument `setMonth(m, 1)` form, a provable day from `new Date(y, m, <1–28>)`
+or from the literal text of `new Date("2026-03-01")` /
+`` new Date(`${month}-01`) ``, and one hop of copy propagation for the
+`monthStart.setDate(1); const monthEnd = new Date(monthStart)` idiom. Clamp
+checks are keyed by **binding identity**, not name, so a normalized `d` in one
+function cannot silence an unguarded `d` in another.
+
+`setFullYear` has the identical defect on Feb 29 and the identical fix. It was
+implemented, measured, and **cut**: 23 production sites, 16 of them year-over-year
+reporting windows in a single controller where a one-day drift once every four
+years governs nothing, against 5 that mattered — and three of those five sit
+within four lines of a month site the rule already reports. The month case
+triggers on three days of most months, the year case on one day in 1,461. A test
+pins the exclusion so it is not re-added without re-measuring.
+
+Complements `no-local-date-as-iso-datestring`, which deliberately removed its own
+`setMonth`/`setFullYear` branch: that rule is about rendering a local-midnight
+instant in UTC, this one is about the shift itself being wrong in any zone.
+
+Measured and rejected on the way to it, each at zero or near-zero corpus
+population: `findOneAndUpdate` without `new: true` (233 calls, 182 with the
+result used, **0** missing a return-shape key), a Mongoose extension of
+`no-untransacted-dependent-writes` (14 candidate first writes, **0** dependent
+pairs), an unfiltered `deleteMany({})` (6 sites, 5 in tests and 1 in a migration
+script), a moment-mutation aliasing rule (**0** occurrences of the aliasing shape
+in 125 moment-importing files), and a cleartext-`http://`-request rule (1,115
+files mention `http://`; the outbound-call sites are all `localhost`, `127.0.0.1`
+or example hosts).
+
 ### Taint is now keyed by BINDING, not by name
 
 The intra-file taint set was a file-global `Set<string>` of NAMES, and
@@ -114,8 +584,54 @@ is ECB, which is `no-weak-cipher`'s subject.
 **A correction to an earlier measurement.** I previously reported this family as
 having zero corpus population — "5 `createCipheriv` call sites, 0 with a constant
 IV" — and concluded it could not clear the population bar. That probe was wrong:
-the real first-party count is roughly 20 call sites, three of which have a literal
-IV. The rule ships because the population is real.
+the real first-party count is roughly 20 call sites, four of which have a literal
+IV, across two distinct defects. The rule ships because the population is real.
+
+The second defect needed the rule extended, and it is a shape no amount of binding
+resolution reaches — the IV lives on an object literal and is read back through
+`this`:
+
+```js
+var crypt = {
+  iv: "<16 characters>",
+  encrypt: function (data, key) {
+    var iv = this.iv;                     // ← one hop
+    var cipher = crypto.createCipheriv(algo, key, iv);
+```
+
+It is as fixed as a literal argument, and worse: every method on the object shares
+it. Resolving it means a property lookup on the object literal the method is
+defined in. Reaching it also meant accepting non-`const` bindings — the corpus
+writes `var iv = this.iv` — so a binding is now followed when it is `const`, or
+when nothing in the file ever assigns to it. A `var` that is later reassigned
+stays silent.
+
+### Scoped and rejected: `no-spoofable-ip-allowlist`
+
+Proposed as the survivor of two IP-spoofing rules, narrowed to the leftmost
+`X-Forwarded-For` entry reaching an allowlist or quota decision, and reported as
+"2 findings, 2/2 precision, 0 false positives on 38,820 files".
+
+The vulnerability is real and I verified the mechanism — proxies APPEND to
+`X-Forwarded-For`, so `split(",")[0]` is precisely the entry the client sent while
+`.pop()` is your own proxy's view:
+
+```
+header the app sees:  10.0.0.99, 203.0.113.7, 198.51.100.4
+leftmost split(",")[0] -> 10.0.0.99      ← the attacker chose this
+rightmost .pop()       -> 198.51.100.4   ← added by your own proxy
+```
+
+But the population does not reproduce. Across **25,952 first-party files there is
+exactly ONE leftmost-XFF extraction, and it reaches no allowlist or quota
+decision** — it is used for a log record, which the proposal itself excluded as a
+noise source. Two of the four originally claimed true positives rest on
+`X-Real-IP`, which the same review had already ruled undecidable because it would
+flag correct Cloudflare code.
+
+So the rule would fire on nothing, which this project treats as a failure in its
+own right. Not shipped — the fifth candidate rejected on measured population
+rather than on taste.
 
 ### `no-prototype-pollution` was built on a false premise
 

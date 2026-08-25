@@ -421,6 +421,9 @@ export const shouldEnableDiagnostic = (diagnostic: Diagnostic, capabilities: Set
       if (!capabilities.has(token)) return false;
     }
   }
+  if (diagnostic.requiresAny && diagnostic.requiresAny.length > 0) {
+    if (!diagnostic.requiresAny.some((token) => capabilities.has(token))) return false;
+  }
   if (diagnostic.disabledWhen) {
     for (const token of diagnostic.disabledWhen) {
       if (capabilities.has(token)) return false;
@@ -433,6 +436,17 @@ export const shouldEnableDiagnostic = (diagnostic: Diagnostic, capabilities: Set
 export const capabilitiesSatisfied = (diagnostic: Diagnostic, capabilities: Set<string>): boolean => {
   if (diagnostic.requires) {
     for (const token of diagnostic.requires) if (!capabilities.has(token)) return false;
+  }
+  // `requiresAny` is the FAMILY gate: at least one of these must be present.
+  // Some defects are shared by several frameworks that spell them the same way —
+  // a guard that responds without returning is the same bug, and the same fix, on
+  // Express and Fastify — and `requires` (which is ALL) cannot express that. The
+  // alternative was dropping the gate entirely and relying on the structural
+  // check, which would have let the rule run on projects with no HTTP framework
+  // at all. An empty array is treated as no constraint rather than as
+  // unsatisfiable, so a mistaken `requiresAny: []` cannot silently kill a rule.
+  if (diagnostic.requiresAny && diagnostic.requiresAny.length > 0) {
+    if (!diagnostic.requiresAny.some((token) => capabilities.has(token))) return false;
   }
   if (diagnostic.disabledWhen) {
     for (const token of diagnostic.disabledWhen) if (capabilities.has(token)) return false;

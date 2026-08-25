@@ -18,7 +18,7 @@ export interface LintOpts {
 
 /** Default capabilities that satisfy a diagnostic's `requires` (so it runs). */
 const defaultCaps = (diagnostic: Diagnostic): Set<string> =>
-  new Set<string>(["node", "esm", ...(diagnostic.requires ?? [])]);
+  new Set<string>(["node", "esm", ...(diagnostic.requires ?? []), ...(diagnostic.requiresAny ?? []).slice(0, 1)]);
 
 export const findingsFor = (ruleId: string, source: string, opts: LintOpts = {}): Finding[] => {
   const diagnostic = DIAGNOSTICS_BY_ID.get(ruleId);

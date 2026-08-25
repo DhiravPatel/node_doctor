@@ -13,6 +13,7 @@ import {
 } from "../../src/core/project.ts";
 import { DIAGNOSTICS, DIAGNOSTICS_BY_ID } from "../../src/core/registry.ts";
 import { ALL_TEXT_DIAGNOSTICS } from "../../src/diagnostics/text-diagnostics.ts";
+import type { Diagnostic } from "../../src/core/types.ts";
 
 /** Every shipped diagnostic, AST and text-scan alike. */
 const ALL_DIAGNOSTICS = [...DIAGNOSTICS, ...ALL_TEXT_DIAGNOSTICS];
@@ -305,6 +306,11 @@ describe("gate integrity", () => {
       for (const token of diagnostic.requires ?? []) {
         if (!isGrantableCapability(token)) offenders.push(`${diagnostic.id} requires "${token}"`);
       }
+      // `requiresAny` is subject to the identical hazard: a family gate whose
+      // every token is ungrantable is just as dead as a `requires` one.
+      for (const token of diagnostic.requiresAny ?? []) {
+        if (!isGrantableCapability(token)) offenders.push(`${diagnostic.id} requiresAny "${token}"`);
+      }
     }
     assert.deepEqual(
       offenders,
@@ -331,5 +337,64 @@ describe("gate integrity", () => {
     assert.equal(rule.requires ?? null, null, "the ungrantable `ws` gate must stay deleted");
     // Opt-in, so it is off by default but selectable once explicitly enabled.
     assert.ok(capabilitiesSatisfied(rule, new Set(["node", "esm"])));
+  });
+});
+
+/**
+ * `requiresAny` — the FAMILY gate.
+ *
+ * Some defects are shared by frameworks that spell them identically: a guard that
+ * responds without returning is the same bug, and the same fix, on Express and
+ * Fastify. `requires` is ALL, so it cannot express that, and the alternative —
+ * dropping the gate and relying on the structural check — would let the rule run
+ * on projects with no HTTP framework at all.
+ */
+describe("requiresAny (family gate)", () => {
+  const fake = (gate: Partial<Diagnostic>): Diagnostic =>
+    ({ id: "x", title: "x", severity: "warn", category: "Bugs", recommendation: "x", create: () => ({}), ...gate }) as Diagnostic;
+
+  test("satisfied when ANY listed token is present", () => {
+    const rule = fake({ requiresAny: ["express", "fastify"] });
+    assert.ok(capabilitiesSatisfied(rule, new Set(["node", "express"])));
+    assert.ok(capabilitiesSatisfied(rule, new Set(["node", "fastify"])));
+    assert.ok(capabilitiesSatisfied(rule, new Set(["node", "express", "fastify"])));
+  });
+
+  test("unsatisfied when none is present", () => {
+    const rule = fake({ requiresAny: ["express", "fastify"] });
+    assert.equal(capabilitiesSatisfied(rule, new Set(["node", "koa"])), false);
+    assert.equal(capabilitiesSatisfied(rule, new Set(["node"])), false);
+  });
+
+  test("combines with `requires`, which stays ALL", () => {
+    const rule = fake({ requires: ["typescript"], requiresAny: ["express", "fastify"] });
+    assert.ok(capabilitiesSatisfied(rule, new Set(["node", "typescript", "fastify"])));
+    assert.equal(capabilitiesSatisfied(rule, new Set(["node", "fastify"])), false, "missing the ALL token");
+    assert.equal(capabilitiesSatisfied(rule, new Set(["node", "typescript"])), false, "missing every ANY token");
+  });
+
+  test("`disabledWhen` still wins over a satisfied family gate", () => {
+    const rule = fake({ requiresAny: ["express", "fastify"], disabledWhen: ["edge"] });
+    assert.equal(capabilitiesSatisfied(rule, new Set(["node", "express", "edge"])), false);
+  });
+
+  test("an EMPTY array is no constraint, not an unsatisfiable one", () => {
+    // A mistaken `requiresAny: []` must not silently kill a rule the way an
+    // ungrantable token once did — that is the failure this file exists for.
+    assert.ok(capabilitiesSatisfied(fake({ requiresAny: [] }), new Set(["node"])));
+  });
+
+  test("`shouldEnableDiagnostic` applies it too, not just `capabilitiesSatisfied`", () => {
+    const rule = fake({ requiresAny: ["express", "fastify"] });
+    assert.ok(shouldEnableDiagnostic(rule, new Set(["node", "fastify"])));
+    assert.equal(shouldEnableDiagnostic(rule, new Set(["node", "koa"])), false);
+  });
+
+  test("the guard-without-return rule now covers Fastify", () => {
+    const rule = DIAGNOSTICS_BY_ID.get("express-missing-return-after-response");
+    assert.ok(rule);
+    assert.ok(capabilitiesSatisfied(rule!, new Set(["node", "fastify"])), "Fastify projects must get it");
+    assert.ok(capabilitiesSatisfied(rule!, new Set(["node", "express"])), "Express must keep it");
+    assert.equal(capabilitiesSatisfied(rule!, new Set(["node", "koa"])), false, "and it must not leak elsewhere");
   });
 });

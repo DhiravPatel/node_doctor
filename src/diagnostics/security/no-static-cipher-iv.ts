@@ -1,6 +1,7 @@
 import { defineDiagnostic } from "../../core/types.ts";
 import type { AstNode } from "../../core/types.ts";
-import { getCalleeName, getMethodName } from "../../core/ast.ts";
+import { getCalleeName, getMethodName, findAncestor } from "../../core/ast.ts";
+import { collectDescendants } from "../../core/walk.ts";
 import { isTestFile } from "../../core/test-file.ts";
 
 /**
@@ -66,6 +67,30 @@ const TEST_OR_FIXTURE =
 /** Random sources that make an IV unique per message. */
 const RANDOM_SOURCES = new Set(["randomBytes", "randomFillSync", "getRandomValues", "randomUUID"]);
 
+/**
+ * The object literal a `this.x` / `obj.x` read refers to.
+ *
+ * For `this`, that is the object literal whose property holds the enclosing
+ * function — `var crypt = { iv: "…", encrypt: function () { this.iv } }`. Only a
+ * literal is resolved: a class field or an imported object is not decidable here,
+ * and undecidable is silence.
+ */
+const objectLiteralFor = (object: AstNode | null | undefined): AstNode | null => {
+  if (!object) return null;
+  if (object.type === "ObjectExpression") return object;
+  if (object.type === "ThisExpression") {
+    // Climb to the function this `this` belongs to, then to the object literal
+    // that function sits in as a property value.
+    const fn = findAncestor(object, (n) => n.type === "FunctionExpression" || n.type === "FunctionDeclaration");
+    if (!fn) return null;
+    const property = fn.parent as AstNode | undefined;
+    if (property?.type !== "Property") return null;
+    const owner = property.parent as AstNode | undefined;
+    return owner?.type === "ObjectExpression" ? owner : null;
+  }
+  return null;
+};
+
 /** Why this IV is constant, or null when it is not decidably constant. */
 const constantIvReason = (
   node: AstNode | null | undefined,
@@ -112,6 +137,35 @@ const constantIvReason = (
     return constantIvReason(initializer, resolve, depth + 1);
   }
 
+  // `this.iv`, where the enclosing object literal declares `iv: "…"`.
+  //
+  // This is a real corpus shape and the first version missed it:
+  //
+  //   var crypt = {
+  //     iv: "<16 characters>",
+  //     encrypt: function (data, key) {
+  //       var iv = this.iv;                       // ← one hop
+  //       var cipher = crypto.createCipheriv(algo, key, iv);
+  //
+  // The IV is as fixed as a literal argument — more so, because every method on
+  // the object shares it. Resolving it needs a property lookup on the object
+  // literal the method is defined in, which no amount of binding resolution
+  // reaches.
+  if (node.type === "MemberExpression" && node.computed !== true) {
+    const property = node.property as AstNode | undefined;
+    if (property?.type !== "Identifier") return null;
+    const owner = objectLiteralFor(node.object as AstNode);
+    if (!owner) return null;
+    for (const member of (owner.properties as AstNode[] | undefined) ?? []) {
+      if (member.type !== "Property" || member.computed) continue;
+      const key = member.key as AstNode | undefined;
+      const name = key?.type === "Identifier" ? String(key.name) : key?.type === "Literal" ? String(key.value) : null;
+      if (name !== String(property.name)) continue;
+      const reason = constantIvReason(member.value as AstNode | undefined, resolve, depth + 1);
+      return reason === null ? null : `${reason}, shared by every method on the object`;
+    }
+  }
+
   return null;
 };
 
@@ -125,10 +179,26 @@ export const noStaticCipherIv = defineDiagnostic({
   recommendation:
     "Generate the IV per message — `const iv = crypto.randomBytes(16)` — and store it alongside the ciphertext; it is not secret, only unique. A fixed IV makes the cipher deterministic, so equal plaintexts produce equal ciphertexts and shared prefixes stay shared. In GCM or any counter mode a repeated nonce repeats the keystream, which reveals the XOR of two plaintexts and lets the authentication key be recovered. If you genuinely need deterministic encryption for searching, use a construction designed for it (AES-SIV) rather than a fixed IV.",
   create: (ctx) => {
+    /** Names assigned anywhere in the file — a reassigned binding is unknown. */
+    let reassigned: Set<string> | null = null;
+    const isReassigned = (name: string): boolean => {
+      if (reassigned === null) {
+        reassigned = new Set<string>();
+        for (const node of collectDescendants(ctx.program, (n) => n.type === "AssignmentExpression")) {
+          const left = node.left as AstNode | undefined;
+          if (left?.type === "Identifier") reassigned.add(String(left.name));
+        }
+      }
+      return reassigned.has(name);
+    };
+
     const resolve = (name: string, from: AstNode): AstNode | undefined => {
       const binding = ctx.scope.getBinding(name, from);
-      // Only a `const`: a `let` may hold a fresh IV by the time this runs.
-      if (binding?.kind !== "const") return undefined;
+      if (!binding) return undefined;
+      // A `const` is settled. A `var`/`let` counts only if nothing ever assigns
+      // to it — the corpus's second defect is `var iv = this.iv`, written once
+      // and never touched again, and requiring `const` alone missed it.
+      if (binding.kind !== "const" && isReassigned(name)) return undefined;
       return binding.initNode as AstNode | undefined;
     };
 

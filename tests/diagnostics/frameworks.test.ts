@@ -18,7 +18,7 @@ import { hapiRouteAuthDisabled } from "../../src/diagnostics/frameworks/hapi-rou
 import { restifyMissingErrorHandler } from "../../src/diagnostics/frameworks/restify-missing-error-handler.ts";
 
 const findings = (diagnostic: Diagnostic, source: string, caps?: string[]): Finding[] => {
-  const capabilities = new Set(["node", "esm", ...(caps ?? diagnostic.requires ?? [])]);
+  const capabilities = new Set(["node", "esm", ...(caps ?? [...(diagnostic.requires ?? []), ...(diagnostic.requiresAny ?? []).slice(0, 1)])]);
   // Mirror the real selector: an unsatisfied gate means the diagnostic never runs.
   if (!capabilitiesSatisfied(diagnostic, capabilities)) return [];
   return lintSource({
