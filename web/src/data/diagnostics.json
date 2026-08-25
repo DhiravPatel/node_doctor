@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 179,
-  "defaultOn": 128,
+  "total": 180,
+  "defaultOn": 129,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 65,
     "Maintainability": 16,
     "Reliability": 49,
-    "Bugs": 36
+    "Bugs": 37
   },
   "categoryWeights": {
     "Security": 2,
@@ -2323,6 +2323,25 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Await it — `await next()` — or return it (`return next()`, or a concise arrow body `(ctx, next) => next()`). `next()` is a promise for the entire downstream chain, and Koa only builds the response after it settles: without the await, Koa answers before any downstream handler that awaits has set `ctx.body` (measured: 404), and a downstream throw escapes your `try` to become an unhandled rejection that exits the process."
+    },
+    {
+      "id": "no-unawaited-next-dynamic-api",
+      "title": "Next.js cookies()/headers() used without await, so every property read is undefined",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "async",
+        "auth",
+        "next"
+      ],
+      "requires": [
+        "next"
+      ],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Await it: `const c = await cookies()`, or `(await cookies()).get(\"session\")`. Since Next 15 `cookies()`, `headers()` and `draftMode()` return Promises — Next 16 removed the synchronous-access shim — so reading a property off the un-awaited call yields `undefined`. `React.use(cookies())` is the other supported form. Watch for optional chaining (`c?.get?.(…)`) around one of these: it converts the TypeError into a check that silently always fails."
     },
     {
       "id": "no-unbounded-agent-loop",

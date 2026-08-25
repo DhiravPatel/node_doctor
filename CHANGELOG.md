@@ -11,6 +11,59 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Next.js Route Handlers: the dynamic API that is a Promise now
+
+New diagnostic `no-unawaited-next-dynamic-api` (Bugs / `error` / confidence
+`high`, gated on the `next` token). Since Next 15, `cookies()`, `headers()` and
+`draftMode()` from `next/headers` return **Promises**, so every property read on
+the un-awaited call is `undefined`.
+
+Verified twice over against Next 16.3.2 — the shipped declarations export
+`cookies(): Promise<ReadonlyRequestCookies>`, and a running dev server confirmed
+the behaviour end to end:
+
+```
+const c = cookies();        typeof c.get  → "undefined"
+const h = headers();        typeof h.get  → "undefined"
+const c = await cookies();  typeof c.get  → "function"
+```
+
+with the server logging, verbatim:
+
+> Route "/api/sync" used `cookies().get`. `cookies()` returns a Promise and must
+> be unwrapped with `await` or `React.use()` before accessing its properties.
+
+The temporary synchronous-access shim Next 15 shipped is **gone in Next 16**, so
+this is a hard failure rather than a deprecation warning. Reading the types alone
+would not have been enough to know that, which is why the server was run.
+
+**The expensive spelling is the one that does not throw.**
+`cookies().get("session")` gives a loud 500. But
+`const c = cookies(); if (c?.get?.("role") === "admin")` throws nothing — the
+optional chain swallows it and the check silently always fails, turning a broken
+authorization test into one that quietly denies, or inverted, quietly allows.
+This is the commonest Next 14 → 15 migration defect, and a codemod that missed a
+file leaves exactly this shape behind.
+
+Two structural claims, no inference. The callee must resolve to an import of
+`cookies`/`headers`/`draftMode` **from `next/headers`** — matched by local binding
+name, so an aliased `import { cookies as getCookies }` is covered and a same-named
+function from anywhere else is not — and the Promise must be consumed
+**synchronously**: a member access on the call, a destructure of it, or a binding
+later member-accessed. Silent by construction wherever it is treated as a
+Promise: `await`, `return`, `.then`/`.catch`/`.finally`, `use(cookies())` and
+`React.use(cookies())` (the documented alternative), `Promise.all([cookies(),
+headers()])`, and a binding passed onward without ever being read.
+
+Not version-gated: the async signature landed in 15, `next` in a modern manifest
+means 15 or 16, and a Next 14 project that upgrades gets a finding already true of
+the version it is moving to.
+
+Next.js route handlers already reached the request-path rules — `collectExportedHandlers`
+recognizes an exported `GET`/`POST`/… in a route file — so no substrate change was
+needed. Verified before writing anything: `no-sync-io-in-request-path` already
+fired on a Next route handler.
+
 ### `requiresAny` — a family gate for the engine, and Fastify coverage that needed it
 
 **Engine.** Capability gating had two forms: `requires` (ALL of these tokens) and

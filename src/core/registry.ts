@@ -76,6 +76,7 @@ import { hapiRouteAuthDisabled } from "../diagnostics/frameworks/hapi-route-auth
 import { hapiRouteMissingValidation } from "../diagnostics/frameworks/hapi-route-missing-validation.ts";
 import { noPeerInconsistentHandler } from "../diagnostics/frameworks/no-peer-inconsistent-handler.ts";
 import { noUnawaitedKoaNext } from "../diagnostics/frameworks/no-unawaited-koa-next.ts";
+import { noUnawaitedNextDynamicApi } from "../diagnostics/frameworks/no-unawaited-next-dynamic-api.ts";
 import { noUnreturnedHonoResponse } from "../diagnostics/frameworks/no-unreturned-hono-response.ts";
 import { restifyMissingErrorHandler } from "../diagnostics/frameworks/restify-missing-error-handler.ts";
 // http
@@ -248,6 +249,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   hapiRouteMissingValidation,
   noPeerInconsistentHandler,
   noUnawaitedKoaNext,
+  noUnawaitedNextDynamicApi,
   noUnreturnedHonoResponse,
   restifyMissingErrorHandler,
   // http
