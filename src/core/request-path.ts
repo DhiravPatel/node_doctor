@@ -227,9 +227,153 @@ const isAdonisContextParameter = (param: AstNode): boolean => {
   return ADONIS_CONTEXT_TYPES.has(String(name.name));
 };
 
+/**
+ * Koa middleware, recognized by its `(ctx, next)` signature.
+ *
+ * Koa middleware registered inline is already found — `use` is one of the
+ * registration methods, so `app.use(async (ctx, next) => …)` is covered. The gap
+ * is the standard project layout, where middleware lives in its own file and is
+ * registered somewhere else:
+ *
+ *   // middleware/auth.ts
+ *   export async function auth(ctx, next) { … }
+ *
+ * Express gets this for free, because `looksLikeExpressHandler` matches
+ * `(req, res, …)` wherever it appears. Measured on a standalone middleware file:
+ * the Express spelling produced two findings and the identical Koa spelling
+ * produced **zero**. That asymmetry is the whole reason this exists.
+ *
+ * `(ctx, next)` is a GENERIC middleware shape, though, so the signature alone is
+ * nowhere near enough. `collectRequestHandlers` is substrate — nine rules gate on
+ * `isOnRequestPath`, and the handler set also feeds `collectModuleFacts` and the
+ * Phase-B project graph — so a wrong answer here surfaces as noise in rules that
+ * have nothing to do with Koa.
+ *
+ * The first attempt at this gate was wrong in two ways, both caught by an
+ * adversarial review and reproduced before being fixed:
+ *
+ *   - **A bare type NAME carried the evidence.** Matching an annotation called
+ *     `Context` or `Next` with no check of where the type came from promotes a
+ *     locally-declared `export type Context = { files: string[] }` in a build
+ *     pipeline, `import { Context } from "telegraf"`, and
+ *     `import type { Context } from "@opentelemetry/api"` — and because this
+ *     module never sees the capability set, it did so in projects with **no koa
+ *     dependency at all**. Confirmed misfires on correct non-HTTP code:
+ *     `no-sync-io-in-request-path` on a boot-time build step,
+ *     `no-process-exit-in-request-path` on CLI middleware (where `process.exit`
+ *     is the correct behaviour), `no-cross-request-state-mutation` on a
+ *     single-process CLI, `no-listener-added-per-request` on a job pipeline.
+ *     The docblock claimed to follow the Adonis discipline while doing no such
+ *     thing: `importsAdonisContext` requires an adonis-named module source AND
+ *     the specifier name together. This now does the same — an annotation counts
+ *     only when its type RESOLVES to an import from `koa`/`@koa/*`.
+ *   - **File-level evidence leaked across the file.** One `import Koa from "koa"`
+ *     promoted every `(ctx, next)` function in it — a fixture helper in a test
+ *     file, a migration script, a closure nested in an unrelated factory, and an
+ *     in-memory reducer 400 lines below a `@koa/router` import. Evidence is now
+ *     per-FUNCTION: the file-level import must be joined by the function's own
+ *     body touching a distinctive Koa context member (`ctx.body`, `ctx.throw`,
+ *     `ctx.state`, …). A reducer reading `ctx.snapshot` no longer qualifies.
+ *
+ * The remaining recall gap is stated rather than hidden: a plain-JS standalone
+ * middleware that neither annotates its parameters nor touches a distinctive
+ * context member is not recognized, and neither is a CommonJS `require("koa")`
+ * app (`importsKoa` walks only `ImportDeclaration`, exactly as the Adonis helper
+ * does). Both under-report, which is the acceptable direction.
+ */
+const KOA_FIRST_PARAMS = new Set(["ctx", "context"]);
+
+/**
+ * Context members distinctive enough to be per-function evidence of Koa.
+ *
+ * Deliberately excludes the generic ones a non-Koa pipeline might also use
+ * (`set`, `status`, `type`) and keeps the ones that only a Koa context has.
+ */
+const KOA_CONTEXT_MEMBERS = new Set([
+  "body",
+  "throw",
+  "state",
+  "request",
+  "response",
+  "cookies",
+  "assert",
+  "redirect",
+]);
+
+/** Local names imported from `koa` / `@koa/*`, type-only imports included. */
+const koaImportedNames = (program: AstNode): Set<string> => {
+  const names = new Set<string>();
+  for (const statement of (program.body as AstNode[] | undefined) ?? []) {
+    if (statement.type !== "ImportDeclaration") continue;
+    const source = (statement.source as AstNode | undefined)?.value;
+    if (typeof source !== "string" || !/^koa$|^@koa\//.test(source)) continue;
+    for (const specifier of (statement.specifiers as AstNode[] | undefined) ?? []) {
+      const local = specifier.local as AstNode | undefined;
+      if (local?.type === "Identifier") names.add(String(local.name));
+    }
+  }
+  return names;
+};
+
+/**
+ * Is a parameter annotated with a type that RESOLVES to a koa import?
+ *
+ * Both `ctx: Context` (from `import type { Context } from "koa"`) and
+ * `ctx: Koa.Context` (from `import Koa from "koa"`) qualify, because in each the
+ * head of the type name is a local binding introduced by a koa import. A type of
+ * the same name from telegraf, grammY or the local file does not.
+ */
+const hasKoaTypeAnnotation = (params: AstNode[], koaNames: ReadonlySet<string>): boolean => {
+  if (koaNames.size === 0) return false;
+  return params.some((param) => {
+    const holder = param.typeAnnotation as AstNode | undefined;
+    const reference = (holder?.typeAnnotation as AstNode | undefined) ?? holder;
+    if (reference?.type !== "TSTypeReference") return false;
+    const name = reference.typeName as AstNode | undefined;
+    if (name?.type === "Identifier") return koaNames.has(String(name.name));
+    if (name?.type === "TSQualifiedName") {
+      // `Koa.Context` — the NAMESPACE is what must come from koa.
+      let head: AstNode | undefined = name;
+      while (head?.type === "TSQualifiedName") head = head.left as AstNode | undefined;
+      return head?.type === "Identifier" && koaNames.has(String(head.name));
+    }
+    return false;
+  });
+};
+
+/** Does this function's own body touch a distinctive Koa context member? */
+const touchesKoaContext = (fn: AstNode, contextName: string): boolean =>
+  findDescendant(
+    fn,
+    (n) =>
+      n.type === "MemberExpression" &&
+      !n.computed &&
+      (n.object as AstNode | undefined)?.type === "Identifier" &&
+      String((n.object as AstNode).name) === contextName &&
+      (n.property as AstNode | undefined)?.type === "Identifier" &&
+      KOA_CONTEXT_MEMBERS.has(String((n.property as AstNode).name)),
+  ) !== null;
+
+/**
+ * Does this function have Koa's middleware signature — exactly `(ctx, next)`?
+ *
+ * Exactly two parameters is load-bearing. Express middleware is `(req, res, next)`
+ * and its error form is `(err, req, res, next)`; requiring arity 2 keeps this off
+ * both, so a project running Koa and Express side by side is not double-counted.
+ */
+export const looksLikeKoaMiddleware = (fn: AstNode | null | undefined): boolean => {
+  if (!isFunctionLike(fn)) return false;
+  const params = (fn!.params as AstNode[]) ?? [];
+  if (params.length !== 2) return false;
+  const first = paramName(params[0]);
+  const second = paramName(params[1]);
+  return !!first && KOA_FIRST_PARAMS.has(first) && second === "next";
+};
+
 export const collectRequestHandlers = (program: AstNode, scope: ScopeResolver): Set<AstNode> => {
   const handlers = new Set<AstNode>();
   const adonisContextImported = importsAdonisContext(program);
+  const koaNames = koaImportedNames(program);
 
   collectExportedHandlers(program, handlers);
 
@@ -326,10 +470,26 @@ export const collectRequestHandlers = (program: AstNode, scope: ScopeResolver): 
     },
   });
 
-  // Signature fallback for split-file controllers.
+  // Signature fallback for split-file controllers and middleware.
   walk(program, {
     enter: (node) => {
-      if (isFunctionLike(node) && looksLikeExpressHandler(node)) handlers.add(node);
+      if (!isFunctionLike(node)) return;
+      if (looksLikeExpressHandler(node)) {
+        handlers.add(node);
+        return;
+      }
+      // Koa's `(ctx, next)` is a generic middleware shape, so the signature needs
+      // PER-FUNCTION proof: a parameter whose type resolves to a koa import, or a
+      // koa import in the file plus this function's own body touching a
+      // distinctive Koa context member. File-level evidence alone leaked across
+      // unrelated functions — see the note above.
+      if (!looksLikeKoaMiddleware(node)) return;
+      const params = (node.params as AstNode[]) ?? [];
+      const contextName = paramName(params[0]);
+      const proven =
+        hasKoaTypeAnnotation(params, koaNames) ||
+        (koaNames.size > 0 && contextName !== null && touchesKoaContext(node, contextName));
+      if (proven) handlers.add(node);
     },
   });
 

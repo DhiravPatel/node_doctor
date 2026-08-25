@@ -11,6 +11,120 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Koa coverage
+
+Koa was the last framework the docs claimed as **Core** without any coverage
+behind it. Two gaps closed, both verified by serving real requests through Koa
+3.2.1 rather than by reading its docs.
+
+**`no-unawaited-koa-next`** (Bugs / `error` / confidence `high`, gated on the
+`koa` token). `next()` returns a promise for the entire downstream chain, and Koa
+builds its response from `ctx` only after that promise settles:
+
+| middleware | downstream | result |
+| --- | --- | --- |
+| `await next()` | sets `ctx.body` synchronously | 200 `"downstream"` |
+| `next()` | sets `ctx.body` synchronously | 200 `"downstream"` |
+| `await next()` | awaits, then sets `ctx.body` | 200 `"downstream after await"` |
+| `return next()` | awaits, then sets `ctx.body` | 200 `"downstream after await"` |
+| `next()` | awaits, then sets `ctx.body` | **404 `"Not Found"`** |
+
+Row two is why it survives review: with a synchronous downstream the un-awaited
+form works, so the smoke test passes — until any handler below awaits a database,
+which every real handler does, and the route starts 404-ing.
+
+The error path is worse. With `await next()` inside a `try`, a downstream throw is
+caught and answers 503. **Without** the await the `try` catches nothing, because
+the rejection lands after the middleware has already returned — it became an
+unhandled rejection that *terminated the probe process*. So the un-awaited form
+does not merely mis-order the response, it converts every downstream error from a
+caught 500 into a process exit.
+
+The rule fires only when a call's direct parent is an `ExpressionStatement`, so
+everything that consumes the promise is silent by construction: `await next()`,
+`return next()`, a concise arrow body, `.then(…)`, `.catch(…)`, `const p = next()`,
+`Promise.all([next(), …])`. Arity two is load-bearing — Express middleware is
+`(req, res, next)` and its error form `(err, req, res, next)`, where a bare
+`next()` is the CORRECT call — so requiring exactly `(ctx | context, next)` keeps
+the rule off both, and a project running Koa and Express side by side is not
+misreported.
+
+**Note the contrast with Hono**, probed identically in the wave below: there an
+un-awaited `next()` still reaches the handler and answers 200, so the equivalent
+rule would report correct code and was deliberately not shipped. Two frameworks,
+the same spelling, opposite verdicts — which is why each was run rather than
+reasoned about.
+
+**Request-path recognition for standalone middleware.** Koa middleware registered
+inline was always covered, because `use` is one of the registration methods. The
+gap was the standard project layout, where middleware lives in its own file and is
+registered elsewhere. Measured on a standalone `export async function auth(ctx, next)`:
+the Express spelling produced two findings and the identical Koa spelling produced
+**zero**.
+
+`(ctx, next)` is a generic middleware shape, though, and `collectRequestHandlers`
+is substrate: nine rules gate on `isOnRequestPath`, and the handler set also feeds
+`collectModuleFacts` and the Phase-B project graph, so a wrong answer surfaces as
+noise in rules that have nothing to do with Koa.
+
+**The gate took two attempts, and the first was not shippable.** An adversarial
+review of the uncommitted change returned three independent BLOCK verdicts, and
+every claim was reproduced before being acted on:
+
+- **A bare type NAME carried the evidence.** Accepting an annotation called
+  `Context` or `Next` without checking where the type came from promoted a
+  locally-declared `export type Context = { files: string[] }` in a build
+  pipeline, `import { Context } from "telegraf"`, and
+  `import type { Context } from "@opentelemetry/api"` — and because this module
+  never sees the capability set, it did so in projects with **no koa dependency
+  at all**. Confirmed misfires on correct non-HTTP code:
+  `no-sync-io-in-request-path` on a boot-time build step,
+  `no-process-exit-in-request-path` on CLI middleware (where `process.exit` on a
+  missing flag is exactly right), `no-cross-request-state-mutation` on a
+  single-process CLI, `no-listener-added-per-request` on a job pipeline. The
+  docblock claimed to follow the Adonis discipline while doing no such thing —
+  `importsAdonisContext` requires an adonis-named module source *and* the
+  specifier name together. It now does the same: an annotation counts only when
+  its type **resolves to an import** from `koa`/`@koa/*`, `Koa.Context` included
+  via its namespace binding.
+- **File-level evidence leaked across the file.** One `import Koa from "koa"`
+  promoted every `(ctx, next)` function in it — a fixture helper in a test file, a
+  migration script, a closure nested in an unrelated factory, an in-memory reducer
+  400 lines below a `@koa/router` import. Evidence is now **per-function**: the
+  file-level import must be joined by that function's own body touching a
+  distinctive Koa context member (`ctx.body`, `ctx.throw`, `ctx.state`, …). A
+  reducer reading `ctx.snapshot` no longer qualifies; plain-JS middleware setting
+  `ctx.body` still does.
+- **The rule bypassed the gate entirely.** `no-unawaited-koa-next` keyed on the
+  signature plus the project-wide `koa` capability, so it fired on files the
+  substrate had explicitly declined to call Koa. It now also requires membership
+  in the request-handler set — the one-line anchor the sibling Hono rule already
+  used, which this rule should have used from the start.
+- **Two housekeeping failures.** `check:schema` and `check:web` were stale, so CI
+  and release would have been red as committed. And the test named "a `next` from
+  an outer scope is not the parameter" asserted nothing — its function was
+  `(ctx, other)`, which bails on the signature before the binding check is ever
+  reached. Both fixed, and the binding path now has a test that actually reaches
+  it.
+
+Every reproduced false positive is pinned as a test, including the block-scoped
+shadow (`{ const next = …; next(); }`), which the resolver's lack of block scopes
+had resolved to the parameter. The `declaresName` guard that fixes it was lifted
+out of the Hono rule into `src/core/ast.ts` so both rules share one
+implementation.
+
+Remaining recall gaps are stated rather than hidden: plain-JS middleware that
+neither annotates its parameters nor touches a distinctive context member, a
+CommonJS `require("koa")` app, `void next()`, `next?.()`, `(ctx, next = noop)`,
+`next()` inside a nested callback, a destructured context, `@koa/router`'s
+three-parameter `router.param`, and a first parameter named `c`. All under-report,
+which is the acceptable direction.
+
+This also corrects the record from the wave below, which said Koa handlers were
+found "only through router registration". `use` is itself a registration method,
+so `app.use(async (ctx, next) => …)` was always covered; the gap was narrower than
+stated and specific to split-file middleware.
+
 ### Hono and AdonisJS coverage
 
 Both frameworks already had a capability token and working handler recognition,

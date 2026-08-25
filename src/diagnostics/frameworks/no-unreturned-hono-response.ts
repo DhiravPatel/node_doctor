@@ -1,7 +1,6 @@
 import { defineDiagnostic } from "../../core/types.ts";
 import type { AstNode } from "../../core/types.ts";
-import { findAncestor, isFunctionLike, isResultDiscarded, unwrapChain } from "../../core/ast.ts";
-import { collectDescendants } from "../../core/walk.ts";
+import { declaresName, findAncestor, isFunctionLike, isResultDiscarded, unwrapChain } from "../../core/ast.ts";
 
 /**
  * A Hono handler that BUILDS a response and never returns it. The client gets a
@@ -94,25 +93,6 @@ const simpleParamName = (param: AstNode | null | undefined): string | null => {
   if (param.type === "AssignmentPattern") return simpleParamName(param.left as AstNode);
   return null;
 };
-
-/**
- * Does anything inside `fn` declare `name`, shadowing the parameter?
- *
- * Deliberately over-broad — it looks through nested functions too — because its
- * only job is to make the rule bail when the name might not be the context.
- */
-const declaresName = (fn: AstNode, name: string): boolean =>
-  collectDescendants(fn, (n) => {
-    if (n.type === "VariableDeclarator") {
-      const id = n.id as AstNode | undefined;
-      return id?.type === "Identifier" && String(id.name) === name;
-    }
-    if (n.type === "FunctionDeclaration" || n.type === "ClassDeclaration") {
-      const id = n.id as AstNode | undefined;
-      return id?.type === "Identifier" && String(id.name) === name;
-    }
-    return false;
-  }).length > 0;
 
 export const noUnreturnedHonoResponse = defineDiagnostic({
   id: "no-unreturned-hono-response",

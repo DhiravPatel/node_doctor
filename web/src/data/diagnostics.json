@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 178,
-  "defaultOn": 127,
+  "total": 179,
+  "defaultOn": 128,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 65,
     "Maintainability": 16,
     "Reliability": 49,
-    "Bugs": 35
+    "Bugs": 36
   },
   "categoryWeights": {
     "Security": 2,
@@ -2163,6 +2163,24 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Anchor the pattern at the start (`/^https:\\/\\/trusted\\.com$/`) so it matches the whole input, not a substring — or, better, parse the value (`new URL(target).host`) and compare the host against an explicit allowlist instead of matching a regex."
+    },
+    {
+      "id": "no-unawaited-koa-next",
+      "title": "Koa middleware calls next() without awaiting it, so the response is sent before the chain finishes",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "async",
+        "http",
+        "koa"
+      ],
+      "requires": [
+        "koa"
+      ],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Await it — `await next()` — or return it (`return next()`, or a concise arrow body `(ctx, next) => next()`). `next()` is a promise for the entire downstream chain, and Koa only builds the response after it settles: without the await, Koa answers before any downstream handler that awaits has set `ctx.body` (measured: 404), and a downstream throw escapes your `try` to become an unhandled rejection that exits the process."
     },
     {
       "id": "no-unbounded-agent-loop",
