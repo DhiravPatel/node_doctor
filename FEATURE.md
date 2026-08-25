@@ -104,7 +104,7 @@ Understands what a codebase *is* before analyzing it, so rules activate correctl
 | --- | --- | --- | --- |
 | Express (4 and 5, version-aware) | ✅ | signature `(req, res)` + registration | **7 rules** |
 | Fastify | ✅ | signature `(request, reply)` + `route({})` | 2 rules |
-| NestJS | ✅ | decorators | 1 rule |
+| NestJS | ✅ | decorators | 2 rules |
 | AdonisJS | ✅ | `HttpContext` type + decorators | **mass assignment** (`request.all()`/`body()`/`qs()`/`params()`, Lucid `merge`/`fill`) |
 | Hono | ✅ | registration | **1 rule** (`no-unreturned-hono-response`) |
 | Koa | ✅ | registration + `(ctx, next)` signature, behind Koa evidence | **1 rule** (`no-unawaited-koa-next`) |
@@ -125,6 +125,25 @@ Route registration is matched **framework-agnostically** — any `x.get/post/put
 `no-unreturned-hono-response` (Bugs/**error**/high, gated on the `hono` token). This is the one API difference that catches every developer arriving from Express: `res.json(x)` **sends**, while `c.json(x)` **constructs a `Response` and hands it back**. Hono replies with whatever the handler returns, so discarding it leaves nothing to reply with. MEASURED against Hono 4.13.4 by running each form through `app.request()`: a discarded `c.json`, `c.text`, `c.html`, `c.redirect` or `c.body` all answer **404 "404 Not Found"**, while `return c.json({ ok: true })` answers 200 with the body. The async row is the expensive one — the `await` already ran, so the row was written or the payment taken, and the caller is told the route does not exist; a client that retries on 404 does all of it again. It survives review because the handler reads like Express and the 404 reads like a routing problem, so the search starts in the router rather than in the handler that already ran.
 
 Three structural conditions, and the exclusions were measured rather than assumed. The method must **produce** a Response (`json`/`text`/`html`/`body`/`redirect`/`notFound`/`newResponse`) — the context's side-effecting methods are verified correct when discarded, since `c.header("x-trace","1")` and `c.status(201)` before a returned `c.json(…)` produce a 201 with the right body, and `c.set(…)` stores a variable `c.get(…)` reads back. The result must be **discarded**. And the receiver must be the **first parameter** of a function the engine already recognizes as a handler — the anchor that keeps the rule off every other framework in the same repo, because Express and Fastify both put their response object *second*. Two measured non-defects are deliberately not claimed: `throw new HTTPException(401)` produces a real 401, and middleware calling `next()` **without** `await` still reaches the handler and answers 200 — so the obvious "missing await on next()" rule would be reporting correct code and is not shipped.
+
+### NestJS — the `@Res()` that stops the response from ever being sent
+
+`no-nest-res-without-send` (Bugs/**error**/high, gated on the `nest` token). Injecting `@Res()` switches a handler into Nest's **library-specific mode**: Nest stops managing the response, so the value the handler returns is discarded and nothing is written to the socket. MEASURED against NestJS 11.2.3, each case booted as a real server and fetched:
+
+| handler | result |
+| --- | --- |
+| returns a value, no `@Res` | 200 `{"ok":true}` |
+| `@Res`, `res.json({ok:true})` | 200 `{"ok":true}` |
+| `@Res({passthrough:true})`, returns a value | 200 `{"ok":true}` |
+| `@Res({passthrough:true})`, `setHeader` then returns | 200 `{"ok":true}` |
+| `@Res`, returns a value, never sends | **no response — hung until timeout** |
+| `@Res`, `setHeader` then returns | **no response — hung until timeout** |
+
+The last row is the shape that actually occurs. Someone needs one header, reaches for `@Res()` to set it, and leaves the `return` that was already there. Nothing throws, nothing is logged, and the handler looks like every other handler in the file — so the "did it send?" question is never asked.
+
+The cost is worse than a wrong response. The socket stays open until the client or a proxy gives up, so under load these accumulate — connections, and the memory of every request pinned to them — until the server stops accepting new ones. The symptom surfaces as a saturated pool, far from the route that caused it.
+
+Four structural conditions, and the analysis defaults to silence wherever it cannot prove the response was left unsent: an HTTP-method decorator on the method; a parameter decorated `@Res()`/`@Response()` **without** `{ passthrough: true }` (the documented escape hatch, verified to answer 200 both with and without a header write); a `return` carrying a value, not counting returns inside nested functions; and no use of the response parameter that could send. A terminal method anywhere in its member chain silences it — `send`, `json`, `end`, `sendFile`, `redirect`, `render`, `download`, `write`, `pipe` — including through `res.status(201).json(x)`. So does **any** other use of the binding: passed as an argument (`stream.pipe(res)`), aliased, returned, spread. Only the provably-benign member reads (`res.setHeader(…)`) leave the finding standing, and those are exactly the measured hang.
 
 ### Next.js — the dynamic API that is a Promise now
 

@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 180,
-  "defaultOn": 129,
+  "total": 181,
+  "defaultOn": 130,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 65,
     "Maintainability": 16,
     "Reliability": 49,
-    "Bugs": 37
+    "Bugs": 38
   },
   "categoryWeights": {
     "Security": 2,
@@ -1568,6 +1568,25 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use `Number.isNaN(value)` — or `Object.is(value, NaN)`. `NaN` is not equal to itself, so `=== NaN` is always false and `!== NaN` is always true: one guard never runs and the other never stops anything."
+    },
+    {
+      "id": "no-nest-res-without-send",
+      "title": "NestJS handler injects @Res() and returns a value, so the request never gets a response",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "http",
+        "nest"
+      ],
+      "requires": [
+        "nest"
+      ],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Either send on the response object (`res.json(payload)`) or take Nest's handling back with `@Res({ passthrough: true })` and keep returning the value. Injecting a bare `@Res()` puts the handler in library-specific mode: Nest stops managing the response, the returned value is discarded, and nothing is written — measured on NestJS 11.2.3, the request hangs until the client times out, holding the connection open. If you only needed a header, `passthrough: true` is the fix."
     },
     {
       "id": "no-node-builtin-on-edge",

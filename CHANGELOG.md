@@ -11,6 +11,52 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### NestJS: the `@Res()` that stops the response from ever being sent
+
+New diagnostic `no-nest-res-without-send` (Bugs / `error` / confidence `high`,
+gated on the `nest` token). NestJS was the most under-covered major framework in
+the catalog — one opt-in rule — and this is its sharpest silent failure.
+
+Injecting `@Res()` switches a handler into Nest's **library-specific mode**: Nest
+stops managing the response, so the value the handler returns is discarded and
+nothing is written to the socket. MEASURED against NestJS 11.2.3, each case
+booted as a real server and fetched:
+
+```
+returns a value, no @Res                       → 200 {"ok":true}
+@Res, res.json({ok:true})                      → 200 {"ok":true}
+@Res({passthrough:true}), returns a value      → 200 {"ok":true}
+@Res({passthrough:true}), setHeader + returns  → 200 {"ok":true}
+@Res, returns a value, never sends             → NO RESPONSE, hung until timeout
+@Res, setHeader then returns                   → NO RESPONSE, hung until timeout
+```
+
+The last row is the shape that actually occurs, and it is why the rule does not
+stop at "the response parameter is unused": someone needs one header, reaches for
+`@Res()` to set it, and leaves the `return` that was already there. Nothing
+throws, nothing is logged, and the handler looks like every other handler in the
+file.
+
+The cost is worse than a wrong response. The socket stays open until the client
+or a proxy gives up, so under load these accumulate — connections, and the memory
+of every request pinned to them — until the server stops accepting new ones. The
+symptom surfaces as a saturated pool, far from the route that caused it.
+
+Four structural conditions, defaulting to silence wherever the analysis cannot
+prove the response was left unsent: an HTTP-method decorator on the method; a
+parameter decorated `@Res()`/`@Response()` **without** `{ passthrough: true }`
+(the documented escape hatch, verified to answer 200 both with and without a
+header write); a `return` carrying a value, not counting returns inside nested
+functions; and no use of the response parameter that could send. A terminal
+method anywhere in its member chain silences it — `send`, `json`, `end`,
+`sendFile`, `redirect`, `render`, `download`, `write`, `pipe` — including through
+`res.status(201).json(x)`. So does **any** other use of the binding: passed as an
+argument (`stream.pipe(res)`), aliased, returned, spread. Only the
+provably-benign member reads leave the finding standing, and those are exactly
+the measured hang.
+
+`node-doctor diagnostics --framework nest` goes from 1 rule to 2.
+
 ### Next.js Route Handlers: the dynamic API that is a Promise now
 
 New diagnostic `no-unawaited-next-dynamic-api` (Bugs / `error` / confidence
