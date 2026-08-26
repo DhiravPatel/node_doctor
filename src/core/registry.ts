@@ -91,6 +91,7 @@ import { noErrorResponseWithSuccessStatus } from "../diagnostics/http/no-error-r
 import { noMissingBodySizeLimit } from "../diagnostics/http/no-missing-body-size-limit.ts";
 import { noSendAfterNext } from "../diagnostics/http/no-send-after-next.ts";
 import { noSharedCacheAuthenticatedResponse } from "../diagnostics/http/no-shared-cache-authenticated-response.ts";
+import { noStatusCodeAsResponseBody } from "../diagnostics/http/no-status-code-as-response-body.ts";
 import { noTrustProxyTrue } from "../diagnostics/http/no-trust-proxy-true.ts";
 import { noWildcardBodyParser } from "../diagnostics/http/no-wildcard-body-parser.ts";
 import { requireErrorHandlingMiddleware } from "../diagnostics/http/require-error-handling-middleware.ts";
@@ -265,6 +266,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noMissingBodySizeLimit,
   noSendAfterNext,
   noSharedCacheAuthenticatedResponse,
+  noStatusCodeAsResponseBody,
   noTrustProxyTrue,
   noWildcardBodyParser,
   requireErrorHandlingMiddleware,

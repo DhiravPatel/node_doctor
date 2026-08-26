@@ -102,7 +102,7 @@ Understands what a codebase *is* before analyzing it, so rules activate correctl
 
 | Framework | Token | Handlers recognized | Dedicated coverage |
 | --- | --- | --- | --- |
-| Express (4 and 5, version-aware) | ✅ | signature `(req, res)` + registration | **7 rules** |
+| Express (4 and 5, version-aware) | ✅ | signature `(req, res)` + registration | **8 rules**, one of them Express-5-only |
 | Fastify | ✅ | signature `(request, reply)` + `route({})` | 2 rules |
 | NestJS | ✅ | decorators | 2 rules |
 | AdonisJS | ✅ | `HttpContext` type + decorators | **mass assignment** (`request.all()`/`body()`/`qs()`/`params()`, Lucid `merge`/`fill`) |
@@ -125,6 +125,28 @@ Route registration is matched **framework-agnostically** — any `x.get/post/put
 `no-unreturned-hono-response` (Bugs/**error**/high, gated on the `hono` token). This is the one API difference that catches every developer arriving from Express: `res.json(x)` **sends**, while `c.json(x)` **constructs a `Response` and hands it back**. Hono replies with whatever the handler returns, so discarding it leaves nothing to reply with. MEASURED against Hono 4.13.4 by running each form through `app.request()`: a discarded `c.json`, `c.text`, `c.html`, `c.redirect` or `c.body` all answer **404 "404 Not Found"**, while `return c.json({ ok: true })` answers 200 with the body. The async row is the expensive one — the `await` already ran, so the row was written or the payment taken, and the caller is told the route does not exist; a client that retries on 404 does all of it again. It survives review because the handler reads like Express and the 404 reads like a routing problem, so the search starts in the router rather than in the handler that already ran.
 
 Three structural conditions, and the exclusions were measured rather than assumed. The method must **produce** a Response (`json`/`text`/`html`/`body`/`redirect`/`notFound`/`newResponse`) — the context's side-effecting methods are verified correct when discarded, since `c.header("x-trace","1")` and `c.status(201)` before a returned `c.json(…)` produce a 201 with the right body, and `c.set(…)` stores a variable `c.get(…)` reads back. The result must be **discarded**. And the receiver must be the **first parameter** of a function the engine already recognizes as a handler — the anchor that keeps the rule off every other framework in the same repo, because Express and Fastify both put their response object *second*. Two measured non-defects are deliberately not claimed: `throw new HTTPException(401)` produces a real 401, and middleware calling `next()` **without** `await` still reaches the handler and answers 200 — so the obvious "missing await on next()" rule would be reporting correct code and is not shipped.
+
+### Express 5 — the status code that becomes the body
+
+`no-status-code-as-response-body` (Bugs/**error**/high, gated on `express:5`). The first rule to *require* the version token rather than retire itself behind it. Express 5 removed `res.send(status)` and the two-argument `res.send(status, body)` / `res.json(status, body)`; it does not throw, the first argument is simply the body now. MEASURED against Express 5.2.1, each case served over a real socket:
+
+| call | result |
+| --- | --- |
+| `res.send(404)` | **200**, body `"404"`, content-type `application/json` |
+| `res.send(204)` | **200**, body `"204"` |
+| `res.send(200, { ok: 1 })` | 200, body `"200"` — **the payload is discarded** |
+| `res.json(201, created)` | **200**, body `"201"` — **the payload is discarded** |
+| `res.send("404")` | 200, body `"404"`, `text/html` — correct |
+| `res.status(404).send()` | 404 — correct |
+| `res.sendStatus(404)` | 404 `"Not Found"` — correct |
+
+This is the worst kind of upgrade break, because the server keeps working. An error path that used to answer 404 now answers **200 with the string "404"**, so every client checking `response.ok` treats the failure as a success and carries on with a body it cannot parse. The two-argument forms are worse: the payload the handler computed is thrown away and replaced by the number. Nothing is logged, and the deprecation warning Express 4 used to print is gone along with the feature.
+
+Two shapes, each proving intent from syntax. **One argument, an integer literal in the 100–599 range** — the range is what proves it was meant as a status, so `res.send(42)` is left alone as a plausible numeric body and `res.send("404")` as a correct string one. **Two arguments with a numeric-literal first** — `send`/`json` take one argument in Express 5, so arity alone is the proof and no range test applies. The receiver must root at `res`/`response`/`reply`, which keeps it off `socket.send(1000, reason)`.
+
+The `express:5` gate is the load-bearing part: on Express 4 these signatures *work*, and firing there would be reporting working code. Verified end to end on two fixture apps with byte-identical source — the Express 5 one reports both sites, the Express 4 one reports neither.
+
+Also measured on Express 5.2.1 and deliberately left out, because each is a different mechanism and most fail loudly enough to be caught the moment the server starts: `app.del(…)` and the route patterns `'/files/*'` and `'/:id?'` throw at **boot** (`TypeError`, `PathError`), and `req.param(…)` / `res.sendfile(…)` throw a 500 on the first request. Two silent ones remain uncovered and are candidates for their own rules — `res.redirect("back")` now redirects to the literal path `/back` (measured: 404), and the default query parser changed from `extended` to `simple`, so `?a[b]=c` yields `{ "a[b]": "c" }` and `req.query.a.b` is undefined.
 
 ### NestJS — the `@Res()` that stops the response from ever being sent
 

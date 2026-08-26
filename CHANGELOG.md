@@ -11,6 +11,58 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Express 5: the status code that becomes the body
+
+New diagnostic `no-status-code-as-response-body` (Bugs / `error` / confidence
+`high`, gated on `express:5`). The `express:5` token has existed since version
+detection shipped, but until now only ever appeared in a `disabledWhen` — used to
+*retire* an Express 4 rule. This is the first rule to require it, and Express 5
+migration defects were entirely uncovered.
+
+Express 5 removed `res.send(status)` and the two-argument
+`res.send(status, body)` / `res.json(status, body)`. It does not throw; the first
+argument is simply the body now. MEASURED against Express 5.2.1, each case served
+over a real socket:
+
+```
+res.send(404)              → 200  body "404"   content-type application/json
+res.send(204)              → 200  body "204"
+res.send(200, { ok: 1 })   → 200  body "200"   ← the payload is discarded
+res.json(201, created)     → 200  body "201"   ← the payload is discarded
+res.send("404")            → 200  body "404"   text/html            (correct)
+res.status(404).send()     → 404  body ""                           (correct)
+res.sendStatus(404)        → 404  body "Not Found"                  (correct)
+```
+
+This is the worst kind of upgrade break, because the server keeps working. An
+error path that used to answer 404 now answers **200 with the string "404"**, so
+every client checking `response.ok` treats the failure as a success and carries on
+with a body it cannot parse. The two-argument forms are worse: the payload the
+handler computed is thrown away and replaced by the number. Nothing is logged, and
+the deprecation warning Express 4 used to print is gone along with the feature.
+
+Two shapes, each proving intent from syntax. **One argument, an integer literal in
+the 100–599 range** — the range is what proves it was meant as a status, so
+`res.send(42)` is left alone as a plausible numeric body and `res.send("404")` as
+a correct string one. **Two arguments with a numeric-literal first** — `send`/`json`
+take one argument in Express 5, so arity alone is the proof and no range test
+applies. The receiver must root at `res`/`response`/`reply`, which keeps it off
+`socket.send(1000, reason)`.
+
+The `express:5` gate is the load-bearing part: on Express 4 these signatures
+*work*, and firing there would be reporting working code. Verified end to end on
+two fixture apps with byte-identical source — the Express 5 one reports both
+sites, the Express 4 one reports neither.
+
+Also measured on Express 5.2.1 and deliberately left out, because each is a
+different mechanism and most fail loudly enough to be caught the moment the server
+starts: `app.del(…)` and the route patterns `'/files/*'` and `'/:id?'` throw at
+**boot** (`TypeError`, `PathError`), and `req.param(…)` / `res.sendfile(…)` throw a
+500 on the first request. Two silent ones remain uncovered and are candidates for
+their own rules — `res.redirect("back")` now redirects to the literal path `/back`
+(measured: 404), and the default query parser changed from `extended` to `simple`,
+so `?a[b]=c` yields `{ "a[b]": "c" }` and `req.query.a.b` is undefined.
+
 ### NestJS: the `@Res()` that stops the response from ever being sent
 
 New diagnostic `no-nest-res-without-send` (Bugs / `error` / confidence `high`,
