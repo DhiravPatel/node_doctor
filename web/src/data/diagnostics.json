@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 182,
-  "defaultOn": 131,
+  "total": 183,
+  "defaultOn": 132,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 65,
     "Maintainability": 16,
     "Reliability": 49,
-    "Bugs": 39
+    "Bugs": 40
   },
   "categoryWeights": {
     "Security": 2,
@@ -1587,6 +1587,25 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Either send on the response object (`res.json(payload)`) or take Nest's handling back with `@Res({ passthrough: true })` and keep returning the value. Injecting a bare `@Res()` puts the handler in library-specific mode: Nest stops managing the response, the returned value is discarded, and nothing is written — measured on NestJS 11.2.3, the request hangs until the client times out, holding the connection open. If you only needed a header, `passthrough: true` is the fix."
+    },
+    {
+      "id": "no-nested-query-on-simple-parser",
+      "title": "Nested req.query read on Express 5, whose default parser does not build nested objects",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "project",
+      "tags": [
+        "express",
+        "http",
+        "migration"
+      ],
+      "requires": [
+        "express:5"
+      ],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Restore the Express 4 behaviour with `app.set(\"query parser\", \"extended\")`, or read the flat key the simple parser actually produces (`req.query[\"filter[status]\"]`). Express 5 changed the default query parser from `extended` (qs) to `simple` (node:querystring), so `?filter[status]=open` arrives as the key `\"filter[status]\"` and `req.query.filter` is undefined — measured on Express 5.2.1. Nothing throws; the filter is simply never applied."
     },
     {
       "id": "no-node-builtin-on-edge",

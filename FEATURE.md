@@ -102,7 +102,7 @@ Understands what a codebase *is* before analyzing it, so rules activate correctl
 
 | Framework | Token | Handlers recognized | Dedicated coverage |
 | --- | --- | --- | --- |
-| Express (4 and 5, version-aware) | ✅ | signature `(req, res)` + registration | **8 rules**, one of them Express-5-only |
+| Express (4 and 5, version-aware) | ✅ | signature `(req, res)` + registration | **9 rules**, two of them Express-5-only |
 | Fastify | ✅ | signature `(request, reply)` + `route({})` | 2 rules |
 | NestJS | ✅ | decorators | 2 rules |
 | AdonisJS | ✅ | `HttpContext` type + decorators | **mass assignment** (`request.all()`/`body()`/`qs()`/`params()`, Lucid `merge`/`fill`) |
@@ -146,7 +146,23 @@ Two shapes, each proving intent from syntax. **One argument, an integer literal 
 
 The `express:5` gate is the load-bearing part: on Express 4 these signatures *work*, and firing there would be reporting working code. Verified end to end on two fixture apps with byte-identical source — the Express 5 one reports both sites, the Express 4 one reports neither.
 
-Also measured on Express 5.2.1 and deliberately left out, because each is a different mechanism and most fail loudly enough to be caught the moment the server starts: `app.del(…)` and the route patterns `'/files/*'` and `'/:id?'` throw at **boot** (`TypeError`, `PathError`), and `req.param(…)` / `res.sendfile(…)` throw a 500 on the first request. Two silent ones remain uncovered and are candidates for their own rules — `res.redirect("back")` now redirects to the literal path `/back` (measured: 404), and the default query parser changed from `extended` to `simple`, so `?a[b]=c` yields `{ "a[b]": "c" }` and `req.query.a.b` is undefined.
+Also measured on Express 5.2.1 and deliberately left out, because each is a different mechanism and most fail loudly enough to be caught the moment the server starts: `app.del(…)` and the route patterns `'/files/*'` and `'/:id?'` throw at **boot** (`TypeError`, `PathError`), and `req.param(…)` / `res.sendfile(…)` throw a 500 on the first request. One silent break remains uncovered and is a candidate for its own rule: `res.redirect("back")` now redirects to the literal path `/back` (measured: 404). The query-parser change is covered below.
+
+### Express 5 — the query parser that stopped building nested objects
+
+`no-nested-query-on-simple-parser` (Bugs/**error**/high, **project scope**, gated on `express:5`). Express 4's default query parser was `extended` (qs); Express 5's is `simple` (`node:querystring`). MEASURED against Express 5.2.1, serving `?filter[status]=open&tags[]=a&tags[]=b`:
+
+| configuration | `req.query` |
+| --- | --- |
+| default | `{ "filter[status]": "open", "tags[]": ["a","b"] }` |
+| `app.set("query parser", "extended")` | `{ filter: { status: "open" }, tags: ["a","b"] }` |
+| `app.set("query parser", "simple")` | `{ "filter[status]": "open", "tags[]": ["a","b"] }` |
+
+So `req.query.filter.status` is `undefined` under the default. Nothing throws — the filter is simply never applied, so a list endpoint returns **every** row instead of the matching ones, and an authorization narrowing quietly stops narrowing. That is a data-exposure shape rather than a 500, which is why it needs finding rather than waiting for.
+
+**Project scope, because the setting and the read are never in the same file.** `app.set("query parser", …)` lives in the bootstrap; the nested read lives in a controller. A file-scope rule would report a correctly-configured app, which is the release-blocking direction. The rule walks every module in the graph (memoized per graph, so the walk is O(modules) rather than O(modules²)) and any value other than the literal `"simple"` — `"extended"`, a custom function, an identifier it cannot read — silences the whole diagnostic for the project. Uncertainty resolves to silence. Setting it explicitly to `"simple"` is the one value that leaves it firing, and correctly: that is the broken behaviour, opted into by name.
+
+**The soundness hinge is the builtin-member exclusion**, and it is measured, not assumed. Repeated keys still produce arrays under the simple parser (`?ids=a&ids=b` → `{ ids: ["a","b"] }`), so `req.query.ids.length`, `req.query.ids.map(…)` and `req.query.ids[0]` all work — exactly as `req.query.name.trim()` does on the string case. The rule therefore fires only on a read of a **custom** property, one that a string or an array does not already have; the excluded set is every own property name of `String.prototype`, `Array.prototype` and `Object.prototype`, enumerated from the runtime rather than written from memory. What is left is precisely the nested-object assumption, and it is always `undefined`.
 
 ### NestJS — the `@Res()` that stops the response from ever being sent
 

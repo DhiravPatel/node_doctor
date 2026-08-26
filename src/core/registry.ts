@@ -89,6 +89,7 @@ import { nestMissingValidationPipe } from "../diagnostics/http/nest-missing-vali
 import { noBodyOnBodilessStatus } from "../diagnostics/http/no-body-on-bodiless-status.ts";
 import { noErrorResponseWithSuccessStatus } from "../diagnostics/http/no-error-response-with-success-status.ts";
 import { noMissingBodySizeLimit } from "../diagnostics/http/no-missing-body-size-limit.ts";
+import { noNestedQueryOnSimpleParser } from "../diagnostics/http/no-nested-query-on-simple-parser.ts";
 import { noSendAfterNext } from "../diagnostics/http/no-send-after-next.ts";
 import { noSharedCacheAuthenticatedResponse } from "../diagnostics/http/no-shared-cache-authenticated-response.ts";
 import { noStatusCodeAsResponseBody } from "../diagnostics/http/no-status-code-as-response-body.ts";
@@ -264,6 +265,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noBodyOnBodilessStatus,
   noErrorResponseWithSuccessStatus,
   noMissingBodySizeLimit,
+  noNestedQueryOnSimpleParser,
   noSendAfterNext,
   noSharedCacheAuthenticatedResponse,
   noStatusCodeAsResponseBody,
