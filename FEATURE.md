@@ -102,7 +102,7 @@ Understands what a codebase *is* before analyzing it, so rules activate correctl
 
 | Framework | Token | Handlers recognized | Dedicated coverage |
 | --- | --- | --- | --- |
-| Express (4 and 5, version-aware) | ✅ | signature `(req, res)` + registration | **9 rules**, two of them Express-5-only |
+| Express (4 and 5, version-aware) | ✅ | signature `(req, res)` + registration | **10 rules**, three of them Express-5-only |
 | Fastify | ✅ | signature `(request, reply)` + `route({})` | 2 rules |
 | NestJS | ✅ | decorators | 2 rules |
 | AdonisJS | ✅ | `HttpContext` type + decorators | **mass assignment** (`request.all()`/`body()`/`qs()`/`params()`, Lucid `merge`/`fill`) |
@@ -125,6 +125,26 @@ Route registration is matched **framework-agnostically** — any `x.get/post/put
 `no-unreturned-hono-response` (Bugs/**error**/high, gated on the `hono` token). This is the one API difference that catches every developer arriving from Express: `res.json(x)` **sends**, while `c.json(x)` **constructs a `Response` and hands it back**. Hono replies with whatever the handler returns, so discarding it leaves nothing to reply with. MEASURED against Hono 4.13.4 by running each form through `app.request()`: a discarded `c.json`, `c.text`, `c.html`, `c.redirect` or `c.body` all answer **404 "404 Not Found"**, while `return c.json({ ok: true })` answers 200 with the body. The async row is the expensive one — the `await` already ran, so the row was written or the payment taken, and the caller is told the route does not exist; a client that retries on 404 does all of it again. It survives review because the handler reads like Express and the 404 reads like a routing problem, so the search starts in the router rather than in the handler that already ran.
 
 Three structural conditions, and the exclusions were measured rather than assumed. The method must **produce** a Response (`json`/`text`/`html`/`body`/`redirect`/`notFound`/`newResponse`) — the context's side-effecting methods are verified correct when discarded, since `c.header("x-trace","1")` and `c.status(201)` before a returned `c.json(…)` produce a 201 with the right body, and `c.set(…)` stores a variable `c.get(…)` reads back. The result must be **discarded**. And the receiver must be the **first parameter** of a function the engine already recognizes as a handler — the anchor that keeps the rule off every other framework in the same repo, because Express and Fastify both put their response object *second*. Two measured non-defects are deliberately not claimed: `throw new HTTPException(401)` produces a real 401, and middleware calling `next()` **without** `await` still reaches the handler and answers 200 — so the obvious "missing await on next()" rule would be reporting correct code and is not shipped.
+
+### Express 5 — the APIs that are gone, and fail when the route runs
+
+`no-express4-removed-api` (Bugs/**error**/high, gated on `express:5`). MEASURED against Express 5.2.1 by enumerating the live objects inside a running handler rather than reading a changelog:
+
+| Express 4 API | Express 5 | consequence |
+| --- | --- | --- |
+| `req.param(name)` | `undefined` | `TypeError` when the route runs |
+| `req.acceptsCharset/Encoding/Language` | `undefined` | `TypeError` — only the **singular** forms went |
+| `res.sendfile(path)` | `undefined` | `TypeError` — `res.sendFile` (capital F) survives |
+| `req.query = …` | getter | `TypeError` — `req.params =` and `req.body =` still work |
+| `res.redirect("back")` | no magic string | **302 with `Location: back`** — no throw at all |
+
+**The membership line is where the failure happens, not what it is.** Express 5 also removed `app.del(…)` and the route patterns `'/files/*'` / `'/:id?'`; those were measured too and they throw at **boot** (`TypeError`, `PathError`), so the server never starts and nobody needs a linter to find them. Everything in this rule fails only when the route *executes*, so it survives a deploy and waits for whichever request first takes that branch.
+
+The accessors are the nastiest of them, because only the singular forms were removed and the plurals are still there — the fix is one letter, and so is the failure. `res.sendfile` versus `res.sendFile` is the same trap in case rather than number. And `res.redirect("back")` is the one that never throws: Express 4 resolved `"back"` to the Referrer, Express 5 treats it as an ordinary relative path, so the user gets a 404 after an otherwise successful login instead of returning where they came from.
+
+`req.query = sanitize(req.query)` deserves its own note: that is the shape sanitizing middleware uses, and it now throws on the first request through that middleware. The measured contrast matters — `req.params` and `req.body` are still assignable, so only this one member changed.
+
+Gated on `express:5` because every one of these **works** on Express 4. Verified end to end on two fixture apps with byte-identical source: the Express 5 one reports all five sites, the Express 4 one reports none.
 
 ### Express 5 — the status code that becomes the body
 

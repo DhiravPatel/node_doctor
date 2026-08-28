@@ -461,7 +461,11 @@ const runDiagnostics = async (args: ParsedArgs): Promise<number> => {
     rows = rows.filter((r) => args.tags.some((t) => r.tags.includes(t)));
   }
   if (args.framework) {
-    rows = rows.filter((r) => r.requires.includes(args.framework!) || r.requiresAny.includes(args.framework!));
+    // A version-qualified token belongs to its framework: `--framework express`
+    // must surface the `express:5` rules too, or the count disagrees with the docs.
+    const matchesFramework = (token: string): boolean =>
+      token === args.framework || token.startsWith(`${args.framework}:`);
+    rows = rows.filter((r) => r.requires.some(matchesFramework) || r.requiresAny.some(matchesFramework));
   }
   if (args.configured) {
     rows = rows.filter((r) => r.source === "config");

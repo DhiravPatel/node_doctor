@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 183,
-  "defaultOn": 132,
+  "total": 184,
+  "defaultOn": 133,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 65,
     "Maintainability": 16,
     "Reliability": 49,
-    "Bugs": 40
+    "Bugs": 41
   },
   "categoryWeights": {
     "Security": 2,
@@ -1092,6 +1092,25 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use `execFile`/`spawn` with an argument array: `execFile('git', ['clone', url])`. There is no shell to re-parse the arguments, so an interpolated value cannot become a second command."
+    },
+    {
+      "id": "no-express4-removed-api",
+      "title": "Express 4 API removed in Express 5, failing when the route runs",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "express",
+        "http",
+        "migration"
+      ],
+      "requires": [
+        "express:5"
+      ],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use the Express 5 spelling: `req.params.<name>` (or `req.query`/`req.body`) for `req.param(…)`, the PLURAL `req.acceptsCharsets`/`acceptsEncodings`/`acceptsLanguages`, `res.sendFile` with a capital F, and `res.redirect(req.get(\"Referrer\") || \"/\")` for the removed `\"back\"` magic string. For sanitizing, mutate in place or carry a new object — `req.query` is a getter in Express 5 and assigning to it throws. Each of these fails when the route RUNS rather than at boot, so it survives a deploy."
     },
     {
       "id": "no-external-call-inside-open-transaction",

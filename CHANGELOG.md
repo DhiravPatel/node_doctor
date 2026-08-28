@@ -53,6 +53,52 @@ have; the excluded set is every own property name of `String.prototype`,
 written from memory. What is left is precisely the nested-object assumption, and
 it is always `undefined`.
 
+### Express 5: the APIs that are gone, and fail when the route runs
+
+New diagnostic `no-express4-removed-api` (Bugs / `error` / confidence `high`,
+gated on `express:5`). MEASURED against Express 5.2.1 by enumerating the live
+objects inside a running handler rather than reading a changelog:
+
+```
+req.param              → undefined      req.acceptsCharsets   → function
+req.acceptsCharset     → undefined      req.acceptsEncodings  → function
+req.acceptsEncoding    → undefined      req.acceptsLanguages  → function
+req.acceptsLanguage    → undefined      res.sendFile          → function
+res.sendfile           → undefined
+req.query = {…}        → TypeError      req.params = {…}      → ok
+res.redirect("back")   → 302, Location: "back"
+```
+
+**The membership line is where the failure happens, not what it is.** Express 5
+also removed `app.del(…)` and the route patterns `'/files/*'` / `'/:id?'`; those
+were measured too, and they throw at **boot** (`TypeError`, `PathError`), so the
+server never starts and nobody needs a linter to find them. Everything in this
+rule fails only when the route *executes*, so it survives a deploy and waits for
+whichever request first takes that branch — the difference between a migration
+finished in an afternoon and one that pages you at 3am.
+
+The accessors are the nastiest, because only the **singular** forms were removed
+and the plurals are still there: the fix is one letter, and so is the failure.
+`res.sendfile` versus `res.sendFile` is the same trap in case rather than number.
+
+`res.redirect("back")` is the one that never throws. Express 4 resolved `"back"`
+to the Referrer; Express 5 treats it as an ordinary relative path, so the response
+is a 302 with `Location: back` and the browser lands on a sibling URL that does
+not exist — a 404 after an otherwise successful login, instead of returning where
+the user came from.
+
+`req.query = sanitize(req.query)` deserves its own note: that is the shape
+sanitizing middleware uses, and it now throws on the first request through that
+middleware. The measured contrast is what makes the claim precise — `req.params`
+and `req.body` are still assignable, so only this one member changed.
+
+Gated on `express:5`, because every one of these **works** on Express 4 and
+reporting them there would be reporting working code. Verified end to end on two
+fixture apps with byte-identical source: the Express 5 one reports all five sites,
+the Express 4 one reports none.
+
+Express is now at 10 rules, three of them Express-5-only.
+
 ### Express 5: the status code that becomes the body
 
 New diagnostic `no-status-code-as-response-body` (Bugs / `error` / confidence

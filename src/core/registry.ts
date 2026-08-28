@@ -88,6 +88,7 @@ import { fastifyMissingSchema } from "../diagnostics/http/fastify-missing-schema
 import { nestMissingValidationPipe } from "../diagnostics/http/nest-missing-validation-pipe.ts";
 import { noBodyOnBodilessStatus } from "../diagnostics/http/no-body-on-bodiless-status.ts";
 import { noErrorResponseWithSuccessStatus } from "../diagnostics/http/no-error-response-with-success-status.ts";
+import { noExpress4RemovedApi } from "../diagnostics/http/no-express4-removed-api.ts";
 import { noMissingBodySizeLimit } from "../diagnostics/http/no-missing-body-size-limit.ts";
 import { noNestedQueryOnSimpleParser } from "../diagnostics/http/no-nested-query-on-simple-parser.ts";
 import { noSendAfterNext } from "../diagnostics/http/no-send-after-next.ts";
@@ -264,6 +265,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   nestMissingValidationPipe,
   noBodyOnBodilessStatus,
   noErrorResponseWithSuccessStatus,
+  noExpress4RemovedApi,
   noMissingBodySizeLimit,
   noNestedQueryOnSimpleParser,
   noSendAfterNext,
