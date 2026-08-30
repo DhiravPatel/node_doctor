@@ -76,6 +76,8 @@ import { hapiRouteAuthDisabled } from "../diagnostics/frameworks/hapi-route-auth
 import { hapiRouteMissingValidation } from "../diagnostics/frameworks/hapi-route-missing-validation.ts";
 import { noNestResWithoutSend } from "../diagnostics/frameworks/no-nest-res-without-send.ts";
 import { noPeerInconsistentHandler } from "../diagnostics/frameworks/no-peer-inconsistent-handler.ts";
+import { noUnawaitedAdonisAuthCheck } from "../diagnostics/frameworks/no-unawaited-adonis-auth-check.ts";
+import { noUnawaitedHonoBody } from "../diagnostics/frameworks/no-unawaited-hono-body.ts";
 import { noUnawaitedKoaNext } from "../diagnostics/frameworks/no-unawaited-koa-next.ts";
 import { noUnawaitedNextDynamicApi } from "../diagnostics/frameworks/no-unawaited-next-dynamic-api.ts";
 import { noUnreturnedHonoResponse } from "../diagnostics/frameworks/no-unreturned-hono-response.ts";
@@ -253,6 +255,8 @@ export const DIAGNOSTICS: Diagnostic[] = [
   hapiRouteMissingValidation,
   noNestResWithoutSend,
   noPeerInconsistentHandler,
+  noUnawaitedAdonisAuthCheck,
+  noUnawaitedHonoBody,
   noUnawaitedKoaNext,
   noUnawaitedNextDynamicApi,
   noUnreturnedHonoResponse,

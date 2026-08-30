@@ -157,6 +157,8 @@
           "no-tofixed-as-number",
           "no-trust-proxy-true",
           "no-unanchored-security-regex",
+          "no-unawaited-adonis-auth-check",
+          "no-unawaited-hono-body",
           "no-unawaited-koa-next",
           "no-unawaited-next-dynamic-api",
           "no-unbounded-agent-loop",
@@ -214,6 +216,7 @@
       "items": {
         "enum": [
           "access-control",
+          "adonis",
           "agent-artifact",
           "ai",
           "api",
@@ -526,6 +529,8 @@
                 "no-tofixed-as-number",
                 "no-trust-proxy-true",
                 "no-unanchored-security-regex",
+                "no-unawaited-adonis-auth-check",
+                "no-unawaited-hono-body",
                 "no-unawaited-koa-next",
                 "no-unawaited-next-dynamic-api",
                 "no-unbounded-agent-loop",

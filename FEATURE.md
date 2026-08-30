@@ -105,8 +105,8 @@ Understands what a codebase *is* before analyzing it, so rules activate correctl
 | Express (4 and 5, version-aware) | ✅ | signature `(req, res)` + registration | **10 rules**, three of them Express-5-only |
 | Fastify | ✅ | signature `(request, reply)` + `route({})` | 2 rules |
 | NestJS | ✅ | decorators | 2 rules |
-| AdonisJS | ✅ | `HttpContext` type + decorators | **mass assignment** (`request.all()`/`body()`/`qs()`/`params()`, Lucid `merge`/`fill`) |
-| Hono | ✅ | registration | **1 rule** (`no-unreturned-hono-response`) |
+| AdonisJS | ✅ | `HttpContext` type + decorators | **1 rule** + mass-assignment coverage (`request.all()`/`body()`/`qs()`/`params()`, Lucid `merge`/`fill`) |
+| Hono | ✅ | registration | **2 rules** (`no-unreturned-hono-response`, `no-unawaited-hono-body`) |
 | Koa | ✅ | registration + `(ctx, next)` signature, behind Koa evidence | **1 rule** (`no-unawaited-koa-next`) |
 | Hapi | ✅ | `server.route({})` | 2 rules |
 | Restify | ✅ | registration | 1 rule |
@@ -265,6 +265,36 @@ The rule fires only when a call's direct parent is an `ExpressionStatement`, so 
 - **File-level evidence leaked across the file.** One `import Koa from "koa"` promoted every `(ctx, next)` function in it — a fixture helper in a test file, a migration script, a closure nested in an unrelated factory, an in-memory reducer 400 lines below a `@koa/router` import. Evidence is now **per-function**: the file-level import must be joined by that function's own body touching a distinctive Koa context member (`ctx.body`, `ctx.throw`, `ctx.state`, `ctx.request`, …). A reducer reading `ctx.snapshot` no longer qualifies; plain-JS middleware setting `ctx.body` still does.
 
 The remaining recall gaps are stated rather than hidden: a plain-JS standalone middleware that neither annotates its parameters nor touches a distinctive context member is not recognized, and neither is a CommonJS `require("koa")` app (`importsKoa` walks only `ImportDeclaration`, exactly as the Adonis helper does). Both under-report, which is the acceptable direction.
+
+### Hono — the body that is a Promise
+
+`no-unawaited-hono-body` (Bugs/**error**/high, gated on the `hono` token). Hono parses the body when you ask for it, unlike Express where middleware has already filled `req.body` — so the six body readers return Promises and the `await` is load-bearing. MEASURED against Hono 4.13.5 by calling every `c.req` member inside a running handler and asking whether the result is a Promise:
+
+| async — need `await` | synchronous — must never fire |
+| --- | --- |
+| `json`, `text`, `parseBody`, `formData`, `arrayBuffer`, `blob` | `param`, `query`, `queries`, `header`, `valid` |
+
+That split is the whole rule. Measured end to end, a handler doing `const b = c.req.json(); return c.json({ got: b.x })` answers **200 with `{"got":null}`** — the request succeeds, the field is missing, and nothing says why. Reporting `c.req.param("id")` would be reporting correct code, which is why the sets were enumerated from the runtime rather than written from memory.
+
+The Promise must be consumed synchronously to fire: a member access on the call, a destructure of it, or a binding later member-accessed. `await`, `return`, `.then`/`.catch`, `Promise.all([c.req.json(), …])` and a Promise passed onward without ever being read are all silent by construction, as is a discarded call — pointless, but not this defect.
+
+Also measured and deliberately **not** a rule: reading the body twice (`await c.req.json()` then `await c.req.json()`) **works** in Hono 4.13.5, which caches the parsed body. The obvious "body already consumed" rule would have reported correct code.
+
+### AdonisJS — the auth check that never rejects
+
+`no-unawaited-adonis-auth-check` (**Security**/**error**/high, gated on the `adonis` token). Read from the shipped type declarations of `@adonisjs/auth` 9.6.0 and `@adonisjs/bouncer` 3.1.6 — `check(): Promise<boolean>`, `authenticate(): Promise<User>`, `allows(...): Promise<boolean>`, `denies(...): Promise<boolean>`, `authorize(...): Promise<void>` — combined with a fact verified by running it:
+
+```
+Boolean(Promise.resolve(false))  → true
+if (Promise.resolve(false))      → the branch IS taken
+!Promise.resolve(true)           → false
+```
+
+So `if (!auth.check()) return response.unauthorized()` **never returns unauthorized**. The negation of a truthy Promise is `false`, the guard is skipped for every request, and the handler below runs for anonymous callers. That is an authentication bypass written in one missing keyword, and it is invisible in review because the line reads exactly like the correct one. `bouncer.allows(…)` fails the same way and in the same direction — always true, so every caller is authorized. `bouncer.denies(…)` is also always true, which fails *closed*: wrong, but it survives review for about an hour. The bypass direction is the one that ships.
+
+Tests do not catch it either. An authenticated test passes because the branch it expects is the one that runs; an anonymous test passes too, for the wrong reason, unless it asserts the 401 specifically.
+
+The claim is only that a Promise is being used as a boolean. The callee must be one of those predicates on a receiver whose last segment is `auth` or `bouncer` (so `auth.check()`, `ctx.auth.check()` and `this.bouncer.allows(…)` match, while `cache.check()` and `policy.allows(…)` cannot), and the call must sit in a **condition position** — an `if`/`while`/`for`/ternary test, a `&&`/`||`/`??` operand, or under `!`. A call that is awaited, returned, assigned or passed on is not claimed; a floating auth promise is a different defect and `no-floating-promise` already owns it.
 
 ### AdonisJS — the body spelled as a call
 

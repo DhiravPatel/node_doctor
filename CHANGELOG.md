@@ -53,6 +53,69 @@ have; the excluded set is every own property name of `String.prototype`,
 written from memory. What is left is precisely the nested-object assumption, and
 it is always `undefined`.
 
+### Hono and AdonisJS: two Promises used as values
+
+Both frameworks gain a rule for the same underlying mistake in different clothes —
+an async API used as though it were synchronous. Hono goes to 2 rules, AdonisJS to
+1 dedicated rule alongside its mass-assignment coverage.
+
+**Hono — the body that is a Promise.** `no-unawaited-hono-body` (Bugs / `error` /
+`high`). Hono parses the body when you ask for it, unlike Express where middleware
+has already filled `req.body`, so the readers return Promises. MEASURED against
+Hono 4.13.5 by calling every `c.req` member inside a running handler and asking
+whether the result is a Promise:
+
+```
+ASYNC  → json, text, parseBody, formData, arrayBuffer, blob
+sync   → param, query, queries, header, valid
+```
+
+That split is the whole rule. Measured end to end,
+`const b = c.req.json(); return c.json({ got: b.x })` answers **200 with
+`{"got":null}`** — the request succeeds, the field is missing, nothing says why.
+Reporting `c.req.param("id")` would be reporting correct code, which is why both
+sets were enumerated from the runtime rather than written from memory.
+
+Also measured and deliberately **not** a rule: reading the body twice
+(`await c.req.json()` then `await c.req.json()`) **works** — Hono caches the
+parsed body — so the obvious "body already consumed" rule would report correct
+code.
+
+**AdonisJS — the auth check that never rejects.** `no-unawaited-adonis-auth-check`
+(**Security** / `error` / `high`). From the shipped declarations of
+`@adonisjs/auth` 9.6.0 and `@adonisjs/bouncer` 3.1.6 — `check(): Promise<boolean>`,
+`authenticate(): Promise<User>`, `allows(...)`/`denies(...)`: `Promise<boolean>`,
+`authorize(...): Promise<void>` — plus a fact verified by running it:
+
+```
+Boolean(Promise.resolve(false))  → true
+if (Promise.resolve(false))      → the branch IS taken
+!Promise.resolve(true)           → false
+```
+
+So `if (!auth.check()) return response.unauthorized()` **never returns
+unauthorized**: the negation of a truthy Promise is `false`, the guard is skipped
+for every request, and the handler below runs for anonymous callers. An
+authentication bypass in one missing keyword, invisible in review because the line
+reads exactly like the correct one.
+
+`bouncer.allows(…)` fails the same way and in the same direction — always true, so
+every caller is authorized. `bouncer.denies(…)` is also always true, which fails
+*closed*: wrong, but it survives review for about an hour. The bypass direction is
+the one that ships. Tests miss it too — an authenticated test passes because the
+branch it expects is the one that runs, and an anonymous test passes for the wrong
+reason unless it asserts the 401 specifically.
+
+The claim is only that a Promise is being used as a boolean. The receiver's last
+segment must be `auth` or `bouncer` (so `cache.check()` and `policy.allows(…)`
+cannot match), and the call must sit in a **condition position** — an
+`if`/`while`/`for`/ternary test, a `&&`/`||`/`??` operand, or under `!`. Awaited,
+returned, assigned or passed-on calls are not claimed; a floating auth promise is
+a different defect that `no-floating-promise` already owns.
+
+Both verified end to end on fixture apps, with the correct sibling handler in each
+staying silent.
+
 ### Express 5: the APIs that are gone, and fail when the route runs
 
 New diagnostic `no-express4-removed-api` (Bugs / `error` / confidence `high`,

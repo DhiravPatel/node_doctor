@@ -17,7 +17,7 @@ falls over the moment two requests arrive at once.
 npx @dhiravpatel/node-doctor@latest .
 ```
 
-**[node-doctor.vercel.app](https://node-doctor.vercel.app/)** — browse all 184 diagnostics
+**[node-doctor.vercel.app](https://node-doctor.vercel.app/)** — browse all 186 diagnostics
 
 </div>
 
@@ -31,7 +31,7 @@ Express handler with no error path, a `readFileSync` on the request path, an N+1
 across a loop, a `Promise.all` that opens a socket per row, injection and
 secret-handling sinks.
 
-It runs **184 diagnostics** — including a whole-tree scan for **committed secrets**
+It runs **186 diagnostics** — including a whole-tree scan for **committed secrets**
 in `.env`, config, CI, and key files — produces a transparent **0–100 health
 score** entirely on your machine (no network, no telemetry), and can push the
 same knowledge **upstream into your coding agent** as an installable skill and an
@@ -74,7 +74,7 @@ Typical output on a codebase that needs help:
 
 ## Features
 
-- **184 diagnostics** across Security, Reliability, Bugs, Performance, and
+- **186 diagnostics** across Security, Reliability, Bugs, Performance, and
   Maintainability — each with a valid + invalid test; FP-prone ones are opt-in.
 - **Whole-tree secret scan** — committed credentials in `.env`, YAML/CI configs,
   and `*.pem`/`*.key` files, gated to git-tracked files so a local `.env` is safe.

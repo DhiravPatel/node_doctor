@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 184,
-  "defaultOn": 133,
+  "total": 186,
+  "defaultOn": 135,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
-    "Security": 65,
+    "Security": 66,
     "Maintainability": 16,
     "Reliability": 49,
-    "Bugs": 41
+    "Bugs": 42
   },
   "categoryWeights": {
     "Security": 2,
@@ -2380,6 +2380,44 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Anchor the pattern at the start (`/^https:\\/\\/trusted\\.com$/`) so it matches the whole input, not a substring — or, better, parse the value (`new URL(target).host`) and compare the host against an explicit allowlist instead of matching a regex."
+    },
+    {
+      "id": "no-unawaited-adonis-auth-check",
+      "title": "AdonisJS auth check used as a condition without await, so the guard never rejects",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "adonis",
+        "async",
+        "auth"
+      ],
+      "requires": [
+        "adonis"
+      ],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Await it: `if (!(await auth.check())) return response.unauthorized()`, `if (await bouncer.denies(\"edit\", post)) …`. AdonisJS's `auth.check()`, `auth.authenticate()`, `bouncer.allows()`, `bouncer.denies()` and `bouncer.authorize()` all return Promises, and a Promise is truthy whatever it resolves to — so without the `await` the guard's condition has a constant answer and the check is not performed at all."
+    },
+    {
+      "id": "no-unawaited-hono-body",
+      "title": "Hono request body read without await, so every field is undefined",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "async",
+        "hono",
+        "http"
+      ],
+      "requires": [
+        "hono"
+      ],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Await it: `const body = await c.req.json()`. Hono parses the body when you ask for it, so `c.req.json()`, `.text()`, `.parseBody()`, `.formData()`, `.arrayBuffer()` and `.blob()` all return Promises — measured on Hono 4.13.5. Reading a field off the un-awaited call gives `undefined` and the request still answers 200. The synchronous accessors are `c.req.param()`, `.query()`, `.queries()`, `.header()` and `.valid()`, which need no await."
     },
     {
       "id": "no-unawaited-koa-next",
