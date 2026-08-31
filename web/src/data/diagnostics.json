@@ -1,11 +1,11 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 186,
-  "defaultOn": 135,
+  "total": 187,
+  "defaultOn": 136,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
-    "Security": 66,
+    "Security": 67,
     "Maintainability": 16,
     "Reliability": 49,
     "Bugs": 42
@@ -211,17 +211,19 @@
       "severity": "error",
       "scope": "file",
       "tags": [
+        "adonis",
         "express",
         "fastify"
       ],
       "requires": [],
       "requiresAny": [
         "express",
-        "fastify"
+        "fastify",
+        "adonis"
       ],
       "disabledWhen": [],
       "optIn": false,
-      "recommendation": "Prefix the guard's response with `return` (`return res.status(400).json(...)`, `return reply.code(400).send(...)`). A response call does not stop the handler — without `return`, the 'rejected' request runs the protected logic anyway. Express then responds twice (`ERR_HTTP_HEADERS_SENT`); Fastify 5 silently keeps the first response and discards whatever the handler returns, so nothing in the logs marks it."
+      "recommendation": "Prefix the guard's response with `return` (`return res.status(400).json(...)`, `return reply.code(400).send(...)`, `return response.unauthorized(...)`). A response call does not stop the handler — without `return`, the 'rejected' request runs the protected logic anyway. Express then responds twice (`ERR_HTTP_HEADERS_SENT`); Fastify 5 silently keeps the first response; AdonisJS discards the handler's return value once the response has a lazy body, so the caller sees the 401 while everything below the guard has already run. In none of the three does anything appear in the logs."
     },
     {
       "id": "fastify-missing-schema",
@@ -1223,6 +1225,25 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Load secrets from the environment (`process.env.X`) or a secret manager (AWS Secrets Manager, Vault). Never commit a credential — it lives forever in git history and cannot be rotated without a code change."
+    },
+    {
+      "id": "no-hono-exact-path-middleware",
+      "title": "Hono middleware mounted on a bare path, leaving every route beneath it unguarded",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "auth",
+        "hono",
+        "http"
+      ],
+      "requires": [
+        "hono"
+      ],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Add the wildcard: `app.use(\"/admin/*\", requireAdmin)`. Express's `app.use(path, …)` is a prefix mount that covers everything below it, but Hono's `use()` takes an ordinary route pattern, so `\"/admin\"` matches only the single path `/admin` — measured on Hono 4.13.5, `/admin/users` answers 200 unguarded while `/admin` answers 401. Mounting a sub-app with `app.route(\"/admin\", …)` does not change it."
     },
     {
       "id": "no-infinite-retry-without-backoff",

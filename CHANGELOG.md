@@ -53,6 +53,72 @@ have; the excluded set is every own property name of `String.prototype`,
 written from memory. What is left is precisely the nested-object assumption, and
 it is always `undefined`.
 
+### Hono and AdonisJS: two guards that do not guard
+
+Both frameworks gain coverage for a check that looks like it protects something
+and does not. Hono goes to 3 rules, AdonisJS to 2.
+
+**Hono — the middleware that guards one path and nothing under it.**
+`no-hono-exact-path-middleware` (**Security** / `error` / `high`). Express's
+`app.use(path, …)` is a PREFIX mount; Hono's `use()` takes an ordinary route
+pattern. The two read identically and behave differently — an Express habit that
+compiles. MEASURED, the same middleware and routes on both frameworks, requested
+without the required header so a guarded route must answer 401:
+
+```
+Hono 4.13.5    use("/admin")    /admin → 401   /admin/users → 200 UNGUARDED
+                                               /admin/users/1/keys → 200 UNGUARDED
+               use("/admin/*")  all three → 401
+Express 5.2.1  use("/admin")    /admin/users → 401   /admin/users/1/keys → 401
+```
+
+A mounted sub-app does not change it: `use("/admin", auth)` followed by
+`route("/admin", adminRoutes)` still leaves `/admin/users` at **200**. Nothing
+errors, no route 404s, and the guarded parent path behaves exactly as intended —
+so a smoke test of `/admin` passes while every page under it is open. When the
+middleware is an auth check, that is an authorization bypass whose only symptom is
+that the wrong people can read things.
+
+The rule reports only when it can prove there IS something underneath: the same
+file must register a route strictly beneath the path, or mount a sub-app there.
+That is also the stated recall limit — child routes in another file get no
+finding, which under-reports rather than guesses. The receiver must be provably a
+Hono app (its binding initializes to `new Hono(…)`/`new OpenAPIHono(…)` and the
+file imports from `hono`), because the `hono` capability is project-wide and
+Express is the framework where `use("/admin", …)` is **right**. A test pins that
+an Express app in a Hono repo stays silent.
+
+**AdonisJS — the guard that responds without returning.**
+`express-missing-return-after-response` now also covers Adonis
+(`requiresAny: ["express", "fastify", "adonis"]`). The precedence rule is written
+down in the framework itself, `src/router/factories/use_return_value.ts`:
+
+```js
+if (value !== undefined && !ctx.response.hasLazyBody && value !== ctx.response) {
+  ctx.response.send(value);
+}
+```
+
+So once a guard has called `response.unauthorized({ … })`, the response **has** a
+lazy body and whatever the handler returns afterwards is **discarded**. The caller
+does get the 401 — and every line below the guard has already run, with all the
+writes and charges it performs. Adonis spells its terminals as status helpers
+(`response.unauthorized()`, `response.notFound()`, `response.created()`), so the
+rule's existing `TERMINAL` set never matched them and the framework was invisible
+to it.
+
+Those 22 helpers are gated on the `adonis` capability, because `ok`, `created`,
+`conflict` and `gone` are ordinary words elsewhere; a test pins that
+`response.ok()` on an Express project stays silent. `response.abort()` is
+deliberately excluded — it **throws**, so it really does stop the handler and
+needs no `return` — and `status()`/`header()`/`type()` are excluded because they
+set no body.
+
+The finding's message now states the consequence that actually happens on each
+stack: Express responds twice, Adonis discards the return value. Emitting
+Express's wording on an Adonis project would have been a small false claim inside
+a true finding, and a test pins the difference.
+
 ### Hono and AdonisJS: two Promises used as values
 
 Both frameworks gain a rule for the same underlying mistake in different clothes —

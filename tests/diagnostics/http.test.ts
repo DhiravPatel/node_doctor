@@ -1,4 +1,5 @@
 import { describe, test } from "node:test";
+import assert from "node:assert/strict";
 import { expectFires, expectSilent } from "../helpers.ts";
 
 describe("express-async-handler-unprotected", () => {
@@ -35,6 +36,78 @@ describe("express-async-handler-unprotected", () => {
     expectFires(
       "express-async-handler-unprotected",
       `app.get("/u/:id", async (req, res) => { const u = await db.find(req.params.id); res.json(u); });`,
+    );
+  });
+});
+
+/**
+ * The same defect on AdonisJS, whose precedence rule is written down in the
+ * framework: `src/router/factories/use_return_value.ts` sends the handler's
+ * returned value only `if (value !== undefined && !ctx.response.hasLazyBody)`.
+ * So once a guard has called `response.unauthorized({…})` the response HAS a lazy
+ * body, the return value is discarded, and the caller gets the 401 — while every
+ * line below the guard has already run.
+ *
+ * Adonis spells its terminals as status helpers, which are ordinary words
+ * elsewhere, so they are gated on the `adonis` capability.
+ */
+describe("express-missing-return-after-response — AdonisJS", () => {
+  const ADONIS = ["node", "esm", "typescript", "adonis"];
+  const controller = (body: string) =>
+    `export default class C { async index({ auth, response, params }) {\n${body}\n} }`;
+
+  test("fires: a status helper guard with no return", () => {
+    for (const helper of ["unauthorized", "notFound", "badRequest", "forbidden", "conflict"]) {
+      expectFires(
+        "express-missing-return-after-response",
+        controller(`  if (!user) { response.${helper}({ e: 1 }) }\n  const data = await load()\n  return data`),
+        { capabilities: ADONIS },
+      );
+    }
+  });
+
+  test("silent: the guard returns", () => {
+    expectSilent(
+      "express-missing-return-after-response",
+      controller(`  if (!user) { return response.unauthorized({ e: 1 }) }\n  const data = await load()\n  return data`),
+      { capabilities: ADONIS },
+    );
+  });
+
+  test("silent: response.abort() THROWS, so it does stop the handler", () => {
+    expectSilent(
+      "express-missing-return-after-response",
+      controller(`  if (!user) { response.abort('nope') }\n  const data = await load()\n  return data`),
+      { capabilities: ADONIS },
+    );
+  });
+
+  test("silent: status()/header() set no body", () => {
+    expectSilent(
+      "express-missing-return-after-response",
+      controller(`  if (!user) { response.status(401) }\n  const data = await load()\n  return data`),
+      { capabilities: ADONIS },
+    );
+  });
+
+  test("the message states the ADONIS consequence, not Express's", () => {
+    const [found] = expectFires(
+      "express-missing-return-after-response",
+      controller(`  if (!user) { response.unauthorized({ e: 1 }) }\n  const data = await load()\n  return data`),
+      { capabilities: ADONIS },
+    );
+    // Adonis does not respond twice — it discards the handler's return value.
+    assert.match(found!.message, /DISCARDS whatever the handler returns/);
+    assert.doesNotMatch(found!.message, /responds twice/);
+  });
+
+  test("silent: the Adonis helpers are gated off other stacks", () => {
+    // `ok`, `created`, `conflict` and `gone` are ordinary words; on an Express
+    // project they must not become terminals.
+    expectSilent(
+      "express-missing-return-after-response",
+      `app.get("/x", (req, res) => { if (!u) { response.ok({}) }\n const d = load(); res.json(d); });`,
+      { capabilities: ["node", "esm", "express"] },
     );
   });
 });

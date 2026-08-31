@@ -105,8 +105,8 @@ Understands what a codebase *is* before analyzing it, so rules activate correctl
 | Express (4 and 5, version-aware) | ✅ | signature `(req, res)` + registration | **10 rules**, three of them Express-5-only |
 | Fastify | ✅ | signature `(request, reply)` + `route({})` | 2 rules |
 | NestJS | ✅ | decorators | 2 rules |
-| AdonisJS | ✅ | `HttpContext` type + decorators | **1 rule** + mass-assignment coverage (`request.all()`/`body()`/`qs()`/`params()`, Lucid `merge`/`fill`) |
-| Hono | ✅ | registration | **2 rules** (`no-unreturned-hono-response`, `no-unawaited-hono-body`) |
+| AdonisJS | ✅ | `HttpContext` type + decorators | **2 rules** + mass-assignment coverage (`request.all()`/`body()`/`qs()`/`params()`, Lucid `merge`/`fill`) |
+| Hono | ✅ | registration | **3 rules** (unreturned response, un-awaited body, exact-path middleware) |
 | Koa | ✅ | registration + `(ctx, next)` signature, behind Koa evidence | **1 rule** (`no-unawaited-koa-next`) |
 | Hapi | ✅ | `server.route({})` | 2 rules |
 | Restify | ✅ | registration | 1 rule |
@@ -279,6 +279,34 @@ That split is the whole rule. Measured end to end, a handler doing `const b = c.
 The Promise must be consumed synchronously to fire: a member access on the call, a destructure of it, or a binding later member-accessed. `await`, `return`, `.then`/`.catch`, `Promise.all([c.req.json(), …])` and a Promise passed onward without ever being read are all silent by construction, as is a discarded call — pointless, but not this defect.
 
 Also measured and deliberately **not** a rule: reading the body twice (`await c.req.json()` then `await c.req.json()`) **works** in Hono 4.13.5, which caches the parsed body. The obvious "body already consumed" rule would have reported correct code.
+
+### Hono — the middleware that guards one path and nothing under it
+
+`no-hono-exact-path-middleware` (**Security**/**error**/high, gated on the `hono` token). Express's `app.use(path, …)` is a PREFIX mount; Hono's `use()` takes an ordinary route pattern. The two read identically and behave differently, which is the entire defect — an Express habit that compiles. MEASURED, the same middleware and routes on both frameworks, requested without the required header so a guarded route must answer 401:
+
+| framework | mount | `/admin` | `/admin/users` | `/admin/users/1/keys` |
+| --- | --- | --- | --- | --- |
+| Hono 4.13.5 | `use("/admin")` | 401 guarded | **200 UNGUARDED** | **200 UNGUARDED** |
+| Hono 4.13.5 | `use("/admin/*")` | 401 | 401 | 401 |
+| Express 5.2.1 | `use("/admin")` | 401 | 401 | 401 |
+
+A mounted sub-app does not change it: `use("/admin", auth)` followed by `route("/admin", adminRoutes)` still leaves `/admin/users` at **200**. Nothing errors, no route 404s, and the guarded parent path behaves exactly as intended — so a smoke test of `/admin` passes while every page under it is open. When the middleware is an auth check, that is an authorization bypass whose only symptom is that the wrong people can read things.
+
+The rule reports only when it can prove there IS something underneath, so a genuinely single-path mount is never touched: the same file must register a route strictly beneath the path, or mount a sub-app there. That is also the stated recall limit — child routes in another file get no finding, which under-reports rather than guesses. `app.use(mw)` with no path, `"*"`, and anything already ending in a wildcard are all correct and silent. The receiver must be provably a Hono app (its binding initializes to `new Hono(…)`/`new OpenAPIHono(…)` and the file imports from `hono`), because the `hono` capability is project-wide and Express is the framework where `use("/admin", …)` is *right*.
+
+### AdonisJS — the guard that responds without returning
+
+`express-missing-return-after-response` now also covers AdonisJS (`requiresAny: ["express", "fastify", "adonis"]`). Adonis's precedence rule is written down in the framework itself — `src/router/factories/use_return_value.ts`:
+
+```js
+if (value !== undefined && !ctx.response.hasLazyBody && value !== ctx.response) {
+  ctx.response.send(value);
+}
+```
+
+So once a guard has called `response.unauthorized({ … })`, the response **has** a lazy body and whatever the handler returns afterwards is **discarded**. The caller does get the 401 — and every line below the guard has already run, with all the writes and charges it performs. Adonis spells its terminals as status helpers (`response.unauthorized()`, `response.notFound()`, `response.created()`), so the rule's existing `TERMINAL` set never matched them.
+
+Those 22 helpers are gated on the `adonis` capability, because `ok`, `created`, `conflict` and `gone` are ordinary words elsewhere and adding them globally would trade this framework's coverage for another's noise — a test pins that `response.ok()` on an Express project stays silent. `response.abort()` is deliberately excluded: it **throws**, so it really does stop the handler and needs no `return`; `status()`, `header()` and `type()` are excluded because they set no body. The finding's message states the Adonis consequence rather than Express's — Adonis does not respond twice, it discards the return — and a test pins that too.
 
 ### AdonisJS — the auth check that never rejects
 
