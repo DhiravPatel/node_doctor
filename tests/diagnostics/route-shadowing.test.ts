@@ -98,3 +98,71 @@ describe("no-shadowed-route", () => {
     silent(`const router = express.Router();\nrouter.get(buildPath(), show); router.get("/users/me", me);`);
   });
 });
+
+/**
+ * Hono is order-based too, so the same claim holds there. MEASURED on Hono
+ * 4.13.5 by serving each pair:
+ *
+ *   get("*")        then get("/health")  → GET /health  serves "wild"  (dead route)
+ *   get("/health")  then get("*")        → GET /health  serves "health"
+ *   get("/u/:id")   then get("/u/me")    → GET /u/me    serves the param handler
+ *   get("/u/me")    then get("/u/:id")   → GET /u/me    serves "me"
+ *   get("/a")       then get("/a")       → the FIRST registration wins
+ *
+ * Hono has no specificity preference: the first matching registration wins.
+ *
+ * The constraint syntax differs, and it matters. Hono spells it `:id{\d+}` where
+ * Express spells it `:id(\d+)`. Measured: `get("/u/:id{\d+}")` before
+ * `get("/u/me")` serves "me" CORRECTLY, so reading the brace form as an ordinary
+ * parameter would report working code.
+ */
+describe("no-shadowed-route — Hono", () => {
+  const honoCount = (source: string, caps = ["node", "esm", "typescript", "hono"]): number =>
+    lintSource({
+      filePath: "src/app.ts",
+      sourceText: `const app = new Hono();\n${source}`,
+      diagnostics: [noShadowedRoute],
+      capabilities: new Set(caps),
+    }).findings.filter((f) => f.diagnostic === "no-shadowed-route").length;
+
+  test("an earlier wildcard makes a later specific route dead", () => {
+    assert.ok(honoCount(`app.get("*", wild);\napp.get("/health", ok);`) > 0);
+  });
+
+  test("an earlier parameter route swallows a literal sibling", () => {
+    assert.ok(honoCount(`app.get("/u/:id", show);\napp.get("/u/me", me);`) > 0);
+    assert.ok(honoCount(`app.get("/u/:id?", show);\napp.get("/u/me", me);`) > 0);
+  });
+
+  test("silent when the specific route is registered first", () => {
+    assert.equal(honoCount(`app.get("/u/me", me);\napp.get("/u/:id", show);`), 0);
+    assert.equal(honoCount(`app.get("/health", ok);\napp.get("*", wild);`), 0);
+  });
+
+  test("a Hono-style constrained param cannot match, so it never shadows", () => {
+    // Measured: /u/me serves "me" correctly with this registration order.
+    assert.equal(honoCount(`app.get("/u/:id{\\\\d+}", show);\napp.get("/u/me", me);`), 0);
+  });
+
+  test("the Express constraint form is still honoured", () => {
+    assert.equal(honoCount(`app.get("/u/:id(\\\\d+)", show);\napp.get("/u/me", me);`), 0);
+  });
+
+  test("different methods do not shadow", () => {
+    assert.equal(honoCount(`app.post("/u/:id", show);\napp.get("/u/me", me);`), 0);
+  });
+
+  test("still disabled when Fastify is present, whose router is specificity-based", () => {
+    assert.equal(
+      honoCount(`app.get("/u/:id", show);\napp.get("/u/me", me);`, ["node", "esm", "hono", "fastify"]),
+      0,
+    );
+  });
+
+  test("the gate accepts either framework, and neither alone is required", () => {
+    assert.ok(capabilitiesSatisfied(noShadowedRoute, new Set(["node", "esm", "hono"])));
+    assert.ok(capabilitiesSatisfied(noShadowedRoute, new Set(["node", "esm", "express"])));
+    assert.equal(capabilitiesSatisfied(noShadowedRoute, new Set(["node", "esm"])), false);
+    assert.equal(capabilitiesSatisfied(noShadowedRoute, new Set(["node", "esm", "hono", "fastify"])), false);
+  });
+});

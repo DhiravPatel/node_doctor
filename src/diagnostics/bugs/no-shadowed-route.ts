@@ -15,12 +15,30 @@ import { getMethodName, getReceiverName, getStaticStringValue } from "../../core
  * It is the routing bug that survives review because both lines look correct in
  * isolation — only their *order* is wrong.
  *
- * Gated to **Express**, and off when **Fastify** is present, because the whole
- * claim rests on *order-based* matching. Fastify and hapi resolve routes by a
- * radix tree where a static route wins over a parameter route regardless of
+ * Gated to **Express or Hono**, and off when **Fastify** is present, because the
+ * whole claim rests on *order-based* matching. Fastify and hapi resolve routes by
+ * a radix tree where a static route wins over a parameter route regardless of
  * registration order — so `fastify.get("/users/:id")` before `/users/me` is NOT a
  * bug there, and firing on it would be a false positive. Express, Koa-router and
- * restify match top-to-bottom; requiring Express is the sound, high-value subset.
+ * restify match top-to-bottom.
+ *
+ * HONO IS ORDER-BASED TOO, measured on 4.13.5 by serving each pair:
+ *
+ *   get("*")        then get("/health")  → GET /health  serves "wild"  (dead route)
+ *   get("/health")  then get("*")        → GET /health  serves "health"
+ *   get("/u/:id")   then get("/u/me")    → GET /u/me    serves the param handler
+ *   get("/u/me")    then get("/u/:id")   → GET /u/me    serves "me"
+ *   get("/a")       then get("/a")       → the FIRST registration wins
+ *
+ * Hono has no specificity preference at all: the first matching registration
+ * wins, so an earlier wildcard or parameter route makes every later route it
+ * covers unreachable.
+ *
+ * Hono spells a constrained parameter `:id{\d+}` where Express spells it
+ * `:id(\d+)`, and `classifySegment` treats BOTH as constrained. That is not
+ * cosmetic: measured, `get("/u/:id{\d+}")` before `get("/u/me")` serves "me"
+ * correctly — the constraint cannot match — so reading the brace form as an
+ * ordinary parameter would have reported working code.
  *
  * Precision, sound toward silence:
  *  - Only routes on the **same router instance** — resolved through `ctx.scope` to
@@ -62,9 +80,14 @@ type SegKind = { kind: "literal"; value: string } | { kind: "param" } | { kind: 
 const classifySegment = (seg: string): SegKind => {
   if (seg === "*" || seg === "(.*)" || seg === "(.*)?") return { kind: "wildcard" };
   if (seg.startsWith(":")) {
-    // `:id` matches any single segment; `:id(\\d+)` only matches its regex, which
-    // we cannot evaluate — treat as "might not match" so it never shadows.
-    return seg.includes("(") ? { kind: "constrained" } : { kind: "param" };
+    // `:id` matches any single segment; a CONSTRAINED param only matches its
+    // regex, which we cannot evaluate — treat as "might not match" so it never
+    // shadows. Express spells the constraint `:id(\\d+)` and Hono spells it
+    // `:id{\\d+}`, so both brackets count. Measured on Hono 4.13.5:
+    // `get("/u/:id{\\d+}")` before `get("/u/me")` serves "me" correctly, while the
+    // unconstrained `get("/u/:id")` swallows it — so reading the brace form as an
+    // ordinary param would report working code.
+    return seg.includes("(") || seg.includes("{") ? { kind: "constrained" } : { kind: "param" };
   }
   return { kind: "literal", value: seg };
 };
@@ -116,7 +139,7 @@ export const noShadowedRoute = defineDiagnostic({
   confidence: "high",
   // Order-based matching only — see the doc comment. Express guaranteed present;
   // Fastify's tree-router guaranteed absent.
-  requires: ["express"],
+  requiresAny: ["express", "hono"],
   disabledWhen: ["fastify"],
   tags: ["express", "routing"],
   recommendation:

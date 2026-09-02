@@ -53,6 +53,85 @@ have; the excluded set is every own property name of `String.prototype`,
 written from memory. What is left is precisely the nested-object assumption, and
 it is always `undefined`.
 
+### AdonisJS: the validation that never validates
+
+New diagnostic `no-unawaited-adonis-validation` (**Security** / `error` /
+confidence `high`, gated on the `adonis` token). AdonisJS goes to 3 rules.
+
+`request.validateUsing()` returns `Promise<Infer<Schema>>`, read from
+`@adonisjs/core`'s own declaration of `RequestValidator.validateUsing`. MEASURED
+by running the same VineJS validator Adonis uses, against invalid input:
+
+```
+await request.validateUsing(v)  → throws ValidationError → framework sends 422
+      request.validateUsing(v)  → typeof data.email is "undefined"
+                                  data is a Promise
+                                  ValidationError → UNHANDLED REJECTION
+```
+
+Three consequences land at once, and not one of them looks like a validation
+failure:
+
+- **The request is never rejected.** The 422 does not happen, because the
+  exception is inside a promise nobody awaited. Invalid input is accepted.
+- **Every field is `undefined`.** The handler holds a Promise where it expected
+  the payload, so a row is written with empty columns — or a `NOT NULL` violation
+  fires three layers from the cause.
+- **The rejection is unhandled**, which on Node ≥ 15 terminates the process by
+  default.
+
+It survives review because the line is one keyword from the correct one and reads
+as the documented validated-input pattern. It survives tests because a test that
+posts VALID input never produces the rejection, and the undefined fields only
+surface if an assertion looks at them.
+
+The rule claims only that a Promise is being used as the payload. The receiver's
+last segment must be `request`, and the Promise must be consumed synchronously — a
+member read on the call, a destructure, or **a binding used anywhere without ever
+being awaited**. That last form is the one that matters:
+`const payload = request.validateUsing(v); await User.create(payload)` reads no
+field at all, so a member-only check would miss a Promise being written to the
+database. A binding that is awaited later, returned, chained, collected into
+`Promise.all`, or never used at all is silent — the last of those belongs to
+`no-floating-promise`.
+
+Complements `no-unawaited-adonis-auth-check`, which owns the same mistake in a
+CONDITION position, where the consequence is an auth bypass rather than skipped
+validation.
+
+### Hono: routes made unreachable by registration order
+
+`no-shadowed-route` now covers Hono as well as Express
+(`requiresAny: ["express", "hono"]`, still off when Fastify is present). Hono goes
+to 4 rules.
+
+The rule's whole claim rests on **order-based** matching, so extending it needed
+proof that Hono matches that way. Measured on 4.13.5 by serving each pair:
+
+```
+get("*")       then get("/health") → GET /health serves "wild"   (specific route DEAD)
+get("/health") then get("*")       → GET /health serves "health"
+get("/u/:id")  then get("/u/me")   → GET /u/me   serves the param handler (DEAD)
+get("/u/me")   then get("/u/:id")  → GET /u/me   serves "me"
+get("/a")      then get("/a")      → the FIRST registration wins
+```
+
+Hono has no specificity preference at all: the first matching registration wins,
+so an earlier wildcard or parameter route makes every later route it covers
+unreachable. That is the same defect the rule already described, which is why this
+extends rather than duplicates. Fastify and hapi stay excluded — their radix
+routers prefer a static route regardless of registration order, and firing there
+would be a false positive.
+
+**One difference mattered enough to change the engine, and it was nearly a
+shipped false positive.** Hono spells a constrained parameter `:id{\d+}` where
+Express spells it `:id(\d+)`, and `classifySegment` recognised only the
+parenthesised form — so the brace form would have been read as an ordinary
+parameter that matches anything. Measured: `get("/u/:id{\d+}")` before
+`get("/u/me")` serves `"me"` **correctly**, because the constraint cannot match a
+non-numeric segment. Both bracket styles now count as constrained, and a test
+pins each. The Express behaviour is unchanged.
+
 ### Hono and AdonisJS: two guards that do not guard
 
 Both frameworks gain coverage for a check that looks like it protects something

@@ -105,8 +105,8 @@ Understands what a codebase *is* before analyzing it, so rules activate correctl
 | Express (4 and 5, version-aware) | ✅ | signature `(req, res)` + registration | **10 rules**, three of them Express-5-only |
 | Fastify | ✅ | signature `(request, reply)` + `route({})` | 2 rules |
 | NestJS | ✅ | decorators | 2 rules |
-| AdonisJS | ✅ | `HttpContext` type + decorators | **2 rules** + mass-assignment coverage (`request.all()`/`body()`/`qs()`/`params()`, Lucid `merge`/`fill`) |
-| Hono | ✅ | registration | **3 rules** (unreturned response, un-awaited body, exact-path middleware) |
+| AdonisJS | ✅ | `HttpContext` type + decorators | **3 rules** + mass-assignment and guard-without-return coverage |
+| Hono | ✅ | registration | **4 rules** (unreturned response, un-awaited body, exact-path middleware, shadowed routes) |
 | Koa | ✅ | registration + `(ctx, next)` signature, behind Koa evidence | **1 rule** (`no-unawaited-koa-next`) |
 | Hapi | ✅ | `server.route({})` | 2 rules |
 | Restify | ✅ | registration | 1 rule |
@@ -280,6 +280,22 @@ The Promise must be consumed synchronously to fire: a member access on the call,
 
 Also measured and deliberately **not** a rule: reading the body twice (`await c.req.json()` then `await c.req.json()`) **works** in Hono 4.13.5, which caches the parsed body. The obvious "body already consumed" rule would have reported correct code.
 
+### Hono — routes made unreachable by registration order
+
+`no-shadowed-route` now covers Hono as well as Express (`requiresAny: ["express", "hono"]`, still off when Fastify is present). The rule's whole claim rests on **order-based** matching, and Hono qualifies — measured on 4.13.5 by serving each pair:
+
+| registration order | request | serves |
+| --- | --- | --- |
+| `get("*")` then `get("/health")` | `/health` | `"wild"` — the specific route is **dead** |
+| `get("/health")` then `get("*")` | `/health` | `"health"` |
+| `get("/u/:id")` then `get("/u/me")` | `/u/me` | the parameter handler — `/u/me` is **dead** |
+| `get("/u/me")` then `get("/u/:id")` | `/u/me` | `"me"` |
+| `get("/a")` then `get("/a")` | `/a` | the **first** registration |
+
+Hono has no specificity preference at all: the first matching registration wins, so an earlier wildcard or parameter route makes every later route it covers unreachable. That is the same defect the rule already described for Express, which is why it extends rather than duplicates — Fastify and hapi stay excluded because their radix routers prefer a static route regardless of order, and firing there would be a false positive.
+
+**One difference mattered enough to change the engine.** Hono spells a constrained parameter `:id{\d+}` where Express spells it `:id(\d+)`, and `classifySegment` recognised only the parenthesised form. Measured: `get("/u/:id{\d+}")` before `get("/u/me")` serves `"me"` **correctly** — the constraint cannot match a non-numeric segment — so reading the brace form as an ordinary parameter would have reported working code. Both bracket styles now count as constrained, and a test pins each.
+
 ### Hono — the middleware that guards one path and nothing under it
 
 `no-hono-exact-path-middleware` (**Security**/**error**/high, gated on the `hono` token). Express's `app.use(path, …)` is a PREFIX mount; Hono's `use()` takes an ordinary route pattern. The two read identically and behave differently, which is the entire defect — an Express habit that compiles. MEASURED, the same middleware and routes on both frameworks, requested without the required header so a guarded route must answer 401:
@@ -307,6 +323,23 @@ if (value !== undefined && !ctx.response.hasLazyBody && value !== ctx.response) 
 So once a guard has called `response.unauthorized({ … })`, the response **has** a lazy body and whatever the handler returns afterwards is **discarded**. The caller does get the 401 — and every line below the guard has already run, with all the writes and charges it performs. Adonis spells its terminals as status helpers (`response.unauthorized()`, `response.notFound()`, `response.created()`), so the rule's existing `TERMINAL` set never matched them.
 
 Those 22 helpers are gated on the `adonis` capability, because `ok`, `created`, `conflict` and `gone` are ordinary words elsewhere and adding them globally would trade this framework's coverage for another's noise — a test pins that `response.ok()` on an Express project stays silent. `response.abort()` is deliberately excluded: it **throws**, so it really does stop the handler and needs no `return`; `status()`, `header()` and `type()` are excluded because they set no body. The finding's message states the Adonis consequence rather than Express's — Adonis does not respond twice, it discards the return — and a test pins that too.
+
+### AdonisJS — the validation that never validates
+
+`no-unawaited-adonis-validation` (**Security**/**error**/high, gated on the `adonis` token). `request.validateUsing()` returns `Promise<Infer<Schema>>`, read from `@adonisjs/core`'s own declaration of `RequestValidator.validateUsing`. MEASURED by running the same VineJS validator Adonis uses, against invalid input:
+
+| | result |
+| --- | --- |
+| `await request.validateUsing(v)` | throws `ValidationError` → the framework turns it into a **422** |
+| `request.validateUsing(v)` | `typeof data.email` is `"undefined"`; `data` is a Promise; the `ValidationError` arrives as an **unhandled rejection** |
+
+Three consequences land at once and not one of them looks like a validation failure. **The request is never rejected** — the 422 does not happen, because the exception is inside a promise nobody awaited, so invalid input is accepted. **Every field is `undefined`** — the handler holds a Promise where it expected the payload, so a row is written with empty columns, or a `NOT NULL` violation fires three layers from the cause. And **the rejection is unhandled**, which on Node ≥ 15 terminates the process by default.
+
+It survives review because the line is one keyword from the correct one and reads as the documented validated-input pattern. It survives tests because a test that posts VALID input never produces the rejection, and the undefined fields only surface if an assertion looks at them.
+
+The rule claims only that a Promise is being used as the payload. The receiver's last segment must be `request` (so `request.validateUsing(v)` and `ctx.request.validateUsing(v)` match while `schema.validateUsing(…)` cannot), and the Promise must be consumed synchronously — a member read on the call, a destructure, or **a binding used anywhere without ever being awaited**. That last form is the one that matters: `const payload = request.validateUsing(v); await User.create(payload)` reads no field at all, so a member-only check would miss a Promise being written to the database. A binding that is awaited later, returned, chained, collected into `Promise.all`, or never used at all is silent — the last of those belongs to `no-floating-promise`.
+
+Complements `no-unawaited-adonis-auth-check`, which owns the same mistake in a CONDITION position, where the consequence is an auth bypass rather than skipped validation.
 
 ### AdonisJS — the auth check that never rejects
 

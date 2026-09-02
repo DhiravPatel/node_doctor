@@ -78,6 +78,7 @@ import { noHonoExactPathMiddleware } from "../diagnostics/frameworks/no-hono-exa
 import { noNestResWithoutSend } from "../diagnostics/frameworks/no-nest-res-without-send.ts";
 import { noPeerInconsistentHandler } from "../diagnostics/frameworks/no-peer-inconsistent-handler.ts";
 import { noUnawaitedAdonisAuthCheck } from "../diagnostics/frameworks/no-unawaited-adonis-auth-check.ts";
+import { noUnawaitedAdonisValidation } from "../diagnostics/frameworks/no-unawaited-adonis-validation.ts";
 import { noUnawaitedHonoBody } from "../diagnostics/frameworks/no-unawaited-hono-body.ts";
 import { noUnawaitedKoaNext } from "../diagnostics/frameworks/no-unawaited-koa-next.ts";
 import { noUnawaitedNextDynamicApi } from "../diagnostics/frameworks/no-unawaited-next-dynamic-api.ts";
@@ -258,6 +259,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noNestResWithoutSend,
   noPeerInconsistentHandler,
   noUnawaitedAdonisAuthCheck,
+  noUnawaitedAdonisValidation,
   noUnawaitedHonoBody,
   noUnawaitedKoaNext,
   noUnawaitedNextDynamicApi,

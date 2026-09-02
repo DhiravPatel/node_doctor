@@ -1,11 +1,11 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 187,
-  "defaultOn": 136,
+  "total": 188,
+  "defaultOn": 137,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
-    "Security": 67,
+    "Security": 68,
     "Maintainability": 16,
     "Reliability": 49,
     "Bugs": 42
@@ -2030,10 +2030,11 @@
         "express",
         "routing"
       ],
-      "requires": [
-        "express"
+      "requires": [],
+      "requiresAny": [
+        "express",
+        "hono"
       ],
-      "requiresAny": [],
       "disabledWhen": [
         "fastify"
       ],
@@ -2420,6 +2421,25 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Await it: `if (!(await auth.check())) return response.unauthorized()`, `if (await bouncer.denies(\"edit\", post)) …`. AdonisJS's `auth.check()`, `auth.authenticate()`, `bouncer.allows()`, `bouncer.denies()` and `bouncer.authorize()` all return Promises, and a Promise is truthy whatever it resolves to — so without the `await` the guard's condition has a constant answer and the check is not performed at all."
+    },
+    {
+      "id": "no-unawaited-adonis-validation",
+      "title": "AdonisJS request validation not awaited, so the request is never validated",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "adonis",
+        "async",
+        "validation"
+      ],
+      "requires": [
+        "adonis"
+      ],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Await it: `const payload = await request.validateUsing(createUserValidator)`. `validateUsing` returns `Promise<Infer<Schema>>`, so without the `await` the handler holds a Promise instead of the payload — every field reads `undefined`, the 422 the framework would have sent never happens because the ValidationError is inside a promise nobody awaited, and that rejection is unhandled (which terminates the process by default on Node 15+)."
     },
     {
       "id": "no-unawaited-hono-body",
