@@ -82,6 +82,7 @@ import { noUnawaitedAdonisValidation } from "../diagnostics/frameworks/no-unawai
 import { noUnawaitedHonoBody } from "../diagnostics/frameworks/no-unawaited-hono-body.ts";
 import { noUnawaitedKoaNext } from "../diagnostics/frameworks/no-unawaited-koa-next.ts";
 import { noUnawaitedNextDynamicApi } from "../diagnostics/frameworks/no-unawaited-next-dynamic-api.ts";
+import { noUnparsedNestRouteParam } from "../diagnostics/frameworks/no-unparsed-nest-route-param.ts";
 import { noUnreturnedHonoResponse } from "../diagnostics/frameworks/no-unreturned-hono-response.ts";
 import { restifyMissingErrorHandler } from "../diagnostics/frameworks/restify-missing-error-handler.ts";
 // http
@@ -93,6 +94,7 @@ import { nestMissingValidationPipe } from "../diagnostics/http/nest-missing-vali
 import { noBodyOnBodilessStatus } from "../diagnostics/http/no-body-on-bodiless-status.ts";
 import { noErrorResponseWithSuccessStatus } from "../diagnostics/http/no-error-response-with-success-status.ts";
 import { noExpress4RemovedApi } from "../diagnostics/http/no-express4-removed-api.ts";
+import { noFieldStrippedByResponseSchema } from "../diagnostics/http/no-field-stripped-by-response-schema.ts";
 import { noMissingBodySizeLimit } from "../diagnostics/http/no-missing-body-size-limit.ts";
 import { noNestedQueryOnSimpleParser } from "../diagnostics/http/no-nested-query-on-simple-parser.ts";
 import { noSendAfterNext } from "../diagnostics/http/no-send-after-next.ts";
@@ -263,6 +265,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noUnawaitedHonoBody,
   noUnawaitedKoaNext,
   noUnawaitedNextDynamicApi,
+  noUnparsedNestRouteParam,
   noUnreturnedHonoResponse,
   restifyMissingErrorHandler,
   // http
@@ -274,6 +277,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noBodyOnBodilessStatus,
   noErrorResponseWithSuccessStatus,
   noExpress4RemovedApi,
+  noFieldStrippedByResponseSchema,
   noMissingBodySizeLimit,
   noNestedQueryOnSimpleParser,
   noSendAfterNext,

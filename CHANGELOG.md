@@ -11,6 +11,67 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### NestJS: the route param that is a string no matter what the annotation says
+
+New diagnostic `no-unparsed-nest-route-param` (Bugs / `error` / confidence
+`high`, **project scope**, gated on the `nest` token). A `@Param()` / `@Query()`
+binding is always the raw request string. The `number` or `boolean` annotation
+sits on the far side of a decorator, so TypeScript never checks it and
+`design:paramtypes` is the only thing that knows about it. MEASURED against
+NestJS 11 on platform-express, four handlers booted as real servers and fetched
+under three pipelines:
+
+```
+                          no pipe        ValidationPipe()  ValidationPipe({transform:true})
+page + 1  (?page=2)       {"next":"21"}  {"next":"21"}     {"next":3}
+id === 1  (/admin/1)      false          false             true
+deleted ? … (=false)      INCLUDE        INCLUDE           exclude
+if (dry)  (?dry=false)    dry run        dry run           DELETED EVERYTHING
+```
+
+**The middle column is the entire reason this rule exists.** Adding a
+`ValidationPipe` — the thing everyone reaches for, and the thing
+`nest-missing-validation-pipe` asks for — does **not** convert primitives unless
+`transform: true` is set explicitly, so the reflex fix leaves the bug exactly
+where it was.
+
+Nothing throws and no status changes. `id === 1` is an authorization check that
+never matches; `if (dry)` inverts a destructive guard, because the string
+`"false"` is truthy and so is `"true"`. The last row is the real shape of the
+defect: the endpoint behaves correctly right up until someone enables
+`transform: true` for an unrelated reason, and then it deletes everything.
+
+**Project scope, because the conversion is configured in `main.ts` and the lie is
+written in a controller.** The rule walks every module in the graph, memoized per
+graph so the walk is O(modules) rather than O(modules²), and any of three things
+silences the whole project: a `new ValidationPipe({ transform: true })`; a
+`useGlobalPipes(x)` whose argument is not a readable `new ValidationPipe({…})`,
+or whose options are not an object literal, or whose `transform` is not a
+literal; or any mention of `APP_PIPE`, whose options generally live behind a
+factory. Uncertainty resolves to silence. `ValidationPipe()` with no options and
+`ValidationPipe({ transform: false })` are both readable and both measured *not*
+to convert, so they correctly leave the rule firing — and that is the common
+real-world shape.
+
+**Per binding, the rule reports only a use that a string genuinely breaks**, not
+merely one that is typed wrong. A `number` must reach `+` against a numeric
+literal (concatenation, not addition) or `===`/`!==` against a numeric literal
+(never equal); a `boolean` must reach a condition, `!`, `&&`/`||`, or `===`/`!==`
+against a boolean literal. `-`, `*`, `/` and `<`/`>` are deliberately excluded:
+they coerce and the code works — the same line `no-tofixed-as-number` draws, for
+the same reason. Four further silencers, each toward silence: a second argument
+on the decorator is a pipe (`@Param("id", ParseIntPipe)`, measured to convert)
+and takes the binding out whatever it is; `@UsePipes` on the method or the class
+is the local form of the same configuration; any parameter decorator the rule
+does not model could itself transform; and the name must be neither re-declared,
+re-assigned, nor taken as a nested function's own parameter anywhere in the body,
+so `id = Number(id)` and every shadowing inner binding are out.
+
+Verified end to end on a two-file fixture: the finding fires on `id === 1` and
+`if (dry)` in the controller while `main.ts` calls
+`useGlobalPipes(new ValidationPipe({ whitelist: true }))`, and adding
+`transform: true` to that same call in the other file silences both.
+
 ### Express 5: the query parser that stopped building nested objects
 
 New diagnostic `no-nested-query-on-simple-parser` (Bugs / `error` / confidence
@@ -52,6 +113,56 @@ have; the excluded set is every own property name of `String.prototype`,
 `Array.prototype` and `Object.prototype`, enumerated from the runtime rather than
 written from memory. What is left is precisely the nested-object assumption, and
 it is always `undefined`.
+
+### Fastify: the response schema that silently drops fields
+
+New diagnostic `no-field-stripped-by-response-schema` (Bugs / `error` / confidence
+`high`, gated on the `fastify` token). Fastify goes to 3 rules.
+
+Fastify's response schema is a **serializer**, not a validator: it compiles with
+fast-json-stringify and emits exactly the declared properties. MEASURED against
+Fastify 5.12.1, one handler returning `{ id, email, role, createdAt }` under four
+schemas:
+
+```
+properties: { id }                             → {"id":"u1"}   ← three fields gone
+properties: { id, email, role, createdAt }     → all four present
+no response schema at all                      → all four present
+properties: { id }, additionalProperties: true → all four present
+```
+
+Nothing warns. The status is 200 and the body is well-formed JSON — the field is
+simply not there, so the failure surfaces in the client as an undefined property,
+or as a column that quietly stops being populated downstream. It is the specific
+cost of Fastify's headline performance feature, and it bites exactly when someone
+adds a field to a handler without also adding it to the schema, which is the
+normal way that edit happens.
+
+The rule reports a key only when it can enumerate **both** sides statically:
+
+- The route's options carry `schema.response.<status>` as an object literal with
+  a literal `properties` object. A schema from a helper, a `$ref`, or a variable
+  is unreadable and never reported.
+- `additionalProperties: true` is the documented escape hatch, verified to keep
+  every field, and silences the route outright.
+- The handler returns an object literal whose keys are all static. A returned
+  identifier, a call, or a literal containing a spread is left alone —
+  `{ ...user, token }` proves nothing about `user`'s keys.
+- A key must be missing from **every** declared status, not just one. A handler
+  with a 200 shape and a 404 shape returns literals matching different schemas,
+  and demanding a match against all of them would report both.
+
+Deliberately not claimed: `reply.send({ … })`, where the same stripping applies
+but the value reaches the serializer by a different path; and a schema declaring a
+property the handler never returns, which is harmless — fast-json-stringify simply
+omits it.
+
+Also measured and deliberately **not** a rule: an `async` hook that also takes the
+`done` callback throws `FST_ERR_HOOK_INVALID_ASYNC_HANDLER` at **registration**,
+so the server never starts and a linter adds nothing.
+
+Complements `fastify-missing-schema`, which is about routes with no schema; this
+one is about a schema that is present and quietly wrong.
 
 ### AdonisJS: the validation that never validates
 

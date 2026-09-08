@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 188,
-  "defaultOn": 137,
+  "total": 190,
+  "defaultOn": 139,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 68,
     "Maintainability": 16,
     "Reliability": 49,
-    "Bugs": 42
+    "Bugs": 44
   },
   "categoryWeights": {
     "Security": 2,
@@ -1129,6 +1129,25 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Do the external I/O before the transaction (pass the result in) or after it commits — keep the `$transaction` callback pure DB work. A network round trip inside it pins the connection and holds row locks for the upstream's full latency."
+    },
+    {
+      "id": "no-field-stripped-by-response-schema",
+      "title": "Fastify handler returns a field the response schema does not declare, so it is dropped",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "fastify",
+        "http"
+      ],
+      "requires": [
+        "fastify"
+      ],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Add the field to the response schema's `properties`, or set `additionalProperties: true` on that status if the shape is deliberately open. Fastify's response schema is a SERIALIZER, not a validator — it compiles with fast-json-stringify and emits exactly the declared properties, so anything else is silently dropped with a 200 and a well-formed body. Measured on Fastify 5.12.1: a handler returning `{ id, email, role, createdAt }` under a schema declaring only `id` answers `{\"id\":\"u1\"}`."
     },
     {
       "id": "no-findmany-then-filter-in-js",
@@ -2703,6 +2722,25 @@
       "disabledWhen": [],
       "optIn": true,
       "recommendation": "Normalize both sides before comparing: `a.normalize(\"NFKC\").toLowerCase() === b.normalize(\"NFKC\").toLowerCase()` (normalize first, case-fold after), or compare a stored canonical form. Case-folding and trimming do not collapse homoglyphs or compatibility characters, so `admin` and `аdmin` (Cyrillic `а`) stay distinct."
+    },
+    {
+      "id": "no-unparsed-nest-route-param",
+      "title": "NestJS route param typed number or boolean arrives as a string, and is used as one",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "project",
+      "tags": [
+        "correctness",
+        "http",
+        "nest"
+      ],
+      "requires": [
+        "nest"
+      ],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Attach a pipe to the binding (`@Param(\"id\", ParseIntPipe)`, `@Query(\"dry\", ParseBoolPipe)`), or enable `app.useGlobalPipes(new ValidationPipe({ transform: true }))`. A `@Param()`/`@Query()` value is always the raw request string: measured on NestJS 11, `@Param(\"id\") id: number` gives `\"1\"`, so `id === 1` is false, and `@Query(\"dry\") dry: boolean` gives the truthy string `\"false\"` for `?dry=false`. A plain `new ValidationPipe()` does NOT convert primitives — only `transform: true` does."
     },
     {
       "id": "no-unpinned-dependency",

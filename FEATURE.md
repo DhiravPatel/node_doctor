@@ -103,8 +103,8 @@ Understands what a codebase *is* before analyzing it, so rules activate correctl
 | Framework | Token | Handlers recognized | Dedicated coverage |
 | --- | --- | --- | --- |
 | Express (4 and 5, version-aware) | ✅ | signature `(req, res)` + registration | **10 rules**, three of them Express-5-only |
-| Fastify | ✅ | signature `(request, reply)` + `route({})` | 2 rules |
-| NestJS | ✅ | decorators | 2 rules |
+| Fastify | ✅ | signature `(request, reply)` + `route({})` | **3 rules** |
+| NestJS | ✅ | decorators | 3 rules |
 | AdonisJS | ✅ | `HttpContext` type + decorators | **3 rules** + mass-assignment and guard-without-return coverage |
 | Hono | ✅ | registration | **4 rules** (unreturned response, un-awaited body, exact-path middleware, shadowed routes) |
 | Koa | ✅ | registration + `(ctx, next)` signature, behind Koa evidence | **1 rule** (`no-unawaited-koa-next`) |
@@ -203,6 +203,27 @@ The cost is worse than a wrong response. The socket stays open until the client 
 
 Four structural conditions, and the analysis defaults to silence wherever it cannot prove the response was left unsent: an HTTP-method decorator on the method; a parameter decorated `@Res()`/`@Response()` **without** `{ passthrough: true }` (the documented escape hatch, verified to answer 200 both with and without a header write); a `return` carrying a value, not counting returns inside nested functions; and no use of the response parameter that could send. A terminal method anywhere in its member chain silences it — `send`, `json`, `end`, `sendFile`, `redirect`, `render`, `download`, `write`, `pipe` — including through `res.status(201).json(x)`. So does **any** other use of the binding: passed as an argument (`stream.pipe(res)`), aliased, returned, spread. Only the provably-benign member reads (`res.setHeader(…)`) leave the finding standing, and those are exactly the measured hang.
 
+### NestJS — the route param that is a string no matter what the annotation says
+
+`no-unparsed-nest-route-param` (Bugs/**error**/high, **project scope**, gated on the `nest` token). A `@Param()` / `@Query()` binding is always the raw request string. The `number` or `boolean` annotation sits on the far side of a decorator, so TypeScript never checks it and `design:paramtypes` is the only thing that knows about it. MEASURED against NestJS 11 on platform-express, four handlers booted as real servers and fetched under three pipelines:
+
+| handler | no pipe | `ValidationPipe()` | `ValidationPipe({ transform: true })` |
+| --- | --- | --- | --- |
+| `page + 1` on `?page=2` | `{"next":"21"}` | `{"next":"21"}` | `{"next":3}` |
+| `id === 1` on `/admin/1` | `false` | `false` | `true` |
+| `deleted ? … : …` on `?deleted=false` | INCLUDE deleted | INCLUDE deleted | exclude deleted |
+| `if (dry)` on `?dry=false` | dry run | dry run | **DELETED EVERYTHING** |
+
+**The middle column is the entire reason this rule exists.** Adding a `ValidationPipe` — the thing everyone reaches for, and the thing `nest-missing-validation-pipe` asks for — does **not** convert primitives unless `transform: true` is set explicitly. So the reflex fix leaves the bug exactly where it was, and the annotation keeps lying.
+
+Nothing throws and no status changes. `id === 1` is an authorization check that never matches. `if (dry)` inverts a destructive guard, because the string `"false"` is truthy and so is `"true"` — which makes the last row the real shape of the defect: the endpoint behaves correctly right up until someone enables `transform: true` for an unrelated reason, and then it deletes everything.
+
+**Project scope, because the conversion is configured in `main.ts` and the lie is written in a controller.** The rule walks every module in the graph (memoized per graph, so O(modules) rather than O(modules²)) and any of three things silences the whole project: a `new ValidationPipe({ transform: true })`; a `useGlobalPipes(x)` whose argument is not a readable `new ValidationPipe({…})`, or whose options are not an object literal, or whose `transform` is not a literal; or any mention of `APP_PIPE`, whose options generally live behind a factory. Uncertainty resolves to silence. `ValidationPipe()` with no options and `ValidationPipe({ transform: false })` are both readable and both measured *not* to convert, so they correctly leave the rule firing — and that is the common real-world shape.
+
+**Per binding, the rule reports only a use that a string genuinely breaks — not merely one that is typed wrong.** A `number` must reach `+` against a numeric literal (concatenation, not addition) or `===`/`!==` against a numeric literal (never equal). A `boolean` must reach a condition, `!`, `&&`/`||`, or `===`/`!==` against a boolean literal. `-`, `*`, `/` and `<`/`>` are deliberately excluded: they coerce and the code works. That is the same line `no-tofixed-as-number` draws, for the same reason — a string standing in for a number is a defect only where the operator does not coerce.
+
+Four further silencers, each toward silence: a second argument on the decorator is a pipe (`@Param("id", ParseIntPipe)`, measured to convert) and takes the binding out whatever it is; `@UsePipes` on the method or the class is the local form of the same configuration; any parameter decorator the rule does not model could itself transform; and the name must be neither re-declared, re-assigned, nor taken as a nested function's own parameter anywhere in the body, so `id = Number(id)` and every shadowing inner binding are out. The scope resolver does not model nested blocks, so that last one is deliberately a whole-body name check rather than a resolution.
+
 ### Next.js — the dynamic API that is a Promise now
 
 `no-unawaited-next-dynamic-api` (Bugs/**error**/high, gated on the `next` token). Since Next 15, `cookies()`, `headers()` and `draftMode()` from `next/headers` return **Promises**, so every property read on the un-awaited call is `undefined`. Verified twice over, against Next 16.3.2: the shipped declarations export `cookies(): Promise<ReadonlyRequestCookies>`, and a running dev server confirmed the behaviour end to end —
@@ -279,6 +300,25 @@ That split is the whole rule. Measured end to end, a handler doing `const b = c.
 The Promise must be consumed synchronously to fire: a member access on the call, a destructure of it, or a binding later member-accessed. `await`, `return`, `.then`/`.catch`, `Promise.all([c.req.json(), …])` and a Promise passed onward without ever being read are all silent by construction, as is a discarded call — pointless, but not this defect.
 
 Also measured and deliberately **not** a rule: reading the body twice (`await c.req.json()` then `await c.req.json()`) **works** in Hono 4.13.5, which caches the parsed body. The obvious "body already consumed" rule would have reported correct code.
+
+### Fastify — the response schema that silently drops fields
+
+`no-field-stripped-by-response-schema` (Bugs/**error**/high, gated on the `fastify` token). Fastify's response schema is a **serializer**, not a validator: it compiles with fast-json-stringify and emits exactly the declared properties. MEASURED against Fastify 5.12.1, one handler returning `{ id, email, role, createdAt }` under four schemas:
+
+| schema | response |
+| --- | --- |
+| `properties: { id }` | `{"id":"u1"}` — **three fields gone** |
+| `properties: { id, email, role, createdAt }` | all four present |
+| no response schema at all | all four present |
+| `properties: { id }`, `additionalProperties: true` | all four present |
+
+Nothing warns. The status is 200 and the body is well-formed JSON — the field is simply not there, so the failure surfaces in the client as an undefined property, or as a column that quietly stops being populated downstream. It is the specific cost of Fastify's headline performance feature, and it bites exactly when someone adds a field to a handler without also adding it to the schema, which is the normal way that edit happens.
+
+The rule reports a key only when it can enumerate **both** sides statically. The route's options must carry `schema.response.<status>` as an object literal with a literal `properties` object — a schema from a helper, a `$ref` or a variable is unreadable and never reported. `additionalProperties: true` is the documented escape hatch, verified to keep every field, and silences the route outright. The handler must return an object literal whose keys are all static, so a returned identifier, a call, or a literal containing a spread is left alone — `{ ...user, token }` proves nothing about `user`'s keys. And a key must be missing from **every** declared status, not just one: a handler with a 200 shape and a 404 shape returns literals matching different schemas, and demanding a match against all of them would report both.
+
+Also measured and deliberately **not** a rule: an `async` hook that also takes the `done` callback throws `FST_ERR_HOOK_INVALID_ASYNC_HANDLER` at **registration**, so the server never starts and a linter adds nothing.
+
+Complements `fastify-missing-schema`, which is about routes with no schema; this one is about a schema that is present and quietly wrong.
 
 ### Hono — routes made unreachable by registration order
 
