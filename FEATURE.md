@@ -113,7 +113,7 @@ Understands what a codebase *is* before analyzing it, so rules activate correctl
 | Sails.js | ✅ | registration | — |
 | Feathers | ✅ | registration | — |
 | LoopBack | ✅ | registration | — |
-| Next.js API routes / Route Handlers | ✅ | exported `GET`/`POST`/… in a route file | **1 rule** (`no-unawaited-next-dynamic-api`) |
+| Next.js App Router | ✅ | exported `GET`/`POST`/… in a route file; the `app/` file convention | **2 rules** (`no-unawaited-next-dynamic-api`, `no-unawaited-next-route-params`), both gated on `next:15` |
 | Remix API / actions & loaders | ✅ | `loader` / `action` signature | — |
 | Serverless Framework | ✅ | registration | — |
 | Meteor | Planned | — | — |
@@ -223,6 +223,32 @@ Nothing throws and no status changes. `id === 1` is an authorization check that 
 **Per binding, the rule reports only a use that a string genuinely breaks — not merely one that is typed wrong.** A `number` must reach `+` against a numeric literal (concatenation, not addition) or `===`/`!==` against a numeric literal (never equal). A `boolean` must reach a condition, `!`, `&&`/`||`, or `===`/`!==` against a boolean literal. `-`, `*`, `/` and `<`/`>` are deliberately excluded: they coerce and the code works. That is the same line `no-tofixed-as-number` draws, for the same reason — a string standing in for a number is a defect only where the operator does not coerce.
 
 Four further silencers, each toward silence: a second argument on the decorator is a pipe (`@Param("id", ParseIntPipe)`, measured to convert) and takes the binding out whatever it is; `@UsePipes` on the method or the class is the local form of the same configuration; any parameter decorator the rule does not model could itself transform; and the name must be neither re-declared, re-assigned, nor taken as a nested function's own parameter anywhere in the body, so `id = Number(id)` and every shadowing inner binding are out. The scope resolver does not model nested blocks, so that last one is deliberately a whole-body name check rather than a resolution.
+
+### Next.js — the route params that are a Promise now, and answer 200 with nothing
+
+`no-unawaited-next-route-params` (Bugs/**error**/high, gated on `next:15`). Since Next 15 the App Router's `params` and `searchParams` props are **Promises**. MEASURED against a running Next 16.3.4 server, every case a real route fetched over HTTP:
+
+| file and signature | read | result |
+| --- | --- | --- |
+| `route.js` `GET(req, { params })` | `params.id` | **200** `{"id":"undefined"}` |
+| `route.js` `GET(req, { params })` | `params?.id ?? "MISS"` | **200** `{"…":"MISS"}` |
+| `route.js` `GET(req, { params: {id} })` | `id` | **200** `{"id":"undefined"}` |
+| `route.js` `GET(req, ctx)` | `ctx.params.id` | **200** `{"id":"undefined"}` |
+| `page.js` `Page({ params, searchParams })` | both | **200**, both `"undefined"` |
+| `page.js` `generateMetadata({ params })` | `params.id` | `<title>user undefined</title>` |
+| `route.js` `GET(req, { params })` | `await params` | **200** `{"id":"abc"}` ✅ |
+
+`typeof params.then` was `"function"` in every failing case, confirming the value really is the Promise. **The server log was empty** — no warning, no error, not one line across any of them.
+
+**That silence is the whole argument for the rule.** Its sibling `no-unawaited-next-dynamic-api` catches `cookies().get(…)`, which throws a 500 and makes Next log a specific complaint; this one answers 200 with the field quietly missing. A handler that does `db.find(params.id)` looks up `undefined`, and `params?.id ?? fallback` — the spelling a careful developer reaches for — takes the fallback forever without ever failing. Neither the client nor the server has anything to notice.
+
+**The anchor is the App Router file convention, checked before anything else**, because that is the only place these props exist: the path must contain an `app/` segment and the basename must be one of Next's reserved names — `page`, `layout`, `route`, `default`. A Pages Router file can never match, which matters, since `getServerSideProps({ params })` receives a plain **object** and reporting it would be reporting correct code. In `route.*` the props are the **second** parameter of an exported HTTP method; in the view files they are the **first** parameter of the default export or of an exported `generateMetadata`. `searchParams` is claimed only for `page` — a layout is not re-rendered on a query-string change and does not receive it, and a route handler never does.
+
+**Gated on `next:15`, a new capability token granted only when the manifest's `next` range has a readable major of 15 or more**, mirroring `express:5`. This is not decoration: on Next 14 `params` is a plain object and the synchronous spelling is *correct*, so a version-blind rule would report working code. A range with no readable major (`latest`, `canary`, `*`) grants nothing and both Next rules stay silent.
+
+**`no-unawaited-next-dynamic-api` was moved onto the same gate in this pass, and that is a correction rather than a tidy-up.** It had shipped on the bare `next` token, with a docblock arguing that a modern manifest means 15 or 16 anyway and that a Next 14 project upgrading would get a finding already true of the version it was moving to. That reasoning was wrong in the release-blocking direction: on Next 14, `cookies()` **is** synchronous, so the rule was reporting correct code in exactly the projects least able to act on it. A test now pins the Next 14 silence for both rules.
+
+The consumption model is shared with the sibling rule. Wrong: a member read (`params.id`, `params[key]`), a destructure (`const { id } = params`, and `{ params: { id } }` in the signature), and a spread — `{ ...params }` yields `{}`, because a Promise has no own enumerable properties. Correct and silent: `await`, `use(params)` / `React.use(params)` (the client-component form), `.then` / `.catch` / `.finally`, and passing the Promise onward unread. A binding that is re-declared, re-assigned, or shadowed by a nested function's own parameter is dropped entirely.
 
 ### Next.js — the dynamic API that is a Promise now
 

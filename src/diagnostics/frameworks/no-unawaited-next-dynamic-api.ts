@@ -62,10 +62,13 @@ import type { Binding } from "../../core/scope.ts";
  * A binding assigned a bare call but never member-accessed is also silent —
  * passing the Promise onward is legitimate.
  *
- * Gated on the `next` capability. It is deliberately NOT version-gated: the
- * async signature landed in Next 15 and `next` in a modern manifest means 15 or
- * 16, while a Next 14 project that upgrades gets a finding that is already true
- * of the version it is moving to.
+ * Gated on `next:15`, granted only when the manifest's `next` range has a
+ * readable major of 15 or more. The rule previously took the bare `next` token
+ * on the argument that a modern manifest means 15 or 16 anyway; that was wrong
+ * in the release-blocking direction, because on Next 14 `cookies()` IS
+ * synchronous and the reported spelling is correct code. A range with no
+ * readable major (`latest`, `canary`, `*`) grants nothing and the rule stays
+ * silent.
  */
 
 /** The `next/headers` exports that became async in Next 15. */
@@ -97,7 +100,7 @@ export const noUnawaitedNextDynamicApi = defineDiagnostic({
   severity: "error",
   category: "Bugs",
   confidence: "high",
-  requires: ["next"],
+  requires: ["next:15"],
   tags: ["next", "async", "auth"],
   recommendation:
     "Await it: `const c = await cookies()`, or `(await cookies()).get(\"session\")`. Since Next 15 `cookies()`, `headers()` and `draftMode()` return Promises — Next 16 removed the synchronous-access shim — so reading a property off the un-awaited call yields `undefined`. `React.use(cookies())` is the other supported form. Watch for optional chaining (`c?.get?.(…)`) around one of these: it converts the TypeError into a check that silently always fails.",

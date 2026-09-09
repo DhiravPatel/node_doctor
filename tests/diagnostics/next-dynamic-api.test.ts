@@ -28,15 +28,17 @@ import assert from "node:assert/strict";
 import { lintSource } from "../../src/core/scan.ts";
 import { noUnawaitedNextDynamicApi } from "../../src/diagnostics/frameworks/no-unawaited-next-dynamic-api.ts";
 
-const CAPS = new Set(["node", "esm", "typescript", "next"]);
+const CAPS = new Set(["node", "esm", "typescript", "next", "next:15"]);
+/** A Next 14 manifest grants `next` but NOT `next:15`, where `cookies()` is synchronous. */
+const NEXT_14 = new Set(["node", "esm", "typescript", "next"]);
 const IMPORT = `import { cookies, headers, draftMode } from "next/headers";\n`;
 
-const findings = (body: string, prelude = IMPORT) =>
+const findings = (body: string, prelude = IMPORT, capabilities = CAPS) =>
   lintSource({
     filePath: "/repo/app/api/users/route.ts",
     sourceText: prelude + body,
     diagnostics: [noUnawaitedNextDynamicApi],
-    capabilities: CAPS,
+    capabilities,
   }).findings.filter((f) => f.diagnostic === "no-unawaited-next-dynamic-api");
 
 const fires = (body: string, prelude?: string) => {
@@ -164,6 +166,16 @@ describe("no-unawaited-next-dynamic-api", () => {
 
     test("a computed member access is not claimed", () => {
       silent(`export async function GET() { return Response.json(cookies()["get"]("s")); }`);
+    });
+  });
+
+  describe("the version gate", () => {
+    test("a Next 14 manifest is silent, because cookies() is synchronous there", () => {
+      // `next:15` is granted only when the manifest's `next` range reads as >= 15.
+      // Reporting this spelling on Next 14 would be reporting correct code.
+      const body = `export async function GET() { return Response.json(cookies().get("session")); }`;
+      assert.ok(findings(body).length > 0, "expected a FIRE under next:15");
+      assert.equal(findings(body, IMPORT, NEXT_14).length, 0, "expected SILENCE under Next 14");
     });
   });
 });

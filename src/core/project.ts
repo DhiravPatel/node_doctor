@@ -114,6 +114,7 @@ export const GRANTABLE_CAPABILITIES: ReadonlySet<string> = new Set<string>([
   "cjs",
   "typescript",
   "express:5",
+  "next:15",
   "bun",
   "deno",
   "edge",
@@ -168,6 +169,14 @@ export const detectCapabilities = (
     if (dep === "express") {
       const major = majorVersion(version);
       if (major !== null && major >= 5) caps.add("express:5");
+    }
+    // Next 15 turned `params`, `searchParams`, `cookies()`, `headers()` and
+    // `draftMode()` into Promises. On Next 14 the synchronous spelling of all
+    // five is CORRECT, so the rules that report it must not run there. A range
+    // with no readable major (`latest`, `canary`, `*`) grants nothing.
+    if (dep === "next") {
+      const major = majorVersion(version);
+      if (major !== null && major >= 15) caps.add("next:15");
     }
   }
 

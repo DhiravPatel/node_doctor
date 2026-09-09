@@ -82,6 +82,7 @@ import { noUnawaitedAdonisValidation } from "../diagnostics/frameworks/no-unawai
 import { noUnawaitedHonoBody } from "../diagnostics/frameworks/no-unawaited-hono-body.ts";
 import { noUnawaitedKoaNext } from "../diagnostics/frameworks/no-unawaited-koa-next.ts";
 import { noUnawaitedNextDynamicApi } from "../diagnostics/frameworks/no-unawaited-next-dynamic-api.ts";
+import { noUnawaitedNextRouteParams } from "../diagnostics/frameworks/no-unawaited-next-route-params.ts";
 import { noUnparsedNestRouteParam } from "../diagnostics/frameworks/no-unparsed-nest-route-param.ts";
 import { noUnreturnedHonoResponse } from "../diagnostics/frameworks/no-unreturned-hono-response.ts";
 import { restifyMissingErrorHandler } from "../diagnostics/frameworks/restify-missing-error-handler.ts";
@@ -265,6 +266,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noUnawaitedHonoBody,
   noUnawaitedKoaNext,
   noUnawaitedNextDynamicApi,
+  noUnawaitedNextRouteParams,
   noUnparsedNestRouteParam,
   noUnreturnedHonoResponse,
   restifyMissingErrorHandler,

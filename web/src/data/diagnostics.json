@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 190,
-  "defaultOn": 139,
+  "total": 191,
+  "defaultOn": 140,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 68,
     "Maintainability": 16,
     "Reliability": 49,
-    "Bugs": 44
+    "Bugs": 45
   },
   "categoryWeights": {
     "Security": 2,
@@ -2510,12 +2510,31 @@
         "next"
       ],
       "requires": [
-        "next"
+        "next:15"
       ],
       "requiresAny": [],
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Await it: `const c = await cookies()`, or `(await cookies()).get(\"session\")`. Since Next 15 `cookies()`, `headers()` and `draftMode()` return Promises — Next 16 removed the synchronous-access shim — so reading a property off the un-awaited call yields `undefined`. `React.use(cookies())` is the other supported form. Watch for optional chaining (`c?.get?.(…)`) around one of these: it converts the TypeError into a check that silently always fails."
+    },
+    {
+      "id": "no-unawaited-next-route-params",
+      "title": "Next.js params/searchParams read without await, so every field is undefined",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "async",
+        "http",
+        "next"
+      ],
+      "requires": [
+        "next:15"
+      ],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Await it: `const { id } = await params`, or `const { q } = await searchParams`. Since Next 15 both props are Promises — measured on Next 16.3.4, `params.id` in a route handler answers **200** with `\"undefined\"` and the server logs nothing at all. In a client component use `React.use(props.params)` instead. Watch for the defensive spelling `params?.id ?? fallback`: it takes the fallback forever without ever failing."
     },
     {
       "id": "no-unbounded-agent-loop",

@@ -11,6 +11,70 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Next.js: the route params that are a Promise now, and answer 200 with nothing
+
+New diagnostic `no-unawaited-next-route-params` (Bugs / `error` / confidence
+`high`), and a new capability token `next:15`.
+
+Since Next 15 the App Router's `params` and `searchParams` props are
+**Promises**. MEASURED against a running Next 16.3.4 server, every case a real
+route fetched over HTTP:
+
+```
+route.js  GET(req, { params })        params.id             → 200 {"id":"undefined"}
+route.js  GET(req, { params })        params?.id ?? "MISS"  → 200 {"…":"MISS"}
+route.js  GET(req, { params: {id} })  id                    → 200 {"id":"undefined"}
+route.js  GET(req, ctx)               ctx.params.id         → 200 {"id":"undefined"}
+page.js   Page({ params, searchParams })   both reads       → 200 both "undefined"
+page.js   generateMetadata({ params })     params.id        → <title>user undefined</title>
+route.js  GET(req, { params })        await params          → 200 {"id":"abc"}   ✅
+```
+
+`typeof params.then` was `"function"` in every failing case, and **the server log
+was empty** — no warning, no error, not one line across any of them.
+
+**That silence is the whole argument for the rule.** Its sibling
+`no-unawaited-next-dynamic-api` catches `cookies().get(…)`, which throws a 500
+and makes Next log a specific complaint; this one answers 200 with the field
+quietly missing. A handler that does `db.find(params.id)` looks up `undefined`,
+and `params?.id ?? fallback` — the spelling a careful developer reaches for —
+takes the fallback forever without ever failing.
+
+**The anchor is the App Router file convention**, because that is the only place
+these props exist: an `app/` path segment plus one of Next's reserved basenames
+(`page`, `layout`, `route`, `default`). A Pages Router file can never match,
+which matters — `getServerSideProps({ params })` receives a plain **object**, and
+reporting it would be reporting correct code. In `route.*` the props are the
+second parameter of an exported HTTP method; in the view files they are the first
+parameter of the default export or of an exported `generateMetadata`.
+`searchParams` is claimed only for `page`.
+
+Wrong and reported: a member read (`params.id`, `params[key]`), a destructure
+(including `{ params: { id } }` in the signature), and a spread — `{ ...params }`
+yields `{}`, because a Promise has no own enumerable properties. Correct and
+silent: `await`, `use(params)` / `React.use(params)`, `.then` / `.catch` /
+`.finally`, and passing the Promise onward unread. A binding that is re-declared,
+re-assigned, or shadowed by a nested function's own parameter is dropped
+entirely.
+
+Verified end to end against the same fixture that produced the measurements: five
+findings across four files, and silence on the awaited handler beside them.
+
+### Added: the `next:15` capability token, and a correction to an existing gate
+
+`next:15` is granted when the manifest's `next` range has a readable major of 15
+or more, mirroring how `express:5` works. A range with no readable major
+(`latest`, `canary`, `*`) grants nothing.
+
+**`no-unawaited-next-dynamic-api` has been moved onto this gate, and that is a
+correction rather than a tidy-up.** It shipped on the bare `next` token with a
+docblock arguing that a modern manifest means 15 or 16 anyway, and that a Next 14
+project upgrading would get a finding already true of the version it was moving
+to. That reasoning was wrong in the release-blocking direction: on Next 14,
+`cookies()` **is** synchronous, so the rule was reporting correct code — in
+exactly the projects least able to act on it. A test now pins the Next 14 silence
+for both Next rules.
+
 ### NestJS: the route param that is a string no matter what the annotation says
 
 New diagnostic `no-unparsed-nest-route-param` (Bugs / `error` / confidence
