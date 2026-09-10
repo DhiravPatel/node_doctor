@@ -11,6 +11,87 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Koa: the handler that returns its response instead of assigning it
+
+New diagnostic `no-discarded-koa-return` (Bugs / `error` / confidence `high`,
+gated on the `koa` token). Koa discards the return value of every middleware, so
+a handler that RETURNS its payload leaves `ctx.body` unset and the request falls
+through the stack. MEASURED against Koa 3.2.1 with @koa/router, each case a real
+server fetched over HTTP:
+
+```
+app.use     return { ok: true }                  → 404 "Not Found"
+app.use     return "hello"                       → 404 "Not Found"
+app.use     ctx.set(…) then return { ok: 1 }     → 404 "Not Found"
+app.use     const rows = await db(); return rows → 404 "Not Found"
+router.get  return { ok: 1 }                     → 404 "Not Found"
+router.get  ctx.body = { ok: 1 }                 → 200 {"ok":1}
+router.get  return (ctx.body = { ok: 1 })        → 200 {"ok":1}
+app.use     delegate to helper(ctx)              → 200 {"via":"helper"}
+```
+
+This is the Express refugee's first Koa bug, and it is expensive out of all
+proportion to how silly it looks. **The symptom is a 404**, so the search starts
+at the router — path spelling, mount order, a missing `app.use(router.routes())`
+— and the handler that is plainly being reached looks obviously fine. Nothing
+warns, nothing throws, and the middleware really did run.
+
+**The anchor is the registration site, not the signature, and the defect's own
+shape forces that.** Koa's `(ctx, next)` is a shape ordinary helpers have too, so
+the engine's Koa recognition demands that the function's body touch a distinctive
+context member (`ctx.body`, `ctx.throw`, `ctx.state`, …) — which is exactly what
+this defect's body does *not* do. Reusing it would have made the rule fire on
+nothing. The rule proves Koa from the other end instead: `const app = new Koa()`
+where `Koa` came from `koa`, then `app.use(fn)`; or `const router = new Router()`
+from `@koa/router`/`koa-router`, then `router.get(…, fn)` and its siblings. Both
+`import` and `require` spellings are read.
+
+**Then the middleware must provably have no path to the response**, since any of
+them silences it: it never assigns `ctx.body`, `ctx.response.body`, `ctx.res` or
+`ctx.respond`; never calls `ctx.throw`/`redirect`/`render`/`attachment`/`back`;
+never mentions `next` (which also makes the idiomatic `return next()` silent by
+construction); and **`ctx` never escapes** — it appears only as the object of a
+member read. That last one is the measured hinge in both directions.
+`app.use((ctx) => helper(ctx))` answers **200**, because the helper sets the
+body, so handing the context away must silence the rule. But a *read* off it is
+not an escape: `db.find(ctx.params.id)` passes a string, which cannot answer the
+request, so `return user` still 404s — and that is the commonest real instance of
+the defect. A rule that silenced on any mention of `ctx` inside a call would have
+lost precisely the case worth finding.
+
+### Koa: the 204 that throws the body away
+
+`no-body-on-bodiless-status` gains a **Koa clause**. It previously understood
+only Express's chained `res.status(204).json(x)`; Koa writes the identical defect
+as two assignments. MEASURED against Koa 3.2.1:
+
+```
+ctx.status = 204;  ctx.body = { ok: true };   → 204, empty, no content-length
+ctx.body = { ok: true };  ctx.status = 204;   → 204, empty, no content-length
+ctx.status = 304;  ctx.body = { ok: true };   → 304, empty
+ctx.status = 201;  ctx.body = { ok: true };   → 201 {"ok":true}
+```
+
+Both orders lose it and 201 keeps it, so the **status** decides, not the
+sequence.
+
+**The chained form gets its branch proof for free; the assignment form has to
+earn it.** The two assignments must be SIBLING statements in the same block with
+no `return`/`throw`/`break`/`continue` between them, so both provably run on the
+same request. That excludes the correct shape a naive rule would report —
+`if (rows.length === 0) { ctx.status = 204; return; }` sitting above a plain
+`ctx.body = rows`, where the status lives in a nested block and the two never
+both execute. A later non-bodiless status replaces the pending one, an empty body
+(`null`, `""`) is the author writing "no body" out loud, and the receiver must be
+a function **parameter**, so a locally-built `{ status, body }` response object is
+not mistaken for a context. The finding carries its own recommendation, because
+the rule's default one is Express's `res.sendStatus(204)` — a spelling Koa does
+not have.
+
+Both were verified end to end on a six-route Koa app that was then **run**: the
+three reported routes answered 404, 404 and a bodiless 204; the three unreported
+ones answered 200 with data, an intentional 204, and 200 with data.
+
 ### Next.js: the route params that are a Promise now, and answer 200 with nothing
 
 New diagnostic `no-unawaited-next-route-params` (Bugs / `error` / confidence

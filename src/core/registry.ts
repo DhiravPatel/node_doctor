@@ -74,6 +74,7 @@ import { requirePaginationLimit } from "../diagnostics/event-loop/require-pagina
 // frameworks
 import { hapiRouteAuthDisabled } from "../diagnostics/frameworks/hapi-route-auth-disabled.ts";
 import { hapiRouteMissingValidation } from "../diagnostics/frameworks/hapi-route-missing-validation.ts";
+import { noDiscardedKoaReturn } from "../diagnostics/frameworks/no-discarded-koa-return.ts";
 import { noHonoExactPathMiddleware } from "../diagnostics/frameworks/no-hono-exact-path-middleware.ts";
 import { noNestResWithoutSend } from "../diagnostics/frameworks/no-nest-res-without-send.ts";
 import { noPeerInconsistentHandler } from "../diagnostics/frameworks/no-peer-inconsistent-handler.ts";
@@ -258,6 +259,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   // frameworks
   hapiRouteAuthDisabled,
   hapiRouteMissingValidation,
+  noDiscardedKoaReturn,
   noHonoExactPathMiddleware,
   noNestResWithoutSend,
   noPeerInconsistentHandler,

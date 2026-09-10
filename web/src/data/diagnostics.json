@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 191,
-  "defaultOn": 140,
+  "total": 192,
+  "defaultOn": 141,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
     "Security": 68,
     "Maintainability": 16,
     "Reliability": 49,
-    "Bugs": 45
+    "Bugs": 46
   },
   "categoryWeights": {
     "Security": 2,
@@ -982,6 +982,25 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Keep verification on. If the peer uses a private CA, provide it via the `ca` option (`{ ca: fs.readFileSync('ca.pem') }`) instead of disabling verification. `rejectUnauthorized: false` accepts any certificate and enables man-in-the-middle."
+    },
+    {
+      "id": "no-discarded-koa-return",
+      "title": "Koa middleware returns its response instead of assigning ctx.body, so the request 404s",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "correctness",
+        "http",
+        "koa"
+      ],
+      "requires": [
+        "koa"
+      ],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Assign the response: `ctx.body = result`. Koa discards every middleware's return value, so returning the payload leaves `ctx.body` unset and the request falls through the stack — measured on Koa 3.2.1, `router.get(\"/users\", async () => ({ ok: true }))` answers **404 Not Found**. The symptom points at the router, which is why this one is expensive to find. `return (ctx.body = result)` also works, since the assignment happens first."
     },
     {
       "id": "no-dropped-abort-signal",
