@@ -11,6 +11,110 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Security: the shell option that undoes the argument-array fix
+
+New diagnostic `no-shell-command-from-input` (Security / `error` / confidence
+`high`). It closes two holes a coverage table would have called covered.
+`no-exec-with-interpolation` looks for a command *built* by interpolation or
+concatenation; a scan of the whole registry confirmed neither of these produced a
+finding from any rule:
+
+```
+exec with interpolation   exec(`ls ${req.body.dir}`)                  → no-exec-with-interpolation
+exec, BARE tainted value  const cmd = req.body.cmd; exec(cmd)         → NOTHING
+spawn + shell:true        spawn("c", [req.body.f], { shell: true })   → NOTHING
+spawn, argument array     spawn("c", [req.body.f])                    → NOTHING (correct)
+```
+
+**The `shell` option is the expensive half, because it silently undoes the fix
+everyone is told to apply.** `execFile`/`spawn` with an argument array is *the*
+remedy for command injection — the arguments go to `execve`, and a `;` in one of
+them is just a semicolon. Setting `shell: true`, usually added later for a PATH
+lookup or to run a `.cmd` on Windows, makes Node join the command and the array
+back into one string and hand it to `/bin/sh -c`. The array is still there, the
+code still looks like the safe pattern, and the protection is gone. MEASURED on
+Node 22, `spawnSync("echo", [value])`:
+
+```
+value              options              result
+"readme.txt; id"   (none)               "readme.txt; id"            literal
+"readme.txt; id"   { shell: true }      "readme.txt" + uid=501(…)   `id` RAN
+"$(id)"            (none)               "$(id)"                     literal
+"$(id)"            { shell: true }      uid=501(…)                  substitution RAN
+"$(id)"            { shell: "/bin/sh" } uid=501(…)                  substitution RAN
+"$(id)"            { shell: false }     "$(id)"                     literal
+"$(id)"            { shell: "" }        "$(id)"                     literal
+```
+
+`true` and any non-empty shell path enable it; `false` and `""` do not — and that
+table *is* the rule's `shell`-value model, not an assumption about the option.
+`execFileSync` behaved identically.
+
+Both halves must be provable: a shell in play, and a caller-controlled value
+reaching the command or an element of the argument array, by the engine's own
+binding-resolved taint. `spawn("npm", ["run", "build"], { shell: true })` — every
+value a literal — is never reported, which is what keeps the rule off the
+legitimate Windows use of the option. The rule also stays silent on the
+interpolated string, so a single line is never reported twice; that shape belongs
+to the sibling rule.
+
+### Security: the password hash whose cost factor was turned down
+
+New diagnostic `no-weak-password-hash-cost` (Security / `error` / confidence
+`high`). The algorithm is right — this is not `no-weak-hash-for-password`, which
+is about MD5 and SHA-1 — but the work factor makes a leaked table cheap to
+brute-force anyway. Nothing fails: the hash verifies, the tests pass, and the only
+observable difference is how fast an attacker who has the database can guess.
+MEASURED on one core, five runs after warmup with the median taken:
+
+```
+bcrypt cost   median ms   guesses/s   vs cost 12
+   4              1.0        1035        204x
+   6              3.2         315         62x
+   8             12.3          81         16x
+  10             49.2          20          4x
+  12            197.5           5          1x
+
+pbkdf2-sha256   median ms   guesses/s
+    1,000           0.1       12773      563x cheaper than 600,000
+   10,000           0.7        1354
+  100,000           7.5         134
+  600,000          44.1          23
+```
+
+**The first table also settled how the rule words itself.** Each bcrypt step
+doubles the work *by definition*, so cost 4 "should" be 256x cost 12 — but the
+observed ratio is 204x, because fixed per-call overhead dominates at low cost. The
+rule therefore quotes the measured row and falls back to the doubling statement
+for costs it has no measurement for, rather than printing `2 ** (12 - cost)` as
+though it were an observation. A test pins that.
+
+Every floor is a library default or a published minimum, never a judgement call:
+bcrypt **10** (bcryptjs's own default, and OWASP's minimum); pbkdf2 **100,000**,
+set deliberately well under OWASP's current 600,000 so the many codebases sitting
+at 100k–310k are not reported; and scrypt **N = 16384**, Node's own default, so a
+finding there means someone explicitly turned the cost *down*. pbkdf2 and scrypt
+are also legitimate KDFs over high-entropy material, where a low work factor is
+correct and cheap, so both are gated on a password context — bcrypt needs no such
+gate, because bcrypt exists for one purpose. A cost that is not a literal is never
+reported.
+
+Both were verified end to end on an eight-case fixture: the four defective sites
+were reported and the four correct ones — an argument array with no shell,
+`shell: true` with an all-literal command, bcrypt at cost 12, and pbkdf2 at 1,000
+iterations over a master key — were silent.
+
+### Measured and rejected this pass
+
+- **AES-GCM encryption that never captures `getAuthTag()`.** It looks like a
+  silent integrity hole, but Node **throws** `Unsupported state or unable to
+  authenticate data` the moment such a ciphertext is decrypted without
+  `setAuthTag` — verified, including against a tampered ciphertext — so the round
+  trip fails loudly in development and never ships.
+- **`SameSite=None` without `Secure`**, which browsers drop outright. Already
+  covered: `require-secure-cookie-flags` demands `secure: true` on auth cookies
+  unconditionally, so the case cannot reach a browser unreported.
+
 ### Koa: the handler that returns its response instead of assigning it
 
 New diagnostic `no-discarded-koa-return` (Bugs / `error` / confidence `high`,

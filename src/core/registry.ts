@@ -167,6 +167,7 @@ import { noOpenRedirect } from "../diagnostics/security/no-open-redirect.ts";
 import { noPathTraversal } from "../diagnostics/security/no-path-traversal.ts";
 import { noPrototypePollution } from "../diagnostics/security/no-prototype-pollution.ts";
 import { noSensitiveDataInLogs } from "../diagnostics/security/no-sensitive-data-in-logs.ts";
+import { noShellCommandFromInput } from "../diagnostics/security/no-shell-command-from-input.ts";
 import { noSqlTemplateInterpolation } from "../diagnostics/security/no-sql-template-interpolation.ts";
 import { noSsrfUnvalidatedUrl } from "../diagnostics/security/no-ssrf-unvalidated-url.ts";
 import { noStateChangeOnGet } from "../diagnostics/security/no-state-change-on-get.ts";
@@ -183,6 +184,7 @@ import { noVmRunUntrusted } from "../diagnostics/security/no-vm-run-untrusted.ts
 import { noWeakCipher } from "../diagnostics/security/no-weak-cipher.ts";
 import { noWeakCryptoParameters } from "../diagnostics/security/no-weak-crypto-parameters.ts";
 import { noWeakHashForPassword } from "../diagnostics/security/no-weak-hash-for-password.ts";
+import { noWeakPasswordHashCost } from "../diagnostics/security/no-weak-password-hash-cost.ts";
 import { noXssInHtmlResponse } from "../diagnostics/security/no-xss-in-html-response.ts";
 import { requireJwtAlgorithmsAllowlist } from "../diagnostics/security/require-jwt-algorithms-allowlist.ts";
 import { requireSecureCookieFlags } from "../diagnostics/security/require-secure-cookie-flags.ts";
@@ -352,6 +354,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noPathTraversal,
   noPrototypePollution,
   noSensitiveDataInLogs,
+  noShellCommandFromInput,
   noSqlTemplateInterpolation,
   noSsrfUnvalidatedUrl,
   noStateChangeOnGet,
@@ -368,6 +371,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noWeakCipher,
   noWeakCryptoParameters,
   noWeakHashForPassword,
+  noWeakPasswordHashCost,
   noXssInHtmlResponse,
   requireJwtAlgorithmsAllowlist,
   requireSecureCookieFlags,

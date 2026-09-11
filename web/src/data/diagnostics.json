@@ -1,11 +1,11 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 192,
-  "defaultOn": 141,
+  "total": 194,
+  "defaultOn": 143,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
-    "Security": 68,
+    "Security": 70,
     "Maintainability": 16,
     "Reliability": 49,
     "Bugs": 46
@@ -2096,6 +2096,23 @@
       "recommendation": "For an authenticated or personalized response, set `Cache-Control: private, no-store` (or drop `public`/`s-maxage`) so a CDN/shared proxy cannot store and re-serve it. If it must be shared-cacheable, key it per user with `Vary: Authorization`."
     },
     {
+      "id": "no-shell-command-from-input",
+      "title": "Caller-controlled value parsed by a shell, including through spawn's shell option",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "injection",
+        "owasp:a03",
+        "shell"
+      ],
+      "requires": [],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Drop the `shell` option and pass an argument array: `spawn(\"convert\", [file])`. The arguments then go to `execve`, where a `;` is just a semicolon — measured on Node 22, `spawnSync(\"echo\", [\"$(id)\"])` prints the literal string, while adding `{ shell: true }` runs `id`. If you only need a PATH lookup, resolve the binary yourself; if you are on Windows and need `.cmd`, name the interpreter (`spawn(\"cmd\", [\"/c\", \"npm\", ...])`). For `exec`, use `execFile` with an array instead — never pass a caller-controlled string as the command."
+    },
+    {
       "id": "no-sparse-array-iteration",
       "title": "Iterating a pre-sized array, whose holes are skipped",
       "category": "Bugs",
@@ -3028,6 +3045,23 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use a slow, salted, memory-hard KDF for passwords: `argon2.hash(pw)`, `scrypt`, or `bcrypt`. MD5/SHA-1 are GPU-crackable at billions of guesses per second."
+    },
+    {
+      "id": "no-weak-password-hash-cost",
+      "title": "Password KDF configured below its cost floor, so a leaked hash is cheap to crack",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "crypto",
+        "owasp:a02",
+        "secrets"
+      ],
+      "requires": [],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Raise the work factor: bcrypt cost 12 (10 is the floor), pbkdf2-sha256 600,000 iterations, scrypt `N` of at least 16384 — Node's own default. Measured on one core, a cost-4 bcrypt hash takes 1.0 ms against cost 12's 197.5 ms, which is 204x more guesses per second for an attacker holding the table, before any GPU. Nothing fails when the cost is too low, so this only ever surfaces after a breach."
     },
     {
       "id": "no-wildcard-body-parser",

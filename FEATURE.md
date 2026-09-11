@@ -587,7 +587,7 @@ Deterministic detection of injection and unsafe-primitive sinks, taint-aware whe
 - **Remote Code Execution** — dynamic code execution from untrusted data.
 - **Unsafe `eval()`** — dynamic evaluation of input.
 - **Unsafe `Function()`** — dynamic function construction from input.
-- **Unsafe `child_process`** — `exec`/`spawn` with interpolation.
+- **Unsafe `child_process`** — `exec`/`spawn` with interpolation (`no-exec-with-interpolation`), a bare caller-controlled command, and `spawn`'s `shell` option (`no-shell-command-from-input`).
 - **Unsafe shell execution** — shell-invoking calls with metacharacter exposure.
 
 **Zip slip shipped** — `no-unsafe-archive-extraction`. An archive entry carries its own path, and that path is attacker-chosen: `join("/srv/app/uploads", "../../../etc/cron.d/pwn")` resolves to `/etc/cron.d/pwn`, pinned as an executable test rather than asserted. The upload arrives as a legitimate archive, the extraction succeeds, and the file lands outside the directory the application believes it owns.
@@ -611,6 +611,52 @@ Both premises were pinned as executable facts rather than asserted, and they res
 Both are literal-only — `minVersion: cfg.tlsMin` and `modulusLength: bits` are the config's business — and only an object passed as an ARGUMENT is judged, so a standalone profile fixture is not a live TLS context. Swept over 111,566 files: 0 findings.
 
 **`no-mass-assignment` had an evasion hole, now closed.** All seven TypeScript assertion spellings bypassed it — `as T`, `as any`, `satisfies`, `!`, `<T>x`, aliased, and spread-of-cast — which left it close to blind on TypeScript, where `create({ data: req.body as UserDto })` is the idiomatic form and the assertion is exactly what makes the author confident the data was validated. The cause was the precision fix that removed 743 false positives: making the match exact let every erased wrapper through. The repair is the underlying fact rather than a patch list — a TypeScript assertion is erased at compile time, so `req.body as UserDto` IS `req.body`. Checked against the other taint-based security rules (SQL, exec, eval, SSRF, open redirect): none shares the hole, because they walk descendants. Re-swept: 133,123 files, 0 findings.
+
+**`no-shell-command-from-input` shipped**, closing two holes that a coverage table would have said were already covered. `no-exec-with-interpolation` looks for a command *built* by interpolation or concatenation, and a scan of the registry confirmed that neither of these produced a single finding from any rule:
+
+```
+exec with interpolation   exec(`ls ${req.body.dir}`)                  → no-exec-with-interpolation
+exec, BARE tainted value  const cmd = req.body.cmd; exec(cmd)         → NOTHING
+spawn + shell:true        spawn("c", [req.body.f], { shell: true })   → NOTHING
+spawn, argument array     spawn("c", [req.body.f])                    → NOTHING (correct)
+```
+
+**The `shell` option is the expensive half, because it silently undoes the fix everyone is told to apply.** `execFile`/`spawn` with an argument array is *the* remedy for command injection — the arguments go to `execve`, and a `;` in one of them is just a semicolon. Setting `shell: true` — usually added later, for a PATH lookup or to run a `.cmd` on Windows — makes Node join the command and the array back into one string and hand it to `/bin/sh -c`. The array is still there, the code still looks like the safe pattern, and the protection is gone. MEASURED on Node 22, `spawnSync("echo", [value])`:
+
+| value | options | result |
+| --- | --- | --- |
+| `"readme.txt; id"` | (none) | `"readme.txt; id"` — literal |
+| `"readme.txt; id"` | `{ shell: true }` | `"readme.txt"` + `uid=501(…)` — **`id` ran** |
+| `"$(id)"` | (none) | `"$(id)"` — literal |
+| `"$(id)"` | `{ shell: true }` | `uid=501(…)` — **substitution ran** |
+| `"$(id)"` | `{ shell: "/bin/sh" }` | `uid=501(…)` — **substitution ran** |
+| `"$(id)"` | `{ shell: false }` | `"$(id)"` — literal |
+| `"$(id)"` | `{ shell: "" }` | `"$(id)"` — literal |
+
+So `true` and any non-empty shell path enable it while `false` and `""` do not, and that table *is* the rule's `shell`-value model rather than an assumption about the option. `execFileSync` behaved identically. Both halves must be provable: a shell in play, and a caller-controlled value reaching the command or an element of the argument array, by the engine's own binding-resolved taint. `spawn("npm", ["run", "build"], { shell: true })` — every value a literal — is never reported, which is what keeps the rule off the legitimate Windows use of the option. And the rule deliberately stays silent on the interpolated string so a single line is not reported twice; that shape belongs to the sibling.
+
+**`no-weak-password-hash-cost` shipped**, and it is about the work factor rather than the algorithm — the complement to `no-weak-hash-for-password`, which is about MD5 and SHA-1. Nothing fails when the cost is too low: the hash verifies, the tests pass, and the only observable difference is how fast an attacker holding the table can guess. MEASURED on one core, five runs after warmup with the median taken, so the doubling per bcrypt step is visible rather than lost in JIT noise:
+
+| bcrypt cost | median ms | guesses/s | vs cost 12 |
+| --- | --- | --- | --- |
+| 4 | 1.0 | 1035 | **204x** |
+| 6 | 3.2 | 315 | 62x |
+| 8 | 12.3 | 81 | 16x |
+| 10 | 49.2 | 20 | 4x |
+| 12 | 197.5 | 5 | 1x |
+
+| pbkdf2-sha256 iterations | median ms | guesses/s |
+| --- | --- | --- |
+| 1,000 | 0.1 | 12773 — **563x** cheaper than 600,000 |
+| 10,000 | 0.7 | 1354 |
+| 100,000 | 7.5 | 134 |
+| 600,000 | 44.1 | 23 |
+
+The first table also settled how the rule words itself. Each bcrypt step doubles the work *by definition*, so cost 4 "should" be 256x cost 12 — but the observed ratio is 204x, because fixed per-call overhead dominates at low cost. The rule therefore quotes the measured row and falls back to the doubling statement for costs it has no measurement for, rather than printing `2 ** (12 - cost)` as though it were an observation. A test pins that.
+
+Every floor is a library default or a published minimum, never a judgement call: bcrypt **10** (bcryptjs's own default, and OWASP's minimum), pbkdf2 **100,000** — set deliberately well under OWASP's current 600,000 so the many codebases sitting at 100k–310k are not reported — and scrypt **N = 16384**, Node's own default, so a finding there means someone explicitly turned the cost *down*. pbkdf2 and scrypt are also legitimate KDFs over high-entropy material, where a low work factor is correct and cheap, so both are gated on a password context; bcrypt needs no such gate because bcrypt exists for one purpose. A cost that is not a literal is never reported.
+
+**Two candidates were measured and rejected in the same pass.** *AES-GCM encryption that never captures `getAuthTag()`* looks like a silent integrity hole, but Node **throws** `Unsupported state or unable to authenticate data` the moment such a ciphertext is decrypted without `setAuthTag` — verified, including on a tampered ciphertext — so the round trip fails loudly in development and never ships. *`SameSite=None` without `Secure`*, which browsers drop outright, is already covered: `require-secure-cookie-flags` demands `secure: true` on auth cookies unconditionally, so the case cannot reach a browser through this rule set unreported.
 
 ## 8. Input Validation
 **Status: Planned** (validator-library awareness); missing-validation detection is Core-adjacent.
