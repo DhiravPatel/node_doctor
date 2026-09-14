@@ -11,6 +11,107 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Security: the UUID that is a timestamp and a MAC address
+
+New diagnostic `no-predictable-security-token` (Security / `error` / confidence
+`high`), the sibling to `no-math-random-for-token`. That rule owns
+`Math.random()`; this one owns the two sources that *look* cryptographic and are
+not — a time- or name-based UUID, and a clock read.
+
+The UUID half is the one worth measuring, because "it's a UUID" is exactly why
+nobody looks twice. MEASURED against uuid 14.0.2, three `v1()` calls in a row:
+
+```
+776c28c0-b008-11f1-941c-09e2f413dcbe
+776c4fd0-b008-11f1-941c-09e2f413dcbe
+776c4fd1-b008-11f1-941c-09e2f413dcbe
+```
+
+All three end `941c-09e2f413dcbe` — the clock sequence and this host's MAC
+address. **80 of the 128 bits are constant** for the life of the process, and the
+only part that moves is the low 32 bits of a 100-nanosecond timestamp. Anyone who
+has been issued a single value knows the rest. v3 and v5 are worse, because they
+are not random at all: `v5("alice@example.com", NIL)` returned the byte-identical
+UUID both times, since they are namespaced SHA-1 and MD5 hashes of a name the
+attacker usually supplies. A "token" computed from someone's email is a token they
+can compute themselves.
+
+**v6 was going to be on the list and the measurement took it off.** It is
+documented as a field-reordered v1, so it looked like the same defect. Three
+consecutive v6 values shared *no* suffix — uuid 14 re-randomises the node id per
+call, so the tail carries real entropy and only the timestamp prefix is public.
+v7 behaves the same way. Neither is reported, and a test pins that.
+
+The clock half needed no measurement to state and got one anyway: three
+`Date.now().toString(36)` calls in a row returned the byte-identical string
+`mu0vurf2`. A clock-derived token does not merely leak — it **collides**.
+
+**The two halves are deliberately not held to the same standard.** UUID takes
+both paths, the named binding and the enclosing function, because `uuidv1()`
+inside `generateResetToken()` is the defect whether or not the result is named.
+The clock takes only the binding path, and additionally refuses any time-shaped
+name: `const tokenExpiry = Date.now() + 3600_000` is correct code that a name
+check alone would report, because `token_expiry` contains `token`.
+
+The "is this security material?" question now lives in one place —
+`securityValueName` in `core/ast.ts`, shared with `no-math-random-for-token`
+rather than duplicated, so a value one rule treats as a token cannot be invisible
+to the next. The existing rule was moved onto it with no behaviour change.
+
+Deliberately **not** claimed: `crypto.randomBytes(n)` with a small `n`. It looked
+like the obvious third clause, but 12 bytes is the *correct* size for a GCM nonce
+and a short random id is a product decision rather than a defect, so it could not
+be made precise without a length-versus-purpose judgement this analyzer has no
+basis for.
+
+### Async: the allSettled result nobody checked
+
+New diagnostic `no-unchecked-allsettled-result` (Bugs / `error` / confidence
+`high`). MEASURED on Node 22, one fulfilled and one rejected:
+
+```
+raw                        [{"status":"fulfilled","value":{"id":1}},{"status":"rejected","reason":{}}]
+b.value                    undefined
+b.value?.id                undefined
+results.map(r => r.value)  [{"id":1}, undefined]
+Promise.allSettled itself  never rejects — nothing throws, at all
+```
+
+And measured on the response shape it actually produces, with the orders call
+rejecting:
+
+```
+return { user: user.value, orders: orders.value }   →   {"user":{"id":"u1"}}
+```
+
+**The `orders` key is not `null`. It is absent** — `JSON.stringify` drops an
+`undefined` property — so the client cannot even tell the field was meant to be
+there.
+
+**Choosing `allSettled` over `all` IS the decision to handle failures
+individually**, and reading only `.value` walks that decision back without saying
+so. `Promise.all` would at least have rejected loudly. Here the batch resolves,
+the handler returns 200, and the cost lands downstream at a point where nothing
+in the logs connects it to a failed upstream call.
+
+The claim is therefore not "you read `.value`" — that is the normal use — but
+"you read `.value` and **nothing** in this function ever looks at whether the
+entry succeeded". Any read of `.status` or `.reason` silences it, however spelled:
+a comparison, a `filter`, a destructure (`const { status, value } = r`), a
+helper's parameter. So does any `"fulfilled"`/`"rejected"` string literal in the
+function, which is how every hand-rolled narrowing helper is written, and so does
+a computed read the rule cannot judge. Both spellings of the read are covered — a
+destructured entry, and the array form, where the callback's own parameter is
+followed into the callback body (including `reduce`, whose element is the second
+parameter). `Promise.all` results have no `.value` wrapper and are never matched.
+
+Both rules were verified end to end on a fixture that was then **run**: the three
+predictable tokens came out one hex digit apart, the same email produced the
+byte-identical API key twice, three session ids were the same string, and the
+unchecked dashboard answered `{"user":{"id":"u1"}}` with the orders key gone. The
+four correct counterparts beside them — v4, v6, a `tokenExpiresAt`, and a
+status-filtered `allSettled` — were all silent.
+
 ### Security: the shell option that undoes the argument-array fix
 
 New diagnostic `no-shell-command-from-input` (Security / `error` / confidence

@@ -347,3 +347,97 @@ export const runsPerIteration = (node: AstNode, loop: AstNode): boolean => {
   // `while` / `do…while`: the test re-runs, so everything inside does.
   return true;
 };
+
+/**
+ * Names that mean "this value is security material", segment-aware so `tokenize`
+ * and `saltedButter` do not match while `reset_token` and `apiKey` do.
+ *
+ * Shared by every rule that has to decide whether a predictable value is being
+ * used as a secret — `Math.random()`, a time-based or name-based UUID, a clock
+ * read. They all ask the same question, and asking it the same way keeps a value
+ * that one rule considers a token from being invisible to the next.
+ */
+const SECURITY_NAME_RE =
+  /(^|[._-])(token|secret|otp|nonce|salt|session|csrf|api[_-]?key|password|passwd|pwd)([._-]|$)|(session|auth|user|account)[_-]?id$/i;
+
+/** Is this identifier name security-shaped? camelCase is split so segments are visible. */
+export const isSecurityShaped = (name: string | null | undefined): boolean =>
+  !!name && SECURITY_NAME_RE.test(name.replace(/([a-z0-9])([A-Z])/g, "$1_$2"));
+
+/** A readable name for a function node — declaration, or assigned arrow/expression. */
+export const enclosingFunctionName = (fn: AstNode | null | undefined): string | null => {
+  if (!fn) return null;
+  const id = fn.id as AstNode | undefined;
+  if (id?.type === "Identifier") return String(id.name);
+  const parent = fn.parent as AstNode | undefined;
+  if (!parent) return null;
+  if (parent.type === "VariableDeclarator") {
+    const target = parent.id as AstNode | undefined;
+    return target?.type === "Identifier" ? String(target.name) : null;
+  }
+  if (parent.type === "AssignmentExpression") {
+    const path = staticMemberPath(parent.left as AstNode);
+    return path ? (path.split(".").pop() ?? null) : null;
+  }
+  if ((parent.type === "Property" || parent.type === "MethodDefinition") && !parent.computed) {
+    const key = parent.key as AstNode | undefined;
+    if (key?.type === "Identifier") return String(key.name);
+    if (key?.type === "Literal" && typeof key.value === "string") return String(key.value);
+  }
+  return null;
+};
+
+/**
+ * The binding name an expression is assigned or returned into, walking up through
+ * the wrappers a value picks up on the way — `.toString(36)`, `.slice(2)`, a
+ * template literal, arithmetic. Null when it is not assigned to a readable name.
+ */
+export const assignedName = (node: AstNode): string | null => {
+  let current: AstNode = node;
+  let parent = node.parent as AstNode | undefined;
+  while (parent) {
+    switch (parent.type) {
+      case "VariableDeclarator": {
+        const id = parent.id as AstNode | undefined;
+        return parent.init === current && id?.type === "Identifier" ? String(id.name) : null;
+      }
+      case "AssignmentExpression": {
+        if (parent.right !== current) return null;
+        const path = staticMemberPath(parent.left as AstNode);
+        return path ? (path.split(".").pop() ?? null) : null;
+      }
+      case "Property": {
+        if (parent.value === current && !parent.computed) {
+          const key = parent.key as AstNode | undefined;
+          if (key?.type === "Identifier") return String(key.name);
+          if (key?.type === "Literal" && typeof key.value === "string") return String(key.value);
+        }
+        return null;
+      }
+      case "CallExpression":
+      case "MemberExpression":
+      case "BinaryExpression":
+      case "TemplateLiteral":
+      case "ChainExpression":
+        current = parent;
+        parent = parent.parent as AstNode | undefined;
+        continue;
+      default:
+        return null;
+    }
+  }
+  return null;
+};
+
+/**
+ * The security-shaped name this expression feeds, or null. Prefers the assignment
+ * target, then falls back to the enclosing function's name — `generateToken()`
+ * returning the value directly is the same claim as `const token = …`.
+ */
+export const securityValueName = (node: AstNode): { name: string; via: "binding" | "function" } | null => {
+  const target = assignedName(node);
+  if (isSecurityShaped(target)) return { name: target!, via: "binding" };
+  const fnName = enclosingFunctionName(findEnclosingFunction(node));
+  if (isSecurityShaped(fnName)) return { name: fnName!, via: "function" };
+  return null;
+};

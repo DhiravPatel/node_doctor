@@ -30,6 +30,7 @@ import { noMissingCatchOnAsyncIife } from "../diagnostics/async/no-missing-catch
 import { noRaceWithoutTimeout } from "../diagnostics/async/no-race-without-timeout.ts";
 import { noSwallowedErrorEmptyCatch } from "../diagnostics/async/no-swallowed-error-empty-catch.ts";
 import { noUnboundedPromiseAll } from "../diagnostics/async/no-unbounded-promise-all.ts";
+import { noUncheckedAllsettledResult } from "../diagnostics/async/no-unchecked-allsettled-result.ts";
 import { noUnclonableWorkerMessage } from "../diagnostics/async/no-unclonable-worker-message.ts";
 import { requireFetchTimeout } from "../diagnostics/async/require-fetch-timeout.ts";
 // bugs
@@ -165,6 +166,7 @@ import { noNondeterministicStableKey } from "../diagnostics/security/no-nondeter
 import { noNosqlObjectInjection } from "../diagnostics/security/no-nosql-object-injection.ts";
 import { noOpenRedirect } from "../diagnostics/security/no-open-redirect.ts";
 import { noPathTraversal } from "../diagnostics/security/no-path-traversal.ts";
+import { noPredictableSecurityToken } from "../diagnostics/security/no-predictable-security-token.ts";
 import { noPrototypePollution } from "../diagnostics/security/no-prototype-pollution.ts";
 import { noSensitiveDataInLogs } from "../diagnostics/security/no-sensitive-data-in-logs.ts";
 import { noShellCommandFromInput } from "../diagnostics/security/no-shell-command-from-input.ts";
@@ -217,6 +219,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noRaceWithoutTimeout,
   noSwallowedErrorEmptyCatch,
   noUnboundedPromiseAll,
+  noUncheckedAllsettledResult,
   noUnclonableWorkerMessage,
   requireFetchTimeout,
   // bugs
@@ -352,6 +355,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noNosqlObjectInjection,
   noOpenRedirect,
   noPathTraversal,
+  noPredictableSecurityToken,
   noPrototypePollution,
   noSensitiveDataInLogs,
   noShellCommandFromInput,

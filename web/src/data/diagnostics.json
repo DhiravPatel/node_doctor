@@ -1,14 +1,14 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 194,
-  "defaultOn": 143,
+  "total": 196,
+  "defaultOn": 145,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
-    "Security": 70,
+    "Security": 71,
     "Maintainability": 16,
     "Reliability": 49,
-    "Bugs": 46
+    "Bugs": 47
   },
   "categoryWeights": {
     "Security": 2,
@@ -1850,6 +1850,23 @@
       "recommendation": "Wrap this handler the way its siblings are wrapped, or — if it genuinely should differ — say so with an inline suppression and a reason. Every other route on this router routes its rejections through the wrapper; an unwrapped async handler that rejects never reaches the error middleware, and on Express 4 the request hangs until the client gives up."
     },
     {
+      "id": "no-predictable-security-token",
+      "title": "Security token built from a time-based UUID or a clock read, both predictable",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "crypto",
+        "owasp:a02",
+        "secrets"
+      ],
+      "requires": [],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Use a CSPRNG: `crypto.randomUUID()` (which is v4) or `crypto.randomBytes(32).toString(\"hex\")`. Measured on uuid 14.0.2, three consecutive `v1()` values shared the suffix `941c-09e2f413dcbe` — the clock sequence and this host's MAC address — so 80 of the 128 bits are constant and only a 100-nanosecond timestamp moves. `v3`/`v5` are namespaced hashes and return the same UUID for the same input every time. And three `Date.now().toString(36)` calls in a row returned the identical string, so clock-derived tokens collide as well as leak."
+    },
+    {
       "id": "no-process-exit-in-request-path",
       "title": "process.exit() on a request path",
       "category": "Reliability",
@@ -2640,6 +2657,23 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Move the cleanup to `SIGTERM` (and `SIGINT` for a local Ctrl-C). `SIGKILL` and `SIGSTOP` are handled by the kernel and cannot be caught — Node throws `EINVAL` from `uv_signal_start` at the point of registration, so this line crashes the process rather than protecting it."
+    },
+    {
+      "id": "no-unchecked-allsettled-result",
+      "title": "Promise.allSettled result read for .value with nothing ever checking .status",
+      "category": "Bugs",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "async",
+        "correctness",
+        "error-handling"
+      ],
+      "requires": [],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Check how the entry settled before reading it: `if (r.status === \"rejected\") throw r.reason`, or `results.filter((r) => r.status === \"fulfilled\").map((r) => r.value)`. A rejected settlement has NO `value` — measured on Node 22 it is `undefined`, and `Promise.allSettled` never rejects, so nothing throws. Choosing `allSettled` over `Promise.all` is the decision to handle failures one by one; reading only `.value` gives up that decision and turns a failed call into a silent `undefined`."
     },
     {
       "id": "no-unchecked-required-env",
