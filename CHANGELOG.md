@@ -11,6 +11,109 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Security: the host allowlist that is a substring test
+
+New diagnostic `no-substring-host-check` (Security / `error` / confidence
+`high`), and **it exists to make an existing silence honest.**
+`no-ssrf-unvalidated-url` and `no-open-redirect` both count `startsWith` as
+evidence that validation is present, and go quiet when they see it. That is
+correct for their purpose — they ask whether a check exists — but it means a
+developer who writes the *bypassable* check gets silence from this analyzer,
+which reads as approval.
+
+MEASURED with Node's own `URL` parser, the same one `fetch` and every redirect
+follow, against `ALLOW = "https://trusted.com"`:
+
+```
+url                                        startsWith includes endsWith  real hostname
+https://trusted.com/ok                     true       true     false     trusted.com
+https://trusted.com.evil.com/steal         TRUE       TRUE     false     trusted.com.evil.com
+https://trusted.com@evil.com/steal         TRUE       TRUE     false     evil.com
+https://evil.com/?next=https://trusted.com false      TRUE     TRUE      evil.com
+```
+
+Every attack passes at least one. `startsWith` falls to the subdomain suffix and,
+worse, to `trusted.com@evil.com` — where everything before the `@` is **userinfo**
+and the real host is `evil.com`. `includes` falls to a query parameter.
+
+A parsed hostname is safer but not automatically safe. Measured on the hostname
+alone against `"trusted.com"`, `"nottrusted.com".endsWith("trusted.com")` is
+**true** and `"trusted.com.evil.com".startsWith("trusted.com")` is **true**. Only
+`===` and a **dot-prefixed** suffix hold, and that is the rule's two-tier model.
+
+The gate is narrow, because a substring test is one of the commonest operations
+in any program: the method must be `startsWith`/`includes`/`endsWith`/an `indexOf`
+compared with `0` or `-1`; the receiver must be named like a URL or host, using
+the vocabulary `no-unanchored-security-regex` uses, now shared rather than
+duplicated; the argument must be a string literal naming a concrete host, so
+`url.startsWith("https://")` is never reported; and the call must be a boolean
+gate rather than a computed value.
+
+**One exclusion was not designed in advance — the self-scan found it.**
+node.doctor's own `normalizeRepoUrl` tests `url.startsWith("git@github.com:")` and
+then *rewrites* the value; there is no allowlist and no attacker, only a dispatch
+on which spelling of a remote arrived in the project's own package.json. A gate
+check alone cannot tell that from an allowlist, so the branch's **effect** now
+decides: a branch that assigns to the value it just tested is normalization, and
+is silent. A test pins both halves.
+
+### Security: the credential inside a JWT payload
+
+New diagnostic `no-sensitive-data-in-jwt-payload` (Security / `error` /
+confidence `high`, gated on the `jsonwebtoken` token). A JWT is **signed, not
+encrypted** — the payload is base64url text anyone holding the token can read with
+no key at all, and signing proves only that nobody changed it. MEASURED against
+jsonwebtoken 9.0.3, signing `{ id, email, role, passwordHash, ssn }` with a
+server-side secret and then decoding the middle segment with **no secret
+whatsoever**:
+
+```
+Buffer.from(token.split(".")[1], "base64url").toString("utf8")
+→ {"id":"u1","email":"a@b.c","role":"admin",
+   "passwordHash":"$2b$12$KIXQ9bT1s0eTk0Xz3mJ8Iu","ssn":"123-45-6789",
+   "iat":1789371205,"exp":1789374805}
+```
+
+`jwt.decode(token)` with no key returns the same object. The hash and the SSN are
+in a string the browser keeps in `localStorage` and sends on every request, so
+they are also in every proxy log, every error report, and every extension that
+reads storage.
+
+**The rule is stricter than `no-sensitive-data-in-logs` about a password hash,
+deliberately.** That rule pins `console.log(user.passwordHash, …)` as silent,
+grouping a hash with `tokenCount` and `passwordless` as a near-miss — a defensible
+call, since a hash is not the password. But a hash handed to the person it belongs
+to is an offline cracking target with unlimited attempts and no rate limit, which
+is exactly why `no-weak-password-hash-cost` exists. So the shared credential set
+stays as it was and this rule layers its own names on top — `passwordHash`,
+`hashedPassword`, `passwordSalt`, `mfaSecret`, `totpSecret`, `recoveryCodes`,
+`cardNumber` — leaving the log rule's decision where it was made.
+
+Both halves are literal: the call must resolve to `jsonwebtoken`, and the payload
+must be an object literal with a statically readable key. `jwt.sign(user, secret)`
+is never reported, because the rule cannot see `user`'s keys and guessing would be
+the release-blocking direction; a spread hides keys the same way. `jose` is a
+deliberate gap rather than an oversight — it ships `EncryptJWT` beside `SignJWT`,
+and a JWE payload really is encrypted, so a library-blind rule would report
+correct code.
+
+Both were verified end to end on a fixture that was then **run**: the reported
+token decoded to reveal the bcrypt hash and the SSN with no secret, while the
+unreported one held only `sub` and `role`; the reported redirect guard **accepted**
+both `https://trusted.com.evil.com/steal` and `https://trusted.com@evil.com/steal`
+(real host `evil.com`), the reported host guard accepted `nottrusted.com`, and the
+unreported guard rejected all three while still accepting `api.trusted.com`.
+
+### Shared helpers
+
+Three vocabularies that two rules each had their own copy of now live in
+`core/ast.ts`: the URL/host operand hints and concrete-host test (shared by
+`no-unanchored-security-regex` and `no-substring-host-check`), and the sensitive
+property-name set (shared by `no-sensitive-data-in-logs` and
+`no-sensitive-data-in-jwt-payload`). A value one rule considers a URL — or a
+credential — must not be invisible to the next. Both existing rules were moved
+onto the shared definitions with no behaviour change.
+
 ### Security: the UUID that is a timestamp and a MAC address
 
 New diagnostic `no-predictable-security-token` (Security / `error` / confidence

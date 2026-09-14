@@ -1,6 +1,6 @@
 import { defineDiagnostic } from "../../core/types.ts";
 import type { AstNode } from "../../core/types.ts";
-import { getMethodName, getReceiverName, unwrapChain } from "../../core/ast.ts";
+import { getMethodName, getReceiverName, unwrapChain, isSensitiveName } from "../../core/ast.ts";
 
 /**
  * A credential written to a log sink by value. Logs leave the process: they are
@@ -45,30 +45,8 @@ const LOG_METHODS = new Set(["log", "info", "warn", "error", "debug", "trace", "
  * `credentials` mode, an OAuth provider descriptor). The qualified forms below
  * carry the auth signal that those bare words do not.
  */
-const SENSITIVE_NAMES = new Set([
-  "password",
-  "passwd",
-  "secret",
-  "apikey",
-  "apitoken",
-  "accesstoken",
-  "refreshtoken",
-  "authtoken",
-  "idtoken",
-  "bearertoken",
-  "sessiontoken",
-  "sessionsecret",
-  "privatekey",
-  "authorization",
-  "creditcard",
-  "ssn",
-  "cvv",
-]);
-
+/** Fold `_`/`-` and case, so `LOG_RECEIVERS` matches `Console`/`my_logger` alike. */
 const normalize = (name: string): string => name.toLowerCase().replace(/[_-]/g, "");
-
-const isSensitiveName = (name: string | null | undefined): boolean =>
-  !!name && SENSITIVE_NAMES.has(normalize(name));
 
 /** Strip TS-only wrappers and optional chaining so `token as string` still resolves. */
 const unwrap = (node: AstNode | null | undefined): AstNode | null => {

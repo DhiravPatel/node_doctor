@@ -676,6 +676,36 @@ The clock half needed no measurement to state and got one anyway: three `Date.no
 
 The "is this security material?" question now lives in one place, `securityValueName` in `core/ast.ts`, shared with `no-math-random-for-token` rather than duplicated: a value one rule treats as a token must not be invisible to the next. Deliberately **not** claimed: `crypto.randomBytes(n)` with a small `n`. It looked like the obvious third clause, but 12 bytes is the *correct* size for a GCM nonce and a short random id is a product decision rather than a defect, so it could not be made precise without a length-versus-purpose judgement this analyzer has no basis for. The two clauses that shipped are categorical — the source is predictable whatever its length — which is a different and defensible claim.
 
+**`no-substring-host-check` shipped, and it exists to make an existing SILENCE honest.** `no-ssrf-unvalidated-url` and `no-open-redirect` both count `startsWith` as evidence that validation is present, and go quiet when they see it. That is correct for their purpose — they ask whether a check exists — but it means a developer who writes the *bypassable* check gets silence from this analyzer, which reads as approval. MEASURED with Node's own `URL` parser, the same one `fetch` and every redirect follow, against `ALLOW = "https://trusted.com"`:
+
+| url | startsWith | includes | endsWith | real hostname |
+| --- | --- | --- | --- | --- |
+| `https://trusted.com/ok` | true | true | false | trusted.com |
+| `https://trusted.com.evil.com/steal` | **TRUE** | **TRUE** | false | trusted.com.evil.com |
+| `https://trusted.com@evil.com/steal` | **TRUE** | **TRUE** | false | **evil.com** |
+| `https://evil.com/?next=https://trusted.com` | false | **TRUE** | **TRUE** | evil.com |
+
+Every attack passes at least one. `startsWith` falls to the subdomain suffix and, worse, to `trusted.com@evil.com` — where everything before the `@` is **userinfo** and the real host is `evil.com`. `includes` falls to a query parameter. A parsed hostname is safer but not automatically safe; measured on the hostname alone against `"trusted.com"`, `nottrusted.com`.endsWith(`"trusted.com"`) is **true** and `trusted.com.evil.com`.startsWith(`"trusted.com"`) is **true**. Only `===` and a **dot-prefixed** suffix hold, which is the rule's two-tier model.
+
+The gate is narrow, because a substring test is one of the commonest operations in any program: the method must be `startsWith`/`includes`/`endsWith`/an `indexOf` compared with `0` or `-1`; the receiver must be named like a URL or host, using the vocabulary `no-unanchored-security-regex` uses, now shared rather than duplicated; the argument must be a string literal naming a concrete host, so `url.startsWith("https://")` is never reported; and the call must be a boolean gate rather than a computed value.
+
+**One exclusion was not designed in advance — the self-scan found it.** node.doctor's own `normalizeRepoUrl` tests `url.startsWith("git@github.com:")` and then *rewrites* the value; there is no allowlist and no attacker, only a dispatch on which spelling of a remote arrived in the project's own `package.json`. A gate check alone cannot tell that from an allowlist, so the branch's **effect** now decides: a branch that assigns to the value it just tested is normalization, and is silent. A test pins both halves.
+
+**`no-sensitive-data-in-jwt-payload` shipped.** A JWT is **signed, not encrypted** — the payload is base64url text anyone holding the token can read with no key at all, and signing proves only that nobody changed it. MEASURED against jsonwebtoken 9.0.3, signing `{ id, email, role, passwordHash, ssn }` with a server-side secret and then decoding the middle segment with **no secret whatsoever**:
+
+```
+Buffer.from(token.split(".")[1], "base64url").toString("utf8")
+→ {"id":"u1","email":"a@b.c","role":"admin",
+   "passwordHash":"$2b$12$KIXQ9bT1s0eTk0Xz3mJ8Iu","ssn":"123-45-6789",
+   "iat":1789371205,"exp":1789374805}
+```
+
+`jwt.decode(token)` with no key returns the same object. The hash and the SSN are in a string the browser keeps in `localStorage` and sends on every request, so they are also in every proxy log, every error report, and every extension that reads storage.
+
+**The rule is stricter than `no-sensitive-data-in-logs` about a password hash, deliberately.** That rule pins `console.log(user.passwordHash, …)` as silent, grouping a hash with `tokenCount` and `passwordless` as a near-miss — a defensible call, since a hash is not the password. But a hash handed to the person it belongs to is an offline cracking target with unlimited attempts and no rate limit, which is exactly why `no-weak-password-hash-cost` exists. So the shared credential set stays as it was and this rule layers its own names on top — `passwordHash`, `hashedPassword`, `passwordSalt`, `mfaSecret`, `totpSecret`, `recoveryCodes`, `cardNumber` — leaving the log rule's decision where it was made.
+
+Both halves are literal: the call must resolve to `jsonwebtoken`, and the payload must be an object literal with a statically readable key. `jwt.sign(user, secret)` is never reported, because the rule cannot see `user`'s keys and guessing would be the release-blocking direction; a spread hides keys the same way, so only what is written out is judged. `jose` is a deliberate gap rather than an oversight — it ships `EncryptJWT` beside `SignJWT`, and a JWE payload really is encrypted, so a library-blind rule would report correct code.
+
 ## 8. Input Validation
 **Status: Planned** (validator-library awareness); missing-validation detection is Core-adjacent.
 

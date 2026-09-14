@@ -441,3 +441,74 @@ export const securityValueName = (node: AstNode): { name: string; via: "binding"
   if (isSecurityShaped(fnName)) return { name: fnName!, via: "function" };
   return null;
 };
+
+/**
+ * Substrings that mark a value as a URL or a host — the thing an allowlist
+ * guards. Deliberately narrow (no `path`/`role`/`route`, which pervade
+ * non-security detection) so every rule built on it stays `error`-worthy.
+ *
+ * Shared by `no-unanchored-security-regex` and `no-substring-host-check`: the
+ * two rules catch different spellings of the same bypass, and a value one of them
+ * considers a URL must not be invisible to the other.
+ */
+export const URL_OPERAND_HINTS = [
+  "url", "uri", "redirect", "origin", "host", "referer", "referrer", "href",
+  "location", "domain", "endpoint", "callback", "returnto", "returnurl", "destination",
+];
+
+/** A TLD a real host allowlist would name. Tolerates a regex-escaped dot. */
+const HOST_TLD_RE =
+  /[a-z0-9_-]\\?\.(com|net|org|io|dev|app|gov|edu|co|us|uk|de|fr|jp|cn|ru|info|biz|me|tv|cc|ly|ai|xyz|internal|local|intranet|corp|example|test|invalid)\b/i;
+
+/** A dotted IPv4, escaped or not — any literal IP in a URL gate is an allowlist entry. */
+const IPV4_RE = /\d{1,3}\\?\.\d{1,3}\\?\.\d{1,3}\\?\.\d{1,3}/;
+
+/**
+ * Does this text name a CONCRETE host — the thing an allowlist enumerates? A real
+ * TLD, a dotted IPv4, or `localhost`. A bare `://` scheme is deliberately NOT
+ * enough: `https?://` is an "is this absolute?" detector with no trusted host to
+ * smuggle past.
+ */
+export const namesConcreteHost = (text: string): boolean =>
+  HOST_TLD_RE.test(text) || IPV4_RE.test(text) || /localhost/i.test(text);
+
+/** The lower-cased name of an operand — an identifier, or a member's property. */
+export const operandName = (node: AstNode | null | undefined): string => {
+  const n = unwrapChain(node);
+  if (!n) return "";
+  if (n.type === "Identifier") return String(n.name).toLowerCase();
+  if (n.type === "MemberExpression" && !n.computed) {
+    const property = n.property as AstNode | undefined;
+    if (property?.type === "Identifier") return String(property.name).toLowerCase();
+  }
+  return "";
+};
+
+/** Is this operand named like a URL or a host? */
+export const isUrlOperand = (name: string): boolean =>
+  name.length > 0 && URL_OPERAND_HINTS.some((hint) => name.includes(hint));
+
+/**
+ * Property names that carry a live credential. Shared by
+ * `no-sensitive-data-in-logs` and `no-sensitive-data-in-jwt-payload`.
+ *
+ * Deliberately the CREDENTIAL ITSELF and nothing adjacent to it. `passwordHash`
+ * is not here, and its absence is a pinned decision rather than an oversight: a
+ * bcrypt hash in a log line is a near-miss, sitting with `tokenCount` and
+ * `passwordless` in the same test. A rule that needs a stricter list — the JWT
+ * one does, because a hash in a client-readable token is offline-crackable —
+ * layers its own names on top rather than widening this set and changing what
+ * the log rule reports.
+ */
+const SENSITIVE_PROPERTY_NAMES = new Set([
+  "password", "passwd", "secret", "apikey", "apitoken", "accesstoken",
+  "refreshtoken", "authtoken", "idtoken", "bearertoken", "sessiontoken",
+  "sessionsecret", "privatekey", "authorization", "creditcard", "ssn", "cvv",
+]);
+
+/** Normalise a property name for comparison: fold case, `_` and `-`. */
+export const normalizePropertyName = (name: string): string => name.toLowerCase().replace(/[_-]/g, "");
+
+/** Is this property name a live credential? */
+export const isSensitiveName = (name: string | null | undefined): boolean =>
+  !!name && SENSITIVE_PROPERTY_NAMES.has(normalizePropertyName(name));

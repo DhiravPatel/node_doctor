@@ -168,6 +168,7 @@ import { noOpenRedirect } from "../diagnostics/security/no-open-redirect.ts";
 import { noPathTraversal } from "../diagnostics/security/no-path-traversal.ts";
 import { noPredictableSecurityToken } from "../diagnostics/security/no-predictable-security-token.ts";
 import { noPrototypePollution } from "../diagnostics/security/no-prototype-pollution.ts";
+import { noSensitiveDataInJwtPayload } from "../diagnostics/security/no-sensitive-data-in-jwt-payload.ts";
 import { noSensitiveDataInLogs } from "../diagnostics/security/no-sensitive-data-in-logs.ts";
 import { noShellCommandFromInput } from "../diagnostics/security/no-shell-command-from-input.ts";
 import { noSqlTemplateInterpolation } from "../diagnostics/security/no-sql-template-interpolation.ts";
@@ -175,6 +176,7 @@ import { noSsrfUnvalidatedUrl } from "../diagnostics/security/no-ssrf-unvalidate
 import { noStateChangeOnGet } from "../diagnostics/security/no-state-change-on-get.ts";
 import { noStatefulGlobalRegexTest } from "../diagnostics/security/no-stateful-global-regex-test.ts";
 import { noStaticCipherIv } from "../diagnostics/security/no-static-cipher-iv.ts";
+import { noSubstringHostCheck } from "../diagnostics/security/no-substring-host-check.ts";
 import { noTaintedSinkViaHelper } from "../diagnostics/security/no-tainted-sink-via-helper.ts";
 import { noTimingUnsafeSecretCompare } from "../diagnostics/security/no-timing-unsafe-secret-compare.ts";
 import { noUnanchoredSecurityRegex } from "../diagnostics/security/no-unanchored-security-regex.ts";
@@ -357,6 +359,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noPathTraversal,
   noPredictableSecurityToken,
   noPrototypePollution,
+  noSensitiveDataInJwtPayload,
   noSensitiveDataInLogs,
   noShellCommandFromInput,
   noSqlTemplateInterpolation,
@@ -364,6 +367,7 @@ export const DIAGNOSTICS: Diagnostic[] = [
   noStateChangeOnGet,
   noStatefulGlobalRegexTest,
   noStaticCipherIv,
+  noSubstringHostCheck,
   noTaintedSinkViaHelper,
   noTimingUnsafeSecretCompare,
   noUnanchoredSecurityRegex,

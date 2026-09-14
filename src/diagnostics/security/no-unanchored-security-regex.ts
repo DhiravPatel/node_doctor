@@ -1,6 +1,6 @@
 import { defineDiagnostic } from "../../core/types.ts";
 import type { AstNode, Visitors, DiagnosticContext } from "../../core/types.ts";
-import { getMethodName, unwrapChain } from "../../core/ast.ts";
+import { getMethodName, isUrlOperand, namesConcreteHost, operandName, unwrapChain } from "../../core/ast.ts";
 
 /**
  * A regex with NO leading `^` anchor, used as a boolean allow/deny gate on a URL
@@ -53,47 +53,6 @@ import { getMethodName, unwrapChain } from "../../core/ast.ts";
 // A domain with a real TLD / internal suffix. A concrete host is what an
 // allowlist enumerates; a leftover word like `file.txt` (txt is not here) is not.
 // Inside a regex literal the dot is usually escaped (`trusted\.com`).
-const HOST_TLD =
-  /[a-z0-9_-]\\?\.(com|net|org|io|dev|app|gov|edu|co|us|uk|de|fr|jp|cn|ru|info|biz|me|tv|cc|ly|ai|xyz|internal|local|intranet|corp|example|test|invalid)\b/i;
-
-// A dotted IPv4 (loopback/link-local/private are the usual SSRF targets, but any
-// literal IP written into a URL gate is an allowlist entry). In a regex literal
-// the dots are usually escaped (`127\.0\.0\.1`).
-const IPV4 = /\d{1,3}\\?\.\d{1,3}\\?\.\d{1,3}\\?\.\d{1,3}/;
-
-/**
- * Does the pattern name a CONCRETE host — the thing an allowlist enumerates? A
- * real TLD (`trusted\.com`), a dotted IPv4, or `localhost`. A bare `://` scheme is
- * deliberately NOT enough: `/https?:\/\//` is an "is this an absolute URL?"
- * detector, not a host allowlist — it has no trusted host to smuggle past, so an
- * unanchored scheme check is not the redirect/SSRF bypass this rule is about
- * (`isAbsolute = url.match(/https?:\/\//)` pervades routing/serialization code).
- * Requiring a concrete host is what keeps this an `error`-worthy signal.
- */
-const hasUrlHostContent = (pattern: string): boolean =>
-  HOST_TLD.test(pattern) || IPV4.test(pattern) || /localhost/i.test(pattern);
-
-// Substrings that mark the tested string as a URL / host — the value an allowlist
-// guards. Kept deliberately narrow (no `path`/`role`/`route`, which pervade
-// non-security detection) so this stays an `error`-worthy signal.
-const URL_OPERAND_HINTS = [
-  "url",
-  "uri",
-  "redirect",
-  "origin",
-  "host",
-  "referer",
-  "referrer",
-  "href",
-  "location",
-  "domain",
-  "endpoint",
-  "callback",
-  "returnto",
-  "returnurl",
-  "destination",
-];
-
 /** A RegExp literal node (`/…/flags`), or null. */
 const regexLiteral = (node: AstNode | null | undefined): AstNode | null => {
   const n = unwrapChain(node);
@@ -130,19 +89,6 @@ const START_ANCHOR = /^\(*(?:\?:)?\^/;
 const isStartAnchored = (pattern: string): boolean => START_ANCHOR.test(pattern);
 
 /** The lowercased name of the tested operand (identifier or `x.prop`), or "". */
-const operandName = (node: AstNode | null | undefined): string => {
-  const n = unwrapChain(node);
-  if (!n) return "";
-  if (n.type === "Identifier") return n.name.toLowerCase();
-  if (n.type === "MemberExpression" && !n.computed && n.property?.type === "Identifier") {
-    return n.property.name.toLowerCase();
-  }
-  return "";
-};
-
-const isUrlOperand = (name: string): boolean =>
-  name.length > 0 && URL_OPERAND_HINTS.some((h) => name.includes(h));
-
 /**
  * Is the operand the CURRENT page's own location (`location.hostname`,
  * `window.location.href`, `document.location…`)? That is environment / self
@@ -253,7 +199,7 @@ export const noUnanchoredSecurityRegex = defineDiagnostic({
       // detection, not validation of an untrusted redirect/request value.
       if (isSelfLocationOperand(operandNode)) return;
       // The pattern must carry URL/host content — otherwise it is not an allowlist.
-      if (!hasUrlHostContent(pattern)) return;
+      if (!namesConcreteHost(pattern)) return;
 
       ctx.report(
         node,

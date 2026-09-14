@@ -1,11 +1,11 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 196,
-  "defaultOn": 145,
+  "total": 198,
+  "defaultOn": 147,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
-    "Security": 71,
+    "Security": 73,
     "Maintainability": 16,
     "Reliability": 49,
     "Bugs": 47
@@ -2043,6 +2043,25 @@
       "recommendation": "Return when you delegate: `return next(err)` (or return after responding). A bare `next()` does not stop the handler, so the later `res.*` writes to an already-finished response and throws ERR_HTTP_HEADERS_SENT."
     },
     {
+      "id": "no-sensitive-data-in-jwt-payload",
+      "title": "Credential placed in a JWT payload, which is base64 text the holder can read",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "jwt",
+        "owasp:a02",
+        "secrets"
+      ],
+      "requires": [
+        "jsonwebtoken"
+      ],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Put only an identifier and the claims the client is allowed to see in the payload — `{ sub: user.id, role: user.role }` — and look the rest up server-side from that id. A JWT is signed, not encrypted: measured on jsonwebtoken 9.0.3, `Buffer.from(token.split(\".\")[1], \"base64url\").toString(\"utf8\")` returns the whole payload with **no secret at all**, and `jwt.decode(token)` does the same. The token lives in the client's storage and travels on every request, so anything inside it is also in every proxy log and error report. If a value genuinely must travel encrypted, use JWE rather than JWS."
+    },
+    {
       "id": "no-sensitive-data-in-logs",
       "title": "Secret or credential written to a log",
       "category": "Security",
@@ -2259,6 +2278,24 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Use `Buffer.byteLength(body)`. `String.prototype.length` counts UTF-16 code units, and `Content-Length` counts bytes — the two agree only for ASCII, and when they disagree the header is too small, so the client truncates the body or desynchronises a keep-alive connection."
+    },
+    {
+      "id": "no-substring-host-check",
+      "title": "Host allowlist written as a substring test, which the parsed URL disagrees with",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "injection",
+        "owasp:a01",
+        "redirect",
+        "ssrf"
+      ],
+      "requires": [],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Parse it and compare the host: `const h = new URL(url).hostname; if (h !== \"trusted.com\" && !h.endsWith(\".trusted.com\")) throw …`. Measured with Node's own URL parser, `\"https://trusted.com.evil.com/steal\".startsWith(\"https://trusted.com\")` is **true** and so is `\"https://trusted.com@evil.com/steal\"` — where everything before the `@` is userinfo and the real host is `evil.com`. `includes` falls to a query parameter. On a parsed hostname, a dotless `endsWith(\"trusted.com\")` still accepts `nottrusted.com`, so the leading dot is not optional."
     },
     {
       "id": "no-swallowed-error-empty-catch",
