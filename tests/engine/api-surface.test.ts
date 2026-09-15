@@ -171,3 +171,147 @@ describe("sortRoutes", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// AdonisJS and NestJS — the two frameworks the surface used to report ZERO
+// routes for. Every expectation below was MEASURED against the real
+// @adonisjs/core 6.21.0 router by registering routes into it and reading back
+// what it committed, rather than taken from documentation.
+// ---------------------------------------------------------------------------
+
+describe("extractRoutes — AdonisJS", () => {
+  test("the controller tuple is the handler, not a dropped argument", () => {
+    // `middlewareName` returned null for an ArrayExpression, so the whole route
+    // was discarded — which is how the surface came to report zero routes.
+    const [r] = routesOf('router.get("/users/:id", [UsersController, "show"]);');
+    assert.equal(r!.method, "GET");
+    assert.equal(r!.path, "/users/:id");
+    assert.deepEqual(r!.middleware, ["UsersController.show"]);
+  });
+
+  test("resource() expands to the seven routes the router commits", () => {
+    const routes = sortRoutes(routesOf('router.resource("/users", UsersController);'));
+    assert.deepEqual(routes.map((r) => `${r.method} ${r.path}`).sort(), [
+      "DELETE /users/:id",
+      "GET /users",
+      "GET /users/:id",
+      "GET /users/:id/edit",
+      "GET /users/create",
+      "POST /users",
+      "PUT /users/:id",
+    ]);
+    assert.ok(routes.every((r) => r.middleware.some((m) => m.startsWith("UsersController."))));
+  });
+
+  test("apiOnly() drops create and edit, leaving five", () => {
+    const routes = routesOf('router.resource("/users", UsersController).apiOnly();');
+    assert.equal(routes.length, 5);
+    assert.ok(!routes.some((r) => r.path.endsWith("/create") || r.path.endsWith("/edit")));
+  });
+
+  test("nested group prefixes compose outermost-first", () => {
+    const routes = routesOf(
+      'router.group(() => { router.group(() => { router.get("/x", [C, "x"]); }).prefix("/v2"); }).prefix("/api");',
+    );
+    assert.equal(routes[0]!.path, "/api/v2/x");
+  });
+
+  test("a group's chained guard protects every route inside it", () => {
+    const routes = routesOf(
+      'router.group(() => { router.get("/me", [C, "me"]); }).prefix("/api").use(middleware.auth());',
+    );
+    assert.equal(routes[0]!.path, "/api/me");
+    assert.ok(routes[0]!.middleware.includes("middleware.auth"));
+    assert.equal(routes[0]!.authenticated, true);
+  });
+
+  test("a route outside any group keeps its own path", () => {
+    const routes = routesOf('router.group(() => { router.get("/in", [C, "a"]); }).prefix("/api");\nrouter.get("/out", [C, "b"]);');
+    assert.deepEqual(sortRoutes(routes).map((r) => r.path), ["/api/in", "/out"]);
+  });
+});
+
+describe("extractRoutes — NestJS", () => {
+  const nest = `
+@Controller("users")
+export class UsersController {
+  @Get() index() { return []; }
+  @Get(":id") show(id) { return id; }
+  @Post() @UseGuards(JwtAuthGuard) store(b) { return b; }
+}
+@Controller("admin")
+@UseGuards(JwtAuthGuard)
+export class AdminController {
+  @Delete(":id") destroy(id) { return id; }
+}`;
+
+  test("decorators register routes, with the controller prefix joined", () => {
+    const routes = sortRoutes(routesOf(nest));
+    assert.deepEqual(routes.map((r) => `${r.method} ${r.path}`).sort(), [
+      "DELETE /admin/:id",
+      "GET /users",
+      "GET /users/:id",
+      "POST /users",
+    ]);
+  });
+
+  test("the handler method name is the chain's last entry", () => {
+    const routes = routesOf(nest);
+    assert.ok(routes.some((r) => r.middleware.includes("index")));
+    assert.ok(routes.some((r) => r.middleware.includes("destroy")));
+  });
+
+  test("@UseGuards marks a route authenticated, on the method or the class", () => {
+    const routes = sortRoutes(routesOf(nest));
+    const byKey = new Map(routes.map((r) => [`${r.method} ${r.path}`, r]));
+    // camelCase must be split before the segment-aware hint pattern is applied,
+    // or `JwtAuthGuard` reads as unauthenticated — the expensive direction.
+    assert.equal(byKey.get("POST /users")!.authenticated, true);
+    assert.equal(byKey.get("DELETE /admin/:id")!.authenticated, true);
+    assert.equal(byKey.get("GET /users")!.authenticated, false);
+  });
+
+  test("a bare @Get() on a prefixless controller is the root path", () => {
+    const routes = routesOf('@Controller() export class A { @Get() ping() { return 1; } }');
+    assert.equal(routes[0]!.path, "/");
+  });
+
+  test("a class with no @Controller is not a route source", () => {
+    assert.equal(routesOf('export class Service { @Get() helper() { return 1; } }').length, 0);
+  });
+});
+
+describe("extractRoutes — hapi declares auth on the route object", () => {
+  test("`auth: \"jwt\"` at either nesting level marks the route guarded", () => {
+    const flat = routesOf('server.route({ method: "POST", path: "/users", auth: "jwt", handler: create });');
+    assert.equal(flat[0]!.authenticated, true);
+    const nested = routesOf('server.route({ method: "POST", path: "/users", options: { auth: "session" }, handler: create });');
+    assert.equal(nested[0]!.authenticated, true);
+    const config = routesOf('server.route({ method: "GET", path: "/me", config: { auth: { strategy: "jwt" } }, handler: me });');
+    assert.equal(config[0]!.authenticated, true);
+  });
+
+  test("a route with no auth declaration stays unguarded", () => {
+    const [r] = routesOf('server.route({ method: "GET", path: "/health", handler: ok });');
+    assert.equal(r!.authenticated, false);
+  });
+});
+
+describe("auth posture — the camelCase repair that had to be narrowed", () => {
+  test("a NestJS guard with no separators is recognized", () => {
+    for (const guard of ["JwtAuthGuard", "AuthGuard", "RolesGuard", "PassportStrategy", "BearerGuard"]) {
+      const [r] = routesOf(`@Controller("x") class C { @Get() @UseGuards(${guard}) a() {} }`);
+      assert.equal(r!.authenticated, true, `${guard} should read as a guard`);
+    }
+  });
+
+  test("an ordinary handler name that merely contains an AUTH_HINT word does not", () => {
+    // The first repair split camelCase before applying AUTH_HINT, which contains
+    // `admin`, `role`, `can`, `login` and `session` — so these all started
+    // reading as guards and a removed guard stopped being reported.
+    for (const handler of ["adminPage", "canDelete", "loginPage", "sessionList", "roleList"]) {
+      const [r] = routesOf(`app.get("/x", ${handler});`);
+      assert.equal(r!.authenticated, false, `${handler} is a handler, not a guard`);
+    }
+  });
+});

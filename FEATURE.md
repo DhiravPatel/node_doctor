@@ -98,17 +98,30 @@ Understands what a codebase *is* before analyzing it, so rules activate correctl
 ## 2. Framework Detection
 **Status: Core** for Express, Fastify, NestJS, AdonisJS, Hono, Koa and Next.js Route Handlers. The rest are **Detected** — the capability token is set and gates rule selection and route extraction, but no framework-specific coverage exists for them yet.
 
-**Framework support is three separate things, and they do not have the same answer.** Most of the value is in the middle column: *handler recognition* is what tells the other ~165 framework-independent rules "this code runs per HTTP request", which is the gate on sync I/O in a handler, unbounded body parsing, secrets in logs, and every injection rule. Dedicated rules are the thin top layer.
+**Framework support is three separate things, and they do not have the same answer.** Most of the value is in *handler recognition*: it is what tells the other ~190 framework-independent rules "this code runs per HTTP request", which is the gate on sync I/O in a handler, unbounded body parsing, secrets in logs, and every injection rule. Dedicated rules are the thin top layer, and **route extraction** — what `surface`, `openapi` and `readiness` read — is a third, separate thing.
+
+**That third column was audited by building one minimal app per framework and running the analyzer against each.** Handler recognition and taint turned out to work everywhere, including on frameworks with no dedicated rules — a `readFileSync` in the handler and a `req.query` value reaching a shell were both reported on Express, Fastify, Hono, Koa, AdonisJS and NestJS alike. Route extraction did not:
+
+| framework | routes before | routes after | what was wrong |
+| --- | --- | --- | --- |
+| Express · Fastify · Hono · Koa · Restify | ✅ | ✅ | nothing |
+| **AdonisJS** | **0** | 15 | the controller tuple `[Controller, "show"]` is an array, and the handler reader returned null for one, so every route was discarded |
+| **NestJS** | **0** | 4 | routes are registered with DECORATORS, and a text pre-filter required a dot before the verb — so `@Get(` never even reached the parser |
+| **hapi** | 2 unguarded | 1 unguarded | routes extracted, but `options: { auth: "jwt" }` was not read, so a guarded route reported as **unauthenticated** |
+
+Reporting **zero routes** is the worst failure mode this module has: it is not an error, just an empty table that reads as "no attack surface". Both are fixed, and the AdonisJS rules were measured against the real `@adonisjs/core` 6.21.0 router rather than its documentation — `resource()` expands to exactly seven routes, `.apiOnly()` leaves five, and nested `group().prefix()` calls compose outermost-first, all read back out of the router after `commit()`.
+
+**One repair had to be narrowed, and a test caught it.** NestJS writes guards as `JwtAuthGuard`, which the segment-aware auth pattern cannot see, so a `@UseGuards(JwtAuthGuard)` route read as unauthenticated. The obvious fix — split camelCase, then apply the pattern — was wrong: that pattern also contains `admin`, `role`, `can`, `login` and `session`, so `adminPage` and `canDelete` immediately started reading as guards and an existing test for a *removed* guard stopped passing. The narrow repair matches five markers that essentially never appear in a non-auth middleware name (`auth`, `guard`, `jwt`, `passport`, `bearer`), and both halves are now pinned.
 
 | Framework | Token | Handlers recognized | Dedicated coverage |
 | --- | --- | --- | --- |
 | Express (4 and 5, version-aware) | ✅ | signature `(req, res)` + registration | **10 rules**, three of them Express-5-only |
 | Fastify | ✅ | signature `(request, reply)` + `route({})` | **3 rules** |
-| NestJS | ✅ | decorators | 3 rules |
-| AdonisJS | ✅ | `HttpContext` type + decorators | **3 rules** + mass-assignment and guard-without-return coverage |
+| NestJS | ✅ | decorators | 3 rules · routes from `@Controller`/`@Get` decorators, `@UseGuards` as the auth signal |
+| AdonisJS | ✅ | `HttpContext` type + decorators | **3 rules** + mass-assignment and guard-without-return coverage · routes from the controller tuple, `resource()` expansion, and nested group prefixes/guards |
 | Hono | ✅ | registration | **4 rules** (unreturned response, un-awaited body, exact-path middleware, shadowed routes) |
 | Koa | ✅ | registration + `(ctx, next)` signature, behind Koa evidence; `new Koa()` / `new Router()` construction | **2 rules** (`no-unawaited-koa-next`, `no-discarded-koa-return`), plus a Koa clause on `no-body-on-bodiless-status` |
-| Hapi | ✅ | `server.route({})` | 2 rules |
+| Hapi | ✅ | `server.route({})` | 2 rules · route-level `auth` read at both nesting levels |
 | Restify | ✅ | registration | 1 rule |
 | Sails.js | ✅ | registration | — |
 | Feathers | ✅ | registration | — |

@@ -1307,8 +1307,12 @@ const runSurface = async (args: ParsedArgs): Promise<number> => {
     } catch {
       continue;
     }
-    // Cheap pre-filter: no route verb in the text, no need to parse.
-    if (!/\.(get|post|put|patch|delete|del|options|head|all|route)\s*\(/.test(src)) continue;
+    // Cheap pre-filter: no route verb in the text, no need to parse. The `@`
+    // alternative is not decoration — NestJS registers with DECORATORS
+    // (`@Get(":id")`), which have no dot, so a dot-only filter skipped every
+    // Nest controller before it was ever parsed and the surface reported zero
+    // routes for the whole framework. `resource` is AdonisJS's expansion form.
+    if (!/[.@](get|post|put|patch|delete|del|options|head|all|route|resource)\s*\(/i.test(src)) continue;
     const parsed = parseSource(file, src);
     if (parsed.parseFailed) continue;
     attachParents(parsed.program);

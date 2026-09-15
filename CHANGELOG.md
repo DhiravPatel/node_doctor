@@ -11,6 +11,58 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Route extraction: AdonisJS and NestJS reported ZERO routes
+
+An audit built one minimal app per framework and ran the analyzer against each.
+**Handler recognition and taint turned out to work everywhere**, including on
+frameworks with no dedicated rules — a `readFileSync` in the handler and a
+`req.query` value reaching a shell were both reported on Express, Fastify, Hono,
+Koa, AdonisJS and NestJS alike. Route extraction did not:
+
+```
+framework                                routes before   after   
+Express · Fastify · Hono · Koa · Restify        ✅          ✅
+AdonisJS                                         0          15
+NestJS                                           0           4
+hapi                              2 unguarded   1 unguarded
+```
+
+Reporting **zero routes** is the worst failure mode this module has: it is not an
+error, just an empty table that reads as "no attack surface".
+
+- **AdonisJS** passes its handler as a tuple, `[UsersController, "show"]`. The
+  handler reader returned null for an `ArrayExpression`, and a route with no
+  readable handler is discarded — so every Adonis route vanished. It now reads
+  the tuple, expands `router.resource()`, and composes `group().prefix()` chains
+  along with any `.use()` / `.middleware()` guard they attach. **All of that is
+  measured against the real `@adonisjs/core` 6.21.0 router** — routes were
+  registered into it and read back after `commit()`, rather than taken from
+  documentation: `resource()` expands to exactly seven routes, `.apiOnly()`
+  leaves five, and nested prefixes compose outermost-first (`/api` + `/v2` +
+  `/x` → `/api/v2/x`).
+- **NestJS** registers with decorators, which are not calls — so nothing in the
+  registration walk could see them. Worse, a cheap text pre-filter required a
+  **dot** before the verb, so `@Get(` never even reached the parser. Both are
+  fixed: the filter admits the `@` form and `resource`, and a decorator pass
+  reads `@Controller(prefix)` with each method's `@Get`/`@Post`/… and joins the
+  paths.
+- **hapi** extracted its routes but not its auth. `options: { auth: "jwt" }` is
+  how hapi guards a route, and it was not read, so a guarded route reported as
+  **unauthenticated** — the expensive direction. Read now at the top level and
+  inside both `options` and `config`.
+
+**One repair had to be narrowed, and an existing test caught it.** NestJS writes
+guards as `JwtAuthGuard`, which the segment-aware auth pattern cannot see, so a
+`@UseGuards(JwtAuthGuard)` route read as unauthenticated. The obvious fix — split
+camelCase, then apply the pattern — was wrong: that pattern also contains
+`admin`, `role`, `can`, `login` and `session`, so `adminPage` and `canDelete`
+immediately started reading as guards and the test for a *removed* guard stopped
+passing. The narrow repair matches five markers that essentially never appear in
+a non-auth middleware name (`auth`, `guard`, `jwt`, `passport`, `bearer`), and
+both halves are now pinned by tests.
+
+`surface` output is byte-identical across runs, as before.
+
 ### Security: the env var prefix that ships a secret to every browser
 
 New diagnostic `no-secret-in-public-env-var` (Security / `error` / confidence

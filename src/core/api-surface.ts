@@ -15,6 +15,28 @@
  * `map.delete(k)`, and inventing routes from every two-argument `.get()` would
  * flood the map. That is a deliberate miss, not an oversight — the surface
  * under-reports rather than lying.
+ *
+ * FOUR REGISTRATION SHAPES are understood, because a route table that silently
+ * reports zero routes is worse than no route table at all:
+ *
+ *   - the verb form — `app.get("/p", mw, handler)` — which Express, Fastify,
+ *     Hono, Koa (`@koa/router`) and AdonisJS all share;
+ *   - Fastify's `route({ method, url, preHandler, handler })` object;
+ *   - AdonisJS's controller tuple, group prefixes and `resource()` expansion;
+ *   - NestJS's decorators, which are not calls at all.
+ *
+ * The AdonisJS rules are MEASURED against the real router (`@adonisjs/core`
+ * 6.21.0), by registering routes into it and reading back what it committed —
+ * not from documentation. `router.resource("/users", C)` expands to exactly
+ * seven routes, `.apiOnly()` drops `create` and `edit` to leave five, and nested
+ * `group().prefix()` calls compose outermost-first:
+ *
+ *   resource("/users", C)          GET /users · GET /users/create · POST /users
+ *                                  GET /users/:id · GET /users/:id/edit
+ *                                  PUT /users/:id · DELETE /users/:id
+ *   …then .apiOnly()               the same minus /users/create and /users/:id/edit
+ *   group(group(get("/x"))) with
+ *     .prefix("/v2") / .prefix("/api")   →  GET /api/v2/x
  */
 
 import type { AstNode } from "./types.ts";
@@ -31,6 +53,25 @@ const ROUTE_VERBS = new Set(["get", "post", "put", "patch", "delete", "del", "op
  */
 const AUTH_HINT =
   /(^|[._-])(auth|authenticate|authenticated|authorize|authorization|requireauth|requiresauth|isauthenticated|ensureauth|protect|protected|guard|jwt|passport|session|login|verifytoken|checktoken|bearer|apikey|permit|can|acl|rbac|role|admin)([._-]|$)/i;
+
+/**
+ * Markers strong enough to read inside a camelCase name with no separators.
+ *
+ * NestJS writes its guards as `JwtAuthGuard`, which the segment-aware `AUTH_HINT`
+ * cannot see, so a route guarded by `@UseGuards(JwtAuthGuard)` was reported as
+ * UNAUTHENTICATED — the expensive direction. The obvious repair, splitting
+ * camelCase before applying `AUTH_HINT`, was WRONG and a test caught it:
+ * `AUTH_HINT` also contains `admin`, `role`, `can`, `login` and `session`, all of
+ * which sit inside ordinary handler names, so `adminPage` and `canDelete` started
+ * reading as guards and a removed guard stopped being reported.
+ *
+ * These five are the ones that essentially never appear in a non-auth middleware
+ * name, so they can be matched without word boundaries.
+ */
+const STRONG_AUTH_MARKER = /(auth|guard|jwt|passport|bearer)/i;
+
+/** Does this middleware name look like an auth guard? */
+const looksLikeAuth = (name: string): boolean => AUTH_HINT.test(name) || STRONG_AUTH_MARKER.test(name);
 
 export interface RouteEntry {
   /** Upper-case HTTP verb, or "ALL". */
@@ -53,6 +94,23 @@ export const routeKey = (r: { method: string; path: string }): string => `${r.me
 const middlewareName = (arg: AstNode): string | null => {
   if (isFunctionLike(arg)) return "<inline>";
   if (arg.type === "Identifier") return arg.name as string;
+  // AdonisJS's controller tuple: `[UsersController, "show"]`. Without this the
+  // route is dropped entirely, which is how the surface came to report ZERO
+  // routes for an Adonis app.
+  if (arg.type === "ArrayExpression") {
+    const items = (arg.elements as (AstNode | null)[]) ?? [];
+    const controller = items[0];
+    const action = items[1];
+    const name =
+      controller?.type === "Identifier"
+        ? (controller.name as string)
+        : controller
+          ? getStaticStringValue(controller)
+          : null;
+    const method = action ? getStaticStringValue(action) : null;
+    if (name && method) return `${name}.${method}`;
+    return name;
+  }
   // `requireAuth("admin")` / `passport.authenticate("jwt")`
   if (arg.type === "CallExpression") {
     const method = getMethodName(arg);
@@ -68,6 +126,165 @@ const middlewareName = (arg: AstNode): string | null => {
   return null;
 };
 
+
+/**
+ * AdonisJS's `resource()` expansion, MEASURED by registering one into the real
+ * `@adonisjs/core` 6.21.0 router and reading back what it committed. `apiOnly()`
+ * drops the two rows marked `browser`, which are the HTML form endpoints.
+ */
+const ADONIS_RESOURCE_ROUTES: { method: string; suffix: string; action: string; browser: boolean }[] = [
+  { method: "GET", suffix: "", action: "index", browser: false },
+  { method: "GET", suffix: "/create", action: "create", browser: true },
+  { method: "POST", suffix: "", action: "store", browser: false },
+  { method: "GET", suffix: "/:id", action: "show", browser: false },
+  { method: "GET", suffix: "/:id/edit", action: "edit", browser: true },
+  { method: "PUT", suffix: "/:id", action: "update", browser: false },
+  { method: "DELETE", suffix: "/:id", action: "destroy", browser: false },
+];
+
+/** Chained calls that attach a guard to a route or a group. */
+const GUARD_CHAIN_METHODS = new Set(["use", "middleware"]);
+
+/** Join path segments the way a router does: one slash, no trailing one. */
+const joinPath = (...parts: string[]): string => {
+  const joined = parts
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0 && p !== "/")
+    .map((p) => (p.startsWith("/") ? p : `/${p}`))
+    .join("")
+    .replace(/\/{2,}/g, "/");
+  return joined.length > 0 ? joined.replace(/\/$/, "") || "/" : "/";
+};
+
+/** The names a chained `.use(…)` / `.middleware(…)` attaches, in order. */
+const chainedGuards = (call: AstNode): string[] => {
+  const names: string[] = [];
+  let current: AstNode | undefined = call;
+  // `router.group(cb).prefix("/api").use([middleware.auth()])`
+  while (current) {
+    const parent = current.parent as AstNode | undefined;
+    if (parent?.type !== "MemberExpression" || parent.object !== current || parent.computed) break;
+    const property = parent.property as AstNode | undefined;
+    const outer = parent.parent as AstNode | undefined;
+    if (outer?.type !== "CallExpression" || outer.callee !== parent) break;
+    if (property?.type === "Identifier" && GUARD_CHAIN_METHODS.has(String(property.name))) {
+      for (const argument of ((outer.arguments as AstNode[] | undefined) ?? [])) {
+        const items =
+          argument.type === "ArrayExpression" ? (((argument.elements as (AstNode | null)[]) ?? []).filter(Boolean) as AstNode[]) : [argument];
+        for (const item of items) {
+          const name = middlewareName(item);
+          if (name) names.push(name);
+        }
+      }
+    }
+    current = outer;
+  }
+  return names;
+};
+
+/** The literal a chained `.prefix("…")` carries, or null. */
+const chainedPrefix = (call: AstNode): string | null => {
+  let current: AstNode | undefined = call;
+  while (current) {
+    const parent = current.parent as AstNode | undefined;
+    if (parent?.type !== "MemberExpression" || parent.object !== current || parent.computed) return null;
+    const property = parent.property as AstNode | undefined;
+    const outer = parent.parent as AstNode | undefined;
+    if (outer?.type !== "CallExpression" || outer.callee !== parent) return null;
+    if (property?.type === "Identifier" && String(property.name) === "prefix") {
+      return getStaticStringValue(((outer.arguments as AstNode[] | undefined) ?? [])[0]);
+    }
+    current = outer;
+  }
+  return null;
+};
+
+interface GroupScope {
+  start: number;
+  end: number;
+  prefix: string;
+  guards: string[];
+}
+
+/**
+ * Every `router.group(() => …)` in the module, with the prefix and guards its
+ * chain attaches. Measured: nested groups compose outermost-first, so the scopes
+ * containing a route are applied in order of increasing `start`.
+ */
+const collectGroupScopes = (program: AstNode): GroupScope[] => {
+  const scopes: GroupScope[] = [];
+  walk(program, {
+    enter: (node) => {
+      if (node.type !== "CallExpression" || getMethodName(node) !== "group") return;
+      const callback = ((node.arguments as AstNode[] | undefined) ?? [])[0];
+      if (!isFunctionLike(callback)) return;
+      const start = typeof callback.start === "number" ? callback.start : 0;
+      const end = typeof callback.end === "number" ? callback.end : 0;
+      scopes.push({ start, end, prefix: chainedPrefix(node) ?? "", guards: chainedGuards(node) });
+    },
+  });
+  return scopes.sort((a, b) => a.start - b.start);
+};
+
+/** The prefix and guards every group enclosing this offset contributes. */
+const enclosingGroups = (scopes: GroupScope[], offset: number): { prefix: string; guards: string[] } => {
+  const prefixes: string[] = [];
+  const guards: string[] = [];
+  for (const scope of scopes) {
+    if (offset < scope.start || offset > scope.end) continue;
+    if (scope.prefix) prefixes.push(scope.prefix);
+    guards.push(...scope.guards);
+  }
+  return { prefix: prefixes.length > 0 ? joinPath(...prefixes) : "", guards };
+};
+
+/** HTTP-method decorators NestJS puts on a controller method. */
+const NEST_METHOD_DECORATORS = new Map([
+  ["Get", "GET"],
+  ["Post", "POST"],
+  ["Put", "PUT"],
+  ["Patch", "PATCH"],
+  ["Delete", "DELETE"],
+  ["Options", "OPTIONS"],
+  ["Head", "HEAD"],
+  ["All", "ALL"],
+]);
+
+/** A decorator's callee name, for `@Foo(…)` and bare `@Foo`. */
+const decoratorName = (decorator: AstNode): string | null => {
+  const expression = decorator.expression as AstNode | undefined;
+  if (expression?.type === "Identifier") return String(expression.name);
+  if (expression?.type === "CallExpression") {
+    const callee = expression.callee as AstNode | undefined;
+    if (callee?.type === "Identifier") return String(callee.name);
+  }
+  return null;
+};
+
+/** A decorator's arguments, or an empty list for the bare form. */
+const decoratorArguments = (decorator: AstNode): AstNode[] => {
+  const expression = decorator.expression as AstNode | undefined;
+  return expression?.type === "CallExpression" ? (((expression.arguments as AstNode[]) ?? [])) : [];
+};
+
+/** The guard names a `@UseGuards(…)` on this node attaches. */
+const nestGuards = (node: AstNode): string[] => {
+  const names: string[] = [];
+  for (const decorator of ((node.decorators as AstNode[] | undefined) ?? [])) {
+    const name = decoratorName(decorator);
+    if (name !== "UseGuards" && name !== "Auth" && name !== "Roles") continue;
+    if (name !== "UseGuards") {
+      names.push(name);
+      continue;
+    }
+    for (const argument of decoratorArguments(decorator)) {
+      const guard = middlewareName(argument);
+      if (guard) names.push(guard);
+    }
+  }
+  return names;
+};
+
 /** Extract every route registered in one parsed module. */
 export const extractRoutes = (
   program: AstNode,
@@ -75,6 +292,7 @@ export const extractRoutes = (
   locate: (offset: number) => { line: number; column: number },
 ): RouteEntry[] => {
   const routes: RouteEntry[] = [];
+  const groupScopes = collectGroupScopes(program);
 
   const push = (node: AstNode, method: string, path: string, middleware: string[]): void => {
     const { line, column } = locate(typeof node.start === "number" ? node.start : 0);
@@ -82,7 +300,7 @@ export const extractRoutes = (
       method: method.toUpperCase() === "DEL" ? "DELETE" : method.toUpperCase(),
       path,
       middleware,
-      authenticated: middleware.some((m) => AUTH_HINT.test(m)),
+      authenticated: middleware.some(looksLikeAuth),
       normalizedFilePath,
       line,
       column,
@@ -109,7 +327,51 @@ export const extractRoutes = (
         if (rest.length === 0) return;
         const middleware = rest.map(middlewareName).filter((n): n is string => n !== null);
         if (middleware.length === 0) return;
-        push(node, method, literalPath ?? "<dynamic>", middleware);
+        // A route inside `router.group(…)` carries that group's prefix and
+        // guards — measured against the real Adonis router, nested groups
+        // compose outermost-first.
+        const offset = typeof node.start === "number" ? node.start : 0;
+        const group = enclosingGroups(groupScopes, offset);
+        const path = literalPath === null ? "<dynamic>" : joinPath(group.prefix, literalPath);
+        push(node, method, path, [...group.guards, ...middleware, ...chainedGuards(node)]);
+        return;
+      }
+
+      // AdonisJS `router.resource("/users", Controller)` — seven routes, or five
+      // after `.apiOnly()`. Both numbers were read back out of the real router.
+      if (method === "resource") {
+        const first = args[0];
+        const controller = args[1];
+        const base = first ? getStaticStringValue(first) : null;
+        if (base === null || !controller) return;
+        const controllerName = middlewareName(controller);
+        if (controllerName === null) return;
+
+        let apiOnly = false;
+        let current: AstNode | undefined = node;
+        while (current) {
+          const parent = current.parent as AstNode | undefined;
+          if (parent?.type !== "MemberExpression" || parent.object !== current || parent.computed) break;
+          const property = parent.property as AstNode | undefined;
+          const outer = parent.parent as AstNode | undefined;
+          if (outer?.type !== "CallExpression" || outer.callee !== parent) break;
+          if (property?.type === "Identifier" && String(property.name) === "apiOnly") apiOnly = true;
+          current = outer;
+        }
+
+        const offset = typeof node.start === "number" ? node.start : 0;
+        const group = enclosingGroups(groupScopes, offset);
+        const guards = [...group.guards, ...chainedGuards(node)];
+        // A resource path is written either as a path or as a dotted resource
+        // name; both are turned into the same slash form the router commits.
+        const basePath = base.replace(/\./g, "/");
+        for (const row of ADONIS_RESOURCE_ROUTES) {
+          if (apiOnly && row.browser) continue;
+          push(node, row.method, joinPath(group.prefix, basePath, row.suffix), [
+            ...guards,
+            `${controllerName}.${row.action}`,
+          ]);
+        }
         return;
       }
 
@@ -135,9 +397,67 @@ export const extractRoutes = (
           } else if (key === "handler") {
             const n = middlewareName(value);
             if (n) middleware.push(n);
+          } else if (key === "auth") {
+            // hapi declares auth on the route itself: `auth: "jwt"`, or
+            // `auth: { strategy: "session" }`. Without this the route reads as
+            // UNAUTHENTICATED, which is the expensive direction.
+            const strategy =
+              getStaticStringValue(value) ??
+              (value.type === "ObjectExpression"
+                ? (getStaticStringValue(
+                    ((value.properties as AstNode[]) ?? [])
+                      .filter((pr) => pr.type === "Property")
+                      .find((pr) => {
+                        const k = pr.key as AstNode | undefined;
+                        return k?.type === "Identifier" && (String(k.name) === "strategy" || String(k.name) === "strategies");
+                      })?.value as AstNode,
+                  ) ?? "auth")
+                : null);
+            if (strategy !== null) middleware.push(`auth:${strategy}`);
+          } else if (key === "options" || key === "config") {
+            // hapi nests the same declaration one level down.
+            if (value.type !== "ObjectExpression") continue;
+            for (const inner of ((value.properties as AstNode[]) ?? [])) {
+              if (inner.type !== "Property") continue;
+              const innerKey = inner.key as AstNode | undefined;
+              if (innerKey?.type !== "Identifier" || String(innerKey.name) !== "auth") continue;
+              const innerValue = inner.value as AstNode;
+              const strategy =
+                getStaticStringValue(innerValue) ??
+                (innerValue.type === "ObjectExpression" ? "auth" : null);
+              if (strategy !== null) middleware.push(`auth:${strategy}`);
+            }
           }
         }
         if (middleware.length > 0) push(node, verb, path, middleware);
+      }
+    },
+  });
+
+  // NestJS registers routes with DECORATORS rather than calls, so nothing in the
+  // walk above can see them — which is why the surface reported zero routes for
+  // a Nest app. The controller's own `@Controller(prefix)` supplies the base.
+  walk(program, {
+    enter: (node) => {
+      if (node.type !== "ClassDeclaration" && node.type !== "ClassExpression") return;
+      const controller = ((node.decorators as AstNode[] | undefined) ?? []).find(
+        (d) => decoratorName(d) === "Controller",
+      );
+      if (!controller) return;
+      const prefix = getStaticStringValue(decoratorArguments(controller)[0]) ?? "";
+      const classGuards = nestGuards(node);
+
+      const body = (node.body as AstNode | undefined)?.body as AstNode[] | undefined;
+      for (const member of body ?? []) {
+        if (member.type !== "MethodDefinition" || !isFunctionLike(member.value)) continue;
+        const key = member.key as AstNode | undefined;
+        const handler = key?.type === "Identifier" ? String(key.name) : (getStaticStringValue(key) ?? "<handler>");
+        for (const decorator of ((member.decorators as AstNode[] | undefined) ?? [])) {
+          const verb = NEST_METHOD_DECORATORS.get(decoratorName(decorator) ?? "");
+          if (verb === undefined) continue;
+          const suffix = getStaticStringValue(decoratorArguments(decorator)[0]) ?? "";
+          push(member, verb, joinPath(prefix, suffix), [...classGuards, ...nestGuards(member), handler]);
+        }
       }
     },
   });
@@ -215,7 +535,7 @@ export const diffApiSurface = (baseline: RouteEntry[], current: RouteEntry[]): A
         kind: "auth-added",
         route: key,
         breaking: true,
-        detail: `now requires auth (${now.middleware.filter((m) => AUTH_HINT.test(m)).join(", ")})`,
+        detail: `now requires auth (${now.middleware.filter(looksLikeAuth).join(", ")})`,
       });
     } else if (r.authenticated && !now.authenticated) {
       changes.push({
