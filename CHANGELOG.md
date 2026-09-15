@@ -11,6 +11,93 @@ CLI, terminal UX, configuration, and the diagnostic set are substantially
 expanded — closing the remaining parity gaps with react-doctor's tooling surface
 while staying offline-first and deterministic.
 
+### Security: the env var prefix that ships a secret to every browser
+
+New diagnostic `no-secret-in-public-env-var` (Security / `error` / confidence
+`high`). A bundler's public env prefix is not a naming convention — it is the
+switch that decides whether a value is inlined into the JavaScript every visitor
+downloads. MEASURED by building two real apps, each with the same two variables
+in its `.env`, and grepping the **shipped client output**:
+
+```
+Next 16.3.4   NEXT_PUBLIC_API_SECRET  → FOUND in .next/static/chunks/0fj2_5j1epjqr.js
+              API_SECRET              → not present anywhere in .next/static
+Vite 7        VITE_API_SECRET         → FOUND in dist/assets/index-DqHaUkPg.js
+              API_SECRET              → not present anywhere in dist
+```
+
+The prefix is the entire difference. Nothing warns, both builds succeed, and the
+value is then in a CDN-cached static asset — held by every browser that has loaded
+the page, so rotating it is the only remedy and you cannot know who already has
+it.
+
+**The exclusions are the whole rule, because half the point of these prefixes is
+to publish things on purpose.** `API_KEY` was the obvious trigger word and is
+wrong: `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is the documented Maps pattern, and that
+key is restricted by HTTP referrer rather than kept secret. The same reasoning
+excludes `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`,
+`NEXT_PUBLIC_SENTRY_DSN`, `NEXT_PUBLIC_RECAPTCHA_SITE_KEY` and every
+`_CLIENT_ID` — all credentials of a kind, all supposed to be in the bundle.
+
+What is left is the set of words with no publishable counterpart: `SECRET` in any
+position (which alone covers `CLIENT_SECRET`, `JWT_SECRET`, `WEBHOOK_SECRET` and
+AWS's `SECRET_ACCESS_KEY`), a password, a private key, a service-role or
+service-account credential, a connection string, and the token families that
+grant access rather than identify. Seven prefixes are recognised
+(`NEXT_PUBLIC_`, `VITE_`, `REACT_APP_`, `GATSBY_`, `EXPO_PUBLIC_`,
+`NUXT_PUBLIC_`, `PUBLIC_`), through both `process.env.X` and `import.meta.env.X`.
+
+### Security: the password salt that never changes
+
+New diagnostic `no-static-kdf-salt` (Security / `error` / confidence `high`), the
+third rule in the password-storage family and the one about how many times an
+attacker has to pay rather than how much each guess costs. MEASURED on Node 22
+with pbkdf2-sha256 at 600,000 iterations, three different users who happened to
+choose the same password:
+
+```
+static salt      alice  c5e1bd456fe4a47c1d6e277820004348
+                 bob    c5e1bd456fe4a47c1d6e277820004348
+                 carol  c5e1bd456fe4a47c1d6e277820004348    byte-identical
+
+randomBytes(16)  alice  d5170108fbea0dee219d45b5b094dfa6
+                 bob    0ff5d24ef5a8f384450693d2772431ea
+                 carol  6ed92222686d716aa1b84825b6fb6dbc
+```
+
+Two things follow, and **the first is not about cracking at all**: with a constant
+salt the stored hashes *themselves* reveal which accounts share a password, so the
+database leaks that before anyone attacks it. The second is the cost — measured
+with a table of four guesses built once, three of three stolen rows fell, where
+per-user salts force the table to be rebuilt per row. That is precisely what a
+salt is for: it converts "attack the database" into "attack each row".
+`no-weak-password-hash-cost` sets how expensive one guess is; this sets how many
+times the attacker has to pay.
+
+The salt must be provably constant — a literal, a template with no interpolation,
+a `Buffer.from` of one, or a module-level `const` holding one that is never
+written to — because a salt read from the row beside the hash is exactly correct
+and is the commonest right answer. And the call must be in a **password
+context**: `pbkdf2` and `scrypt` are also ordinary key-derivation primitives, and
+deriving a subkey from a 256-bit master key with a fixed published salt is
+correct, since there is no low-entropy secret to build a table against.
+
+**HKDF is deliberately absent, and that is a decision rather than an omission.**
+Its salt is a *domain separator*, not an anti-rainbow-table device — RFC 5869
+explicitly permits an empty salt and the construction is sound over high-entropy
+input — so `hkdfSync(hash, masterKey, "app-v1", info, len)` with a constant is the
+documented correct use, and reporting it would be reporting correct code. A test
+pins that.
+
+Both were verified end to end on a fixture: the two prefixed credentials and the
+static salt were reported, while `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, the unprefixed `STRIPE_SECRET_KEY`, a
+`randomBytes(16)` salt and a master-key derivation beside them were all silent.
+
+The password-context test that all three password rules need now lives once in
+`core/ast.ts` rather than in three copies, and `no-weak-password-hash-cost` was
+moved onto it with no behaviour change.
+
 ### Security: the host allowlist that is a substring test
 
 New diagnostic `no-substring-host-check` (Security / `error` / confidence

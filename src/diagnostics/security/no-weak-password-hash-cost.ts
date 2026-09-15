@@ -1,7 +1,6 @@
 import { defineDiagnostic } from "../../core/types.ts";
 import type { AstNode } from "../../core/types.ts";
-import { findEnclosingFunction, getObjectProperty } from "../../core/ast.ts";
-import { findDescendant } from "../../core/walk.ts";
+import { getObjectProperty, inPasswordContext } from "../../core/ast.ts";
 
 /**
  * A password KDF configured below its cost floor. The algorithm is right — this
@@ -60,8 +59,6 @@ import { findDescendant } from "../../core/walk.ts";
  * A cost that is not a literal — a constant, `env.BCRYPT_ROUNDS`, a ternary — is
  * never reported. The rule cannot read it, and uncertainty resolves to silence.
  */
-
-const PASSWORD_RE = /(password|passwd|passphrase|pwd|credential)/i;
 
 /** Cost floors. Each is a published minimum or a library default, never a guess. */
 const BCRYPT_FLOOR = 10;
@@ -145,14 +142,6 @@ export const noWeakPasswordHashCost = defineDiagnostic({
   create: (ctx) => {
     let imported = new Map<string, string>();
 
-    /** Is a password-shaped name in scope here? pbkdf2/scrypt are also plain KDFs. */
-    const inPasswordContext = (node: AstNode): boolean => {
-      const scope = findEnclosingFunction(node) ?? ctx.program;
-      const id = scope.id as AstNode | undefined;
-      if (id?.type === "Identifier" && PASSWORD_RE.test(String(id.name))) return true;
-      return findDescendant(scope, (n) => n.type === "Identifier" && PASSWORD_RE.test(String(n.name))) !== null;
-    };
-
     return {
       Program: (root) => {
         imported = moduleBindings(root);
@@ -199,7 +188,7 @@ export const noWeakPasswordHashCost = defineDiagnostic({
         if (name === "pbkdf2" || name === "pbkdf2Sync") {
           const iterations = literalNumber(args[2]);
           if (iterations === null || iterations >= PBKDF2_FLOOR) return;
-          if (!inPasswordContext(node)) return;
+          if (!inPasswordContext(node, ctx.program)) return;
           ctx.report(
             args[2]!,
             `\`${iterations.toLocaleString("en-US")}\` PBKDF2 iterations is far below the ${PBKDF2_FLOOR.toLocaleString("en-US")} that has been the minimum for a decade, and OWASP now asks for 600,000 with SHA-256. Measured on one core: 1,000 iterations runs at about 12,773 guesses a second against 600,000's 23 — **563x** cheaper to attack. Raise it to \`600_000\`, or move to bcrypt/argon2.`,
@@ -212,7 +201,7 @@ export const noWeakPasswordHashCost = defineDiagnostic({
           const options = args[3];
           const n = literalNumber(getObjectProperty(options, "N")?.value as AstNode | undefined);
           if (n === null || n >= SCRYPT_N_FLOOR) return;
-          if (!inPasswordContext(node)) return;
+          if (!inPasswordContext(node, ctx.program)) return;
           ctx.report(
             options!,
             `An scrypt \`N\` of \`${n}\` is below Node's own default of ${SCRYPT_N_FLOOR}, so this explicitly turns the cost **down**: measured here, \`N = 1024\` takes 1.3 ms per hash against the default's 19.3 ms. Leave \`N\` unset to get the default, or set it to \`16384\` or more.`,

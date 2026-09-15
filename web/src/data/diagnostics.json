@@ -1,11 +1,11 @@
 {
   "generatedFrom": "node.doctor registry",
-  "total": 198,
-  "defaultOn": 147,
+  "total": 200,
+  "defaultOn": 149,
   "optIn": 51,
   "byCategory": {
     "Performance": 13,
-    "Security": 73,
+    "Security": 75,
     "Maintainability": 16,
     "Reliability": 49,
     "Bugs": 47
@@ -2026,6 +2026,23 @@
       "recommendation": "Move the secret out of the committed config into an injected secret (CI secret store, environment variable, or secret manager) and reference it. Never commit a provider key or private key."
     },
     {
+      "id": "no-secret-in-public-env-var",
+      "title": "Credential read through a bundler's public env prefix, so it ships to every browser",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "bundler",
+        "owasp:a02",
+        "secrets"
+      ],
+      "requires": [],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Drop the public prefix and read it only on the server (a route handler, a server action, `getServerSideProps`), then return just the derived result to the client. These prefixes are not a naming convention — measured by building both, Next 16.3.4 inlined `NEXT_PUBLIC_API_SECRET` into `.next/static/chunks/` and Vite inlined `VITE_API_SECRET` into `dist/assets/`, while the same variable without the prefix appeared in neither. Nothing warns, the build succeeds, and the value is then in a CDN-cached static asset. If it has already shipped, rotating it is the only remedy."
+    },
+    {
       "id": "no-send-after-next",
       "title": "Response sent after calling next()",
       "category": "Bugs",
@@ -2242,6 +2259,23 @@
       "disabledWhen": [],
       "optIn": false,
       "recommendation": "Generate the IV per message — `const iv = crypto.randomBytes(16)` — and store it alongside the ciphertext; it is not secret, only unique. A fixed IV makes the cipher deterministic, so equal plaintexts produce equal ciphertexts and shared prefixes stay shared. In GCM or any counter mode a repeated nonce repeats the keystream, which reveals the XOR of two plaintexts and lets the authentication key be recovered. If you genuinely need deterministic encryption for searching, use a construction designed for it (AES-SIV) rather than a fixed IV."
+    },
+    {
+      "id": "no-static-kdf-salt",
+      "title": "Password KDF given a hard-coded salt, so one table cracks every row",
+      "category": "Security",
+      "severity": "error",
+      "scope": "file",
+      "tags": [
+        "crypto",
+        "owasp:a02",
+        "secrets"
+      ],
+      "requires": [],
+      "requiresAny": [],
+      "disabledWhen": [],
+      "optIn": false,
+      "recommendation": "Generate the salt per password and store it beside the hash: `const salt = crypto.randomBytes(16)`. A salt converts “attack the database” into “attack each row”, and a constant one gives that up entirely. Measured on Node 22, three users who chose the same password got the **byte-identical** derived key under a static salt, so the stored hashes reveal which accounts share a password before anyone even attacks them; a table of four guesses built once then cracked three of three rows, where per-user salts would have forced it to be rebuilt for each."
     },
     {
       "id": "no-status-code-as-response-body",

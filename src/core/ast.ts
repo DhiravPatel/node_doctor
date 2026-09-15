@@ -512,3 +512,30 @@ export const normalizePropertyName = (name: string): string => name.toLowerCase(
 /** Is this property name a live credential? */
 export const isSensitiveName = (name: string | null | undefined): boolean =>
   !!name && SENSITIVE_PROPERTY_NAMES.has(normalizePropertyName(name));
+
+/**
+ * Names that mean "this value is a password". Distinct from `isSecurityShaped`,
+ * which asks whether a value is security MATERIAL: a session id is security
+ * material and is not a password, and the difference decides whether a slow KDF
+ * and a per-user salt are required.
+ */
+const PASSWORD_NAME_RE = /(password|passwd|passphrase|pwd|credential)/i;
+
+/**
+ * Is a password-shaped name in scope at this node — the enclosing function's own
+ * name, or any identifier inside it?
+ *
+ * The password-hashing rules all need this and each had its own copy. It is a
+ * CONTEXT test rather than a claim about one value, because `pbkdf2` and `scrypt`
+ * are also ordinary key-derivation primitives: deriving a subkey from a 256-bit
+ * master key needs neither a high work factor nor a per-user salt, and reporting
+ * it would be reporting correct code.
+ */
+export const inPasswordContext = (node: AstNode, fallbackScope: AstNode): boolean => {
+  const scope = findEnclosingFunction(node) ?? fallbackScope;
+  const id = scope.id as AstNode | undefined;
+  if (id?.type === "Identifier" && PASSWORD_NAME_RE.test(String(id.name))) return true;
+  const name = enclosingFunctionName(scope);
+  if (name !== null && PASSWORD_NAME_RE.test(name)) return true;
+  return findDescendant(scope, (n) => n.type === "Identifier" && PASSWORD_NAME_RE.test(String(n.name))) !== null;
+};
